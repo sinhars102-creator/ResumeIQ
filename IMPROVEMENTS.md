@@ -54,4 +54,17 @@ Track these items for future implementation.
 
 ---
 
+## 8. Pull jobs from LinkedIn
+**What:** Let users search and pull job listings from LinkedIn (title, company, location, JD) instead of only pasting.
+**Why:** Smoother flow: search LinkedIn from the app and load the JD automatically.
+**Options (see `docs/LINKEDIN_JOBS_OPTIONS.md`):**
+- **Unofficial guest API** – free, no key; may need a small backend proxy for CORS; can break (unofficial).
+- **RapidAPI “LinkedIn Job Search”** – paid subscription; stable, easy to integrate.
+- **Apify LinkedIn Jobs Scraper** – pay per use (~$0.70/1k jobs); good for volume.
+- **Official LinkedIn API** – not for pulling public job listings; for posting only and partner-only.
+
+**Notes:** Prefer third-party API or guest API behind a backend proxy; map response to existing job shape (`company`, `role`, `location`, `jd`, `source: "linkedin"`).
+
+---
+
 *Add new items below as needed.*

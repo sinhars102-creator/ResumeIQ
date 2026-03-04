@@ -184,6 +184,146 @@ const styles = {
     animation: "fadeUp 0.6s ease-out forwards",
     opacity: 0,
   },
+  uploadHero: {
+    textAlign: "center",
+    marginBottom: 32,
+  },
+  uploadTitle: {
+    fontFamily: "'DM Mono', monospace",
+    fontSize: 12,
+    letterSpacing: 3,
+    color: "#00e5a0",
+    marginBottom: 8,
+    textTransform: "uppercase",
+  },
+  uploadHeadline: {
+    fontFamily: "'Playfair Display', serif",
+    fontSize: 28,
+    fontWeight: 700,
+    color: "#f0f0e8",
+    marginBottom: 8,
+    lineHeight: 1.3,
+  },
+  uploadHeadlineAccent: {
+    color: "#00e5a0",
+  },
+  uploadSubtext: {
+    fontSize: 14,
+    color: "#888",
+    maxWidth: 480,
+    margin: "0 auto",
+    lineHeight: 1.5,
+  },
+  dropZone: {
+    border: "2px dashed #333",
+    borderRadius: 16,
+    padding: "48px 24px",
+    textAlign: "center",
+    background: "rgba(30,30,48,0.4)",
+    cursor: "pointer",
+    transition: "border-color 0.2s, background 0.2s",
+  },
+  dropZoneHover: {
+    borderColor: "rgba(0,229,160,0.5)",
+    background: "rgba(0,229,160,0.06)",
+  },
+  dropZoneIcon: {
+    fontSize: 36,
+    marginBottom: 12,
+    color: "#666",
+  },
+  dropZoneLabel: {
+    fontSize: 15,
+    color: "#f0f0e8",
+    marginBottom: 4,
+  },
+  dropZoneBrowse: {
+    fontSize: 13,
+    color: "#00e5a0",
+    cursor: "pointer",
+  },
+  dropZoneTypes: {
+    fontSize: 11,
+    color: "#666",
+    marginTop: 8,
+  },
+  featureGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, 1fr)",
+    gap: 14,
+    marginTop: 32,
+    maxWidth: 560,
+    marginLeft: "auto",
+    marginRight: "auto",
+  },
+  featureCard: {
+    background: "rgba(15,15,31,0.8)",
+    border: "1px solid #1e1e30",
+    borderRadius: 12,
+    padding: 16,
+  },
+  featureCardTitle: {
+    fontSize: 12,
+    fontWeight: 600,
+    color: "#f0f0e8",
+    marginBottom: 4,
+  },
+  featureCardDesc: {
+    fontSize: 11,
+    color: "#888",
+    lineHeight: 1.4,
+  },
+  parsingCard: {
+    maxWidth: 420,
+    margin: "0 auto",
+    background: "rgba(15,15,31,0.9)",
+    border: "1px solid #1e1e30",
+    borderRadius: 14,
+    padding: 24,
+  },
+  parsingFileRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 20,
+  },
+  parsingFileIcon: {
+    fontSize: 24,
+    color: "#666",
+  },
+  parsingFileName: {
+    fontSize: 14,
+    color: "#f0f0e8",
+    fontWeight: 500,
+  },
+  parsingFileSize: {
+    fontSize: 12,
+    color: "#666",
+  },
+  parsingStatusLine: {
+    fontSize: 13,
+    color: "#aaa",
+    marginBottom: 16,
+  },
+  parsingList: {
+    listStyle: "none",
+    padding: 0,
+    margin: 0,
+  },
+  parsingListItem: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    fontSize: 13,
+    color: "#888",
+    marginBottom: 10,
+  },
+  parsingBulletDone: {
+    color: "#00e5a0",
+  },
+  parsingBulletPending: {
+    color: "#f5c842",
+  },
   sectionHeader: {
     marginBottom: 18,
   },
@@ -309,6 +449,16 @@ const styles = {
     borderRadius: 10,
     border: "1px solid #1e1e30",
     padding: 12,
+    fontFamily: "'DM Sans', system-ui, sans-serif",
+    fontSize: 13,
+    color: "#f0f0e8",
+    outline: "none",
+  },
+  input: {
+    background: "#0f0f1f",
+    borderRadius: 8,
+    border: "1px solid #1e1e30",
+    padding: "8px 12px",
     fontFamily: "'DM Sans', system-ui, sans-serif",
     fontSize: 13,
     color: "#f0f0e8",
@@ -877,14 +1027,18 @@ const styles = {
 
 function getStepOrder(step) {
   switch (step) {
-    case "select":
+    case "upload":
       return 1;
-    case "analyze":
+    case "parsing":
       return 2;
-    case "suggestions":
+    case "select":
       return 3;
-    case "preview":
+    case "analyze":
       return 4;
+    case "suggestions":
+      return 5;
+    case "preview":
+      return 6;
     default:
       return 1;
   }
@@ -1920,16 +2074,30 @@ function ResumeDocument({ resume, highlights = [], dim = false, afterMode = fals
   );
 }
 
+const DEFAULT_PARSING_STATUS = { extractText: false, parseStructure: false, findJobs: false };
+
 export default function ResumeIQ() {
-  const [step, setStep] = useState("select");
+  const [step, setStep] = useState("upload");
   const [jobs, setJobs] = useState(JOB_DATABASE);
   const [selectedJob, setSelectedJob] = useState(null);
-  const [resume, setResume] = useState(SAMPLE_RESUME);
+  const [resume, setResume] = useState(null);
   const [resumeText, setResumeText] = useState("");
   const [extractingResume, setExtractingResume] = useState(false);
   const [readingPdf, setReadingPdf] = useState(false);
   const [linkedInText, setLinkedInText] = useState("");
   const [extracting, setExtracting] = useState(false);
+  const [linkedInSearchKeywords, setLinkedInSearchKeywords] = useState("Product Manager");
+  const [linkedInSearchLocation, setLinkedInSearchLocation] = useState("India");
+  const [linkedInSearchIndiaOnly, setLinkedInSearchIndiaOnly] = useState(true);
+  const [linkedInSearchLimit, setLinkedInSearchLimit] = useState(100);
+  const [linkedInSearching, setLinkedInSearching] = useState(false);
+  const [linkedInSearchError, setLinkedInSearchError] = useState(null);
+  const [uploadedFileName, setUploadedFileName] = useState("");
+  const [uploadedFileSize, setUploadedFileSize] = useState("");
+  const [parsingStatus, setParsingStatus] = useState(() => ({ ...DEFAULT_PARSING_STATUS }));
+  const [parsingError, setParsingError] = useState(null);
+  const [dropZoneHover, setDropZoneHover] = useState(false);
+  const fileInputRef = useRef(null);
   const [score, setScore] = useState(null);
   const [scoreBreakdown, setScoreBreakdown] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
@@ -1995,6 +2163,37 @@ export default function ResumeIQ() {
     }
   };
 
+  const handleSearchLinkedInJobs = async () => {
+    setLinkedInSearchError(null);
+    setLinkedInSearching(true);
+    try {
+      const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/$/, "");
+      const location = linkedInSearchIndiaOnly ? "India" : (linkedInSearchLocation.trim() || "India");
+      const params = new URLSearchParams({
+        keywords: linkedInSearchKeywords.trim() || "Product Manager",
+        location,
+        limit: String(linkedInSearchLimit),
+      });
+      const res = await fetch(`${base}/api/linkedin-jobs?${params}`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setLinkedInSearchError(data.error || data.details || `Search failed (${res.status})`);
+        return;
+      }
+      const newJobs = (data.jobs || []).map((j) => ({ ...j, source: "linkedin" }));
+      setJobs((prev) => {
+        const ids = new Set(prev.map((x) => x.id));
+        const added = newJobs.filter((j) => !ids.has(j.id));
+        added.forEach((j) => ids.add(j.id));
+        return [...prev, ...added];
+      });
+    } catch (e) {
+      setLinkedInSearchError(e.message || "Search failed");
+    } finally {
+      setLinkedInSearching(false);
+    }
+  };
+
   const handleDeleteJob = (id) => {
     setJobs((prev) => prev.filter((job) => job.id !== id));
     if (selectedJob && selectedJob.id === id) {
@@ -2018,54 +2217,107 @@ export default function ResumeIQ() {
     }
   };
 
+  const readFileToText = async (file) => {
+    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+    if (isPdf) {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const numPages = pdf.numPages;
+      let fullText = "";
+      for (let i = 1; i <= numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const strings = content.items.map((item) => item.str || "").filter(Boolean);
+        fullText += strings.join(" ") + "\n";
+      }
+      return fullText.trim();
+    }
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+      reader.onerror = () => reject(new Error("Failed to read file"));
+      reader.readAsText(file);
+    });
+  };
+
+  const handleUploadAndParse = async (file) => {
+    if (!file) return;
+    const name = file.name || "Resume";
+    const size = file.size ? `${(file.size / 1024).toFixed(1)} KB` : "";
+    setUploadedFileName(name);
+    setUploadedFileSize(size);
+    setParsingStatus({ ...DEFAULT_PARSING_STATUS });
+    setParsingError(null);
+    setStep("parsing");
+
+    try {
+      const text = await readFileToText(file);
+      setParsingStatus((s) => ({ ...s, extractText: true }));
+
+      const extracted = await extractResumeFromText(text);
+      setResume(extracted);
+      setResumeText(text);
+      setParsingStatus((s) => ({ ...s, parseStructure: true }));
+
+      const keywords = (extracted.title || "").trim() || "Product Manager";
+      const location = linkedInSearchIndiaOnly ? "India" : (linkedInSearchLocation.trim() || "India");
+      const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/$/, "");
+      const params = new URLSearchParams({ keywords, location, limit: String(linkedInSearchLimit) });
+      const res = await fetch(`${base}/api/linkedin-jobs?${params}`);
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(data.jobs) && data.jobs.length) {
+        setJobs((prev) => {
+          const ids = new Set(prev.map((x) => x.id));
+          const added = (data.jobs || []).filter((j) => !ids.has(j.id));
+          added.forEach((j) => ids.add(j.id));
+          return [...prev, ...added.map((j) => ({ ...j, source: "linkedin" }))];
+        });
+      } else if (!res.ok) {
+        setParsingError(data.details || data.error || "Could not fetch jobs");
+      }
+    } catch (err) {
+      console.error("Upload/parse error:", err);
+      const msg = err.message || "Something went wrong";
+      const isNetwork = /fetch failed|failed to fetch|network error|connection refused/i.test(msg);
+      setParsingError(isNetwork ? "Could not reach the server. Start it with: npm run dev:all" : msg);
+      if (!resume) setResume(SAMPLE_RESUME);
+    } finally {
+      setParsingStatus((s) => ({ ...s, findJobs: true }));
+      setStep("select");
+    }
+  };
+
   const handleResumeFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
-
-    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-
-    if (isPdf) {
-      setReadingPdf(true);
-      try {
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        const numPages = pdf.numPages;
-        let fullText = "";
-        for (let i = 1; i <= numPages; i++) {
-          const page = await pdf.getPage(i);
-          const content = await page.getTextContent();
-          const strings = content.items.map((item) => item.str || "").filter(Boolean);
-          fullText += strings.join(" ") + "\n";
-        }
-        setResumeText(fullText.trim());
-      } catch (err) {
-        console.error("PDF read error:", err);
-        setResumeText("");
-      } finally {
-        setReadingPdf(false);
-      }
+    if (step === "upload") {
+      handleUploadAndParse(file);
       return;
     }
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      const text = typeof reader.result === "string" ? reader.result : "";
+    setReadingPdf(true);
+    try {
+      const text = await readFileToText(file);
       setResumeText(text);
-    };
-    reader.readAsText(file);
+    } catch (err) {
+      console.error("Read error:", err);
+      setResumeText("");
+    } finally {
+      setReadingPdf(false);
+    }
   };
 
   const handleAnalyzeResume = async () => {
     if (!selectedJob) return;
+    const resumeToUse = resume || SAMPLE_RESUME;
     setLoading(true);
     setLoadingMsg("Scoring your resume against this job…");
     try {
-      const scoreData = await scoreResume(selectedJob, resume);
+      const scoreData = await scoreResume(selectedJob, resumeToUse);
       setScore(scoreData.score);
       setScoreBreakdown(scoreData);
       setLoadingMsg("Generating tailored suggestions…");
-      const suggs = await generateSuggestions(selectedJob, resume);
+      const suggs = await generateSuggestions(selectedJob, resumeToUse);
       setSuggestions(suggs);
       setApprovedIds(new Set());
       setRejectedIds(new Set());
@@ -2079,9 +2331,10 @@ export default function ResumeIQ() {
   };
 
   const handleReset = () => {
-    setStep("select");
+    setStep("upload");
     setJobs(JOB_DATABASE);
     setSelectedJob(null);
+    setResume(null);
     setScore(null);
     setScoreBreakdown(null);
     setSuggestions([]);
@@ -2091,6 +2344,10 @@ export default function ResumeIQ() {
     setPreviewHighlights([]);
     setLinkedInText("");
     setRegenerationContext("");
+    setUploadedFileName("");
+    setUploadedFileSize("");
+    setParsingStatus({ ...DEFAULT_PARSING_STATUS });
+    setParsingError(null);
     setLoading(false);
     setLoadingMsg("");
     setApplyingChanges(false);
@@ -2317,10 +2574,12 @@ body {
             </div>
             <nav style={styles.stepNav}>
               {[
-                { id: "select", num: 1, label: "Jobs" },
-                { id: "analyze", num: 2, label: "Resume" },
-                { id: "suggestions", num: 3, label: "Suggestions" },
-                { id: "preview", num: 4, label: "Preview" },
+                { id: "upload", num: 1, label: "Upload" },
+                { id: "parsing", num: 2, label: "Parsing" },
+                { id: "select", num: 3, label: "Job Matches" },
+                { id: "analyze", num: 4, label: "Resume" },
+                { id: "suggestions", num: 5, label: "Suggestions" },
+                { id: "preview", num: 6, label: "Preview" },
               ].map((s, idx) => {
                 const order = getStepOrder(s.id);
                 let state = "future";
@@ -2332,7 +2591,7 @@ body {
                       {s.num}
                     </div>
                     <span style={styles.stepLabel}>{s.label}</span>
-                    {idx < 3 && <span style={styles.stepArrow}>→</span>}
+                    {idx < 5 && <span style={styles.stepArrow}>→</span>}
                   </div>
                 );
               })}
@@ -2341,97 +2600,187 @@ body {
         </header>
 
         <main style={styles.mainCard}>
+          {step === "upload" && (
+            <section style={styles.stepSection}>
+              <div style={styles.uploadHero}>
+                <div style={styles.uploadTitle}>AI-POWERED RESUME INTELLIGENCE</div>
+                <h1 style={styles.uploadHeadline}>
+                  Find Jobs That <span style={styles.uploadHeadlineAccent}>Actually Fit You</span>
+                </h1>
+                <p style={styles.uploadSubtext}>
+                  Upload your resume. We’ll scan the job market, score every match, and help you tailor your resume to land interviews.
+                </p>
+              </div>
+              <div
+                style={{
+                  ...styles.dropZone,
+                  ...(dropZoneHover ? styles.dropZoneHover : {}),
+                }}
+                onDragOver={(e) => { e.preventDefault(); setDropZoneHover(true); }}
+                onDragLeave={() => setDropZoneHover(false)}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  setDropZoneHover(false);
+                  const file = e.dataTransfer?.files?.[0];
+                  if (file && /\.(pdf|txt|md)$/i.test(file.name)) handleUploadAndParse(file);
+                }}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <div style={styles.dropZoneIcon}>↑</div>
+                <div style={styles.dropZoneLabel}>Drop your resume here</div>
+                <div style={styles.dropZoneBrowse}>or browse files</div>
+                <div style={styles.dropZoneTypes}>PDF, TXT, Markdown</div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleUploadAndParse(file);
+                    e.target.value = "";
+                  }}
+                />
+              </div>
+              <div style={styles.featureGrid}>
+                <div style={styles.featureCard}>
+                  <div style={styles.featureCardTitle}>AI Resume Parsing</div>
+                  <div style={styles.featureCardDesc}>Extracts every detail automatically</div>
+                </div>
+                <div style={styles.featureCard}>
+                  <div style={styles.featureCardTitle}>Live Job Search</div>
+                  <div style={styles.featureCardDesc}>Real openings in India & worldwide</div>
+                </div>
+                <div style={styles.featureCard}>
+                  <div style={styles.featureCardTitle}>Match Scoring</div>
+                  <div style={styles.featureCardDesc}>% fit shown on every job card</div>
+                </div>
+                <div style={styles.featureCard}>
+                  <div style={styles.featureCardTitle}>Smart Edits</div>
+                  <div style={styles.featureCardDesc}>Approve AI suggestions one by one</div>
+                </div>
+              </div>
+              <p style={{ textAlign: "center", marginTop: 24, fontSize: 12, color: "#666" }}>
+                <button
+                  type="button"
+                  style={{ ...styles.ghostButton, fontSize: 12 }}
+                  onClick={() => {
+                    setResume(SAMPLE_RESUME);
+                    setStep("select");
+                  }}
+                >
+                  Use sample resume instead
+                </button>
+              </p>
+            </section>
+          )}
+
+          {step === "parsing" && (
+            <section style={styles.stepSection}>
+              <div style={styles.parsingCard}>
+                <div style={styles.parsingFileRow}>
+                  <span style={styles.parsingFileIcon}>📄</span>
+                  <div>
+                    <div style={styles.parsingFileName}>{uploadedFileName}</div>
+                    {uploadedFileSize && <div style={styles.parsingFileSize}>{uploadedFileSize}</div>}
+                  </div>
+                </div>
+                <div style={styles.parsingStatusLine}>Structuring your profile with AI...</div>
+                <ul style={styles.parsingList}>
+                  <li style={styles.parsingListItem}>
+                    <span style={parsingStatus.extractText ? styles.parsingBulletDone : styles.parsingBulletPending}>
+                      {parsingStatus.extractText ? "✓" : "○"}
+                    </span>
+                    Extract text
+                  </li>
+                  <li style={styles.parsingListItem}>
+                    <span style={parsingStatus.parseStructure ? styles.parsingBulletDone : styles.parsingBulletPending}>
+                      {parsingStatus.parseStructure ? "✓" : "○"}
+                    </span>
+                    Parse structure
+                  </li>
+                  <li style={styles.parsingListItem}>
+                    <span style={parsingStatus.findJobs ? styles.parsingBulletDone : styles.parsingBulletPending}>
+                      {parsingStatus.findJobs ? "✓" : "○"}
+                    </span>
+                    Find matching jobs
+                  </li>
+                </ul>
+              </div>
+            </section>
+          )}
+
           {step === "select" && (
             <section style={styles.stepSection}>
               <div style={styles.sectionHeader}>
-                <h2 style={styles.sectionTitle}>Find Your Next Role</h2>
+                <h2 style={styles.sectionTitle}>Your Job Matches</h2>
                 <p style={styles.sectionSubtitle}>
-                  Add your resume, then add roles. We’ll analyze fit against each
-                  opening using your resume.
+                  Jobs matched to your profile. Pick one to analyze fit and get tailored suggestions.
                 </p>
               </div>
+              {parsingError && (
+                <div style={{ marginBottom: 16, padding: 10, background: "rgba(245,200,66,0.1)", borderRadius: 8, fontSize: 12, color: "#f5c842" }}>
+                  {parsingError}. You can add roles manually below.
+                </div>
+              )}
 
               <div style={styles.linkedInPanel}>
                 <div style={styles.panelLabelRow}>
                   <div style={styles.panelLabel}>
-                    <span>Your resume</span>
+                    <span>Search LinkedIn Jobs</span>
                   </div>
-                  <div style={styles.smallPill}>
-                    {resume.name && resume.title
-                      ? `${resume.name} · ${resume.title}`
-                      : "Upload or paste to analyze fit"}
-                  </div>
+                  <div style={styles.smallPill}>India & worldwide · up to 150 jobs</div>
                 </div>
-                <p style={styles.smallHelpText}>
-                  Upload a PDF or .txt resume, or paste the text below. We’ll extract your
-                  details and use them to check fit for each role.
-                </p>
-                <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
-                  <label
-                    style={{
-                      ...styles.ghostButton,
-                      marginBottom: 0,
-                      cursor: readingPdf ? "wait" : "pointer",
-                      opacity: readingPdf ? 0.7 : 1,
-                    }}
-                  >
-                    📄 Upload PDF or .txt
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 12 }}>
+                  <input
+                    type="text"
+                    placeholder="Keywords (e.g. Senior Product Manager)"
+                    value={linkedInSearchKeywords}
+                    onChange={(e) => setLinkedInSearchKeywords(e.target.value)}
+                    style={{ ...styles.input, flex: "1 1 200px", minWidth: 180 }}
+                  />
+                  <input
+                    type="text"
+                    placeholder="Location"
+                    value={linkedInSearchIndiaOnly ? "India" : linkedInSearchLocation}
+                    onChange={(e) => setLinkedInSearchLocation(e.target.value)}
+                    disabled={linkedInSearchIndiaOnly}
+                    style={{ ...styles.input, width: 140, opacity: linkedInSearchIndiaOnly ? 0.8 : 1 }}
+                  />
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#888", cursor: "pointer" }}>
                     <input
-                      type="file"
-                      accept=".pdf,.txt,application/pdf,text/plain"
-                      style={{ display: "none" }}
-                      disabled={readingPdf}
-                      onChange={handleResumeFileChange}
+                      type="checkbox"
+                      checked={linkedInSearchIndiaOnly}
+                      onChange={(e) => setLinkedInSearchIndiaOnly(e.target.checked)}
+                      style={{ accentColor: "#00e5a0" }}
                     />
+                    India only
                   </label>
-                  {readingPdf && (
-                    <span style={styles.monoStatus}>Reading PDF…</span>
-                  )}
-                  {!readingPdf && (
-                    <span style={styles.monoStatus}>
-                      or paste in the box below
-                    </span>
-                  )}
-                </div>
-                <textarea
-                  style={{ ...styles.textArea, minHeight: 100, marginTop: 8 }}
-                  placeholder="Paste your resume text here (from Word, PDF copy, or any text)…"
-                  value={resumeText}
-                  onChange={(e) => setResumeText(e.target.value)}
-                />
-                <div style={styles.linkedInActions}>
+                  <select
+                    value={linkedInSearchLimit}
+                    onChange={(e) => setLinkedInSearchLimit(Number(e.target.value))}
+                    style={{ ...styles.input, width: 72, padding: "8px 10px" }}
+                  >
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                    <option value={150}>150</option>
+                  </select>
+                  <span style={{ fontSize: 12, color: "#666" }}>jobs</span>
                   <button
                     type="button"
                     style={{
                       ...styles.primaryButton,
-                      ...(extractingResume || !resumeText.trim()
-                        ? styles.disabledButton
-                        : {}),
+                      ...(linkedInSearching ? styles.disabledButton : {}),
                     }}
-                    disabled={extractingResume || !resumeText.trim()}
-                    onClick={handleExtractResume}
+                    disabled={linkedInSearching}
+                    onClick={handleSearchLinkedInJobs}
                   >
-                    ⚡ Extract my resume
+                    {linkedInSearching ? "Searching…" : "Search LinkedIn"}
                   </button>
-                  {extractingResume && (
-                    <span style={styles.monoStatus}>
-                      Extracting your details…
-                    </span>
-                  )}
-                  {resume.name && (
-                    <button
-                      type="button"
-                      style={{
-                        ...styles.ghostButton,
-                        fontSize: 11,
-                        padding: "6px 10px",
-                      }}
-                      onClick={() => setResume(SAMPLE_RESUME)}
-                    >
-                      Use sample resume instead
-                    </button>
-                  )}
                 </div>
+                {linkedInSearchError && (
+                  <div style={{ marginBottom: 8, fontSize: 12, color: "#ff5f5f" }}>{linkedInSearchError}</div>
+                )}
               </div>
 
               <div style={styles.linkedInPanel}>
@@ -2475,10 +2824,6 @@ body {
               <div style={styles.jobGrid}>
                 {jobs.map((job) => {
                   const hovered = hoveredJobId === job.id;
-                  const preview =
-                    job.jd && job.jd.length > 120
-                      ? `${job.jd.slice(0, 120)}…`
-                      : job.jd || "";
                   return (
                     <div
                       key={job.id}
@@ -2527,7 +2872,20 @@ body {
                           <div style={styles.sourcePill}>LinkedIn</div>
                         )}
                       </div>
-                      <div style={styles.jobPreview}>{preview}</div>
+                      <div style={styles.jobPreview}>
+                        {job.jd ? (job.jd.length > 280 ? `${job.jd.slice(0, 280)}…` : job.jd) : ""}
+                      </div>
+                      {job.url && (
+                        <a
+                          href={job.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ fontSize: 11, color: "#9bbcf6", marginTop: 6, display: "inline-block" }}
+                        >
+                          View full JD on LinkedIn →
+                        </a>
+                      )}
                       <div style={styles.cardFooterRow}>
                         <button
                           type="button"
@@ -2560,7 +2918,7 @@ body {
                     style={styles.smallBackButton}
                     onClick={() => setStep("select")}
                   >
-                    ← Back to roles
+                    ← Back to Job Matches
                   </button>
                   <div>
                     <div style={styles.backText}>Analyzing for</div>
@@ -2575,21 +2933,21 @@ body {
 
               <div style={styles.twoColumn}>
                 <div style={styles.colLeft}>
-                  <ResumeDocument resume={resume} />
+                  <ResumeDocument resume={resume || SAMPLE_RESUME} />
                 </div>
                 <aside style={styles.colRightFixed}>
                   <div style={styles.sideCard}>
                     <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                       <div style={styles.avatarCircle}>
-                        {resume.name
+                        {(resume || SAMPLE_RESUME).name
                           .split(" ")
                           .map((n) => n[0])
                           .join("")
                           .slice(0, 2)}
                       </div>
                       <div>
-                        <div style={styles.resumeName}>{resume.name}</div>
-                        <div style={styles.resumeTitle}>{resume.title}</div>
+                        <div style={styles.resumeName}>{(resume || SAMPLE_RESUME).name}</div>
+                        <div style={styles.resumeTitle}>{(resume || SAMPLE_RESUME).title}</div>
                       </div>
                     </div>
                   </div>
