@@ -83,7 +83,8 @@ Set `VITE_API_URL=http://localhost:3001` in `.env` if the app runs on a differen
 
 ## Going live
 
-See **[DEPLOYMENT.md](./DEPLOYMENT.md)** for building, env vars, and hosting the frontend and API (e.g. Vercel + Railway/Render).
+- **Quick path (Render + Vercel):** See **[GO_LIVE.md](./GO_LIVE.md)** for step-by-step deployment in ~15 minutes.
+- **Full reference:** [DEPLOYMENT.md](./DEPLOYMENT.md) for build, env vars, and other hosts (Railway, Fly.io, Netlify, etc.).
 
 ## License
 

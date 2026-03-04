@@ -1,0 +1,16 @@
+# Render Blueprint: ResumeIQ API only
+# Deploy at https://dashboard.render.com/blueprints (connect this repo)
+# Then deploy the frontend (e.g. Vercel) with VITE_API_URL = this service's URL
+
+services:
+  - type: web
+    name: resumeiq-api
+    runtime: node
+    region: oregon
+    buildCommand: npm install
+    startCommand: node server/index.js
+    envVars:
+      - key: APIFY_TOKEN
+        sync: false
+      - key: NODE_VERSION
+        value: 20
