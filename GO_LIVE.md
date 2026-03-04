@@ -146,4 +146,5 @@ Users can open the Vercel link, upload a resume, search jobs (India/worldwide), 
 | “Could not reach the server” when searching jobs | In Vercel, **Settings → Environment Variables**: `VITE_API_URL` must be exactly the Render URL (https, no trailing slash). Then **Redeploy** the project. |
 | Job search returns no jobs / error | In Render, **Environment**: `APIFY_TOKEN` must be set. Redeploy the service after adding it. |
 | OpenAI errors (extract resume, suggestions) | In Vercel, `VITE_OPENAI_API_KEY` must be set. Redeploy after adding it. |
+| **"Resume parsing is temporarily unavailable"** (users see this) | Add **VITE_OPENAI_API_KEY** in Vercel → Settings → Environment Variables, then **Redeploy** (Deployments → ⋮ → Redeploy). Key is baked in at build time. |
 | First job search very slow (30–60 s) | On Render’s free tier the API sleeps after ~15 min idle; the first request wakes it. Later requests are fast. |

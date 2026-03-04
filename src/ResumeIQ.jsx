@@ -2,8 +2,8 @@ import { useState, useEffect, useRef } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import { jsPDF } from "jspdf";
 
-// PDF.js worker for text extraction (Vite)
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+// PDF.js worker: use local copy from public/ (avoids "load failed" in production from CDN)
+pdfjsLib.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
 const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
 const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || "";
@@ -2236,17 +2236,25 @@ export default function ResumeIQ() {
   const readFileToText = async (file) => {
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
     if (isPdf) {
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      const numPages = pdf.numPages;
-      let fullText = "";
-      for (let i = 1; i <= numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const strings = content.items.map((item) => item.str || "").filter(Boolean);
-        fullText += strings.join(" ") + "\n";
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const numPages = pdf.numPages;
+        let fullText = "";
+        for (let i = 1; i <= numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const strings = content.items.map((item) => item.str || "").filter(Boolean);
+          fullText += strings.join(" ") + "\n";
+        }
+        return fullText.trim();
+      } catch (e) {
+        const msg = e?.message || String(e);
+        if (/load failed|worker|invalid/i.test(msg)) {
+          throw new Error("Could not read this PDF. Try saving your resume as TXT or paste the text into the box below.");
+        }
+        throw e;
       }
-      return fullText.trim();
     }
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -2296,11 +2304,12 @@ export default function ResumeIQ() {
       console.error("Upload/parse error:", err);
       const msg = err.message || "Something went wrong";
       const isNetwork = /fetch failed|failed to fetch|network error|connection refused/i.test(msg);
+      const isApiKey = /missing|not configured|api key|invalid.*key|openai|quota|401|429/i.test(msg);
       setParsingError(
         isNetwork
           ? "Could not reach the server. Start it with: npm run dev:all"
-          : /openai|api key|quota/i.test(msg)
-            ? "Resume extraction failed. Check your OpenAI API key (Vercel env: VITE_OPENAI_API_KEY) and try again."
+          : isApiKey
+            ? "Resume parsing is temporarily unavailable. Please try again later."
             : msg
       );
       setResume(null);

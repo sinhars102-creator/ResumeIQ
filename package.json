@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "postinstall": "mkdir -p public && cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs public/pdf.worker.min.mjs 2>/dev/null || true",
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
@@ -13,6 +14,7 @@
     "dev:all": "concurrently \"npm run dev\" \"npm run server\""
   },
   "dependencies": {
+    "@vercel/analytics": "^1.6.1",
     "cheerio": "^1.2.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
