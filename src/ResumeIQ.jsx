@@ -94,6 +94,7 @@ const JOB_DATABASE = [
 
 const styles = {
   appRoot: {
+    width: "100%",
     minHeight: "100vh",
     background: "#0a0a14",
     color: "#f0f0e8",
@@ -102,10 +103,12 @@ const styles = {
       "'DM Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
     display: "flex",
     justifyContent: "center",
+    boxSizing: "border-box",
   },
   appInner: {
     width: "100%",
     maxWidth: 1200,
+    boxSizing: "border-box",
   },
   stickyHeader: {
     position: "sticky",
@@ -152,6 +155,12 @@ const styles = {
     gap: 6,
     opacity: state === "active" ? 1 : state === "past" ? 0.7 : 0.4,
     transition: "opacity 0.25s ease",
+    cursor: "pointer",
+    border: "none",
+    background: "none",
+    color: "inherit",
+    font: "inherit",
+    padding: "4px 0",
   }),
   stepCircle: (isActive) => ({
     width: 20,
@@ -1074,8 +1083,12 @@ async function callOpenAI(system, user, maxTokens) {
       ],
     }),
   });
-  const data = await response.json();
-  const text = data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const errMsg = data?.error?.message || data?.message || `OpenAI API error ${response.status}`;
+    throw new Error(errMsg);
+  }
+  const text = data?.choices?.[0]?.message?.content;
   return text || "";
 }
 
@@ -1152,6 +1165,9 @@ async function extractResumeFromText(pastedText) {
 Resume text:
 ${pastedText}`;
     const text = await callOpenAI(system, user, 1500);
+    if (!text || typeof text !== "string") {
+      throw new Error("OpenAI returned no content. Check your API key and quota.");
+    }
     const cleaned = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(cleaned);
     return {
@@ -1167,8 +1183,8 @@ ${pastedText}`;
       references: Array.isArray(parsed.references) ? parsed.references : [],
     };
   } catch (e) {
-    console.error("Resume extraction error, using sample:", e);
-    return SAMPLE_RESUME;
+    console.error("Resume extraction error:", e);
+    throw e;
   }
 }
 
@@ -2275,15 +2291,22 @@ export default function ResumeIQ() {
       } else if (!res.ok) {
         setParsingError(data.details || data.error || "Could not fetch jobs");
       }
+      setStep("select");
     } catch (err) {
       console.error("Upload/parse error:", err);
       const msg = err.message || "Something went wrong";
       const isNetwork = /fetch failed|failed to fetch|network error|connection refused/i.test(msg);
-      setParsingError(isNetwork ? "Could not reach the server. Start it with: npm run dev:all" : msg);
-      if (!resume) setResume(SAMPLE_RESUME);
+      setParsingError(
+        isNetwork
+          ? "Could not reach the server. Start it with: npm run dev:all"
+          : /openai|api key|quota/i.test(msg)
+            ? "Resume extraction failed. Check your OpenAI API key (Vercel env: VITE_OPENAI_API_KEY) and try again."
+            : msg
+      );
+      setResume(null);
+      setStep("upload");
     } finally {
       setParsingStatus((s) => ({ ...s, findJobs: true }));
-      setStep("select");
     }
   };
 
@@ -2585,14 +2608,24 @@ body {
                 let state = "future";
                 if (order === currentStepOrder) state = "active";
                 else if (order < currentStepOrder) state = "past";
+                const goToStep = () => {
+                  setStep(s.id === "parsing" ? "select" : s.id);
+                };
                 return (
-                  <div key={s.id} style={styles.stepItem(state)}>
+                  <button
+                    type="button"
+                    key={s.id}
+                    style={styles.stepItem(state)}
+                    onClick={goToStep}
+                    onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = state === "active" ? "1" : state === "past" ? "0.7" : "0.4"; }}
+                  >
                     <div style={styles.stepCircle(state === "active")}>
                       {s.num}
                     </div>
                     <span style={styles.stepLabel}>{s.label}</span>
                     {idx < 5 && <span style={styles.stepArrow}>→</span>}
-                  </div>
+                  </button>
                 );
               })}
             </nav>
@@ -2611,6 +2644,11 @@ body {
                   Upload your resume. We’ll scan the job market, score every match, and help you tailor your resume to land interviews.
                 </p>
               </div>
+              {parsingError && (
+                <div style={{ marginBottom: 16, padding: 12, background: "rgba(255,95,95,0.15)", borderRadius: 8, fontSize: 13, color: "#ff8a8a" }}>
+                  {parsingError}
+                </div>
+              )}
               <div
                 style={{
                   ...styles.dropZone,
