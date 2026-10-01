@@ -12,7 +12,10 @@ import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const REPO_PATH = process.env.JOBS_REPO_PATH || resolve(__dirname, "data/jobs-repository.json");
+// Vercel functions can only write to /tmp (cleared between cold starts), so saved roles are best-effort there.
+const REPO_PATH =
+  process.env.JOBS_REPO_PATH ||
+  (process.env.VERCEL ? "/tmp/jobs-repository.json" : resolve(__dirname, "data/jobs-repository.json"));
 
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // drop roles not seen in a live search for 30 days
 const SERVE_MAX_AGE_MS = 21 * 24 * 60 * 60 * 1000; // only serve roles seen in the last 3 weeks

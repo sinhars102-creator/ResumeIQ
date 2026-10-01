@@ -970,7 +970,8 @@ app.get("/api/health", (_, res) =>
   })
 );
 
-app.listen(PORT, () => {
+// On Vercel the app runs as a serverless function (api/index.js); locally it listens on PORT.
+if (!process.env.VERCEL) app.listen(PORT, () => {
   const apify = getApifyToken();
   const rapid = getRapidApiKey();
   const rxresume = getRxResumeKey();
@@ -986,3 +987,5 @@ app.listen(PORT, () => {
   if (rxresume) console.log("  RXRESUME_API_KEY: loaded (Reactive Resume AI tailoring)");
   else console.log("  RXRESUME_API_KEY: not set – suggestion generation will fail until it's configured");
 });
+
+export default app;

@@ -7,6 +7,10 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 
+// API origin: VITE_API_URL if set; otherwise the local dev server, or the same origin in
+// production builds (the API is deployed alongside the frontend at /api on Vercel).
+const API_BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://localhost:3001" : "");
+
 const SAMPLE_RESUME = {
   name: "Alex Chen",
   title: "Product Manager",
@@ -1169,7 +1173,7 @@ function computeLocalMatchScore(resume, job) {
  * so no model API key is shipped to the browser. Every caller expects JSON.
  */
 async function callLLM(system, user, maxTokens) {
-  const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/$/, "");
+  const base = API_BASE.replace(/\/$/, "");
   const response = await fetch(`${base}/api/llm`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -2286,7 +2290,7 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept }) {
     setLoading(true);
     setError(null);
     try {
-      const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/$/, "");
+      const base = API_BASE.replace(/\/$/, "");
       const response = await fetch(`${base}/api/assistant`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2868,7 +2872,7 @@ export default function ResumeIQ() {
     const keywords = (overrideKeywords ?? linkedInSearchKeywords).trim() || "Product Manager";
     const levels = yearsToLinkedInLevels(overrideYears !== undefined ? overrideYears : yearsNum);
     const location = linkedInSearchIndiaOnly ? "India" : (linkedInSearchLocation.trim() || "India");
-    const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/$/, "");
+    const base = API_BASE.replace(/\/$/, "");
     const params = new URLSearchParams({ keywords, location });
     if (levels.length) params.set("experienceLevel", levels.join(","));
 
@@ -3174,7 +3178,7 @@ export default function ResumeIQ() {
     setOpeningInBuilder(true);
     setOpenInBuilderError(null);
     try {
-      const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/$/, "");
+      const base = API_BASE.replace(/\/$/, "");
       const response = await fetch(`${base}/api/rxresume/open-in-builder`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
