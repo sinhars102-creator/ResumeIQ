@@ -912,12 +912,18 @@ app.post("/api/rxresume/open-in-builder", async (req, res) => {
   if (!key) {
     return res.status(400).json({ error: "RXRESUME_API_KEY not configured on the server (.env)." });
   }
-  const { resumeData } = req.body || {};
+  const { resumeData, name } = req.body || {};
   if (!resumeData) {
     return res.status(400).json({ error: "resumeData is required." });
   }
   try {
     const { resumeId } = await importIntoRxResume(resumeData);
+    // Imports get a random name ("Alone Brown Vulture"); label it after the candidate and job.
+    const label = rxText(name).trim().slice(0, 120);
+    if (label) {
+      const renamed = await rxFetch(`/resumes/${resumeId}`, { method: "PUT", body: JSON.stringify({ name: label }) });
+      if (!renamed.ok) console.warn("Reactive Resume rename failed:", renamed.status, renamed.data?.message);
+    }
     return res.json({ resumeId, builderUrl: `${RX_APP_URL}/builder/${resumeId}`, embeddable: RX_APP_URL !== "https://rxresu.me" });
   } catch (err) {
     console.error("Reactive Resume open-in-builder error:", err);

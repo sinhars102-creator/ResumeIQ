@@ -2754,6 +2754,9 @@ export default function ResumeIQ() {
   const [openInBuilderError, setOpenInBuilderError] = useState(null);
   // Reactive Resume builder embedded in the Updated Resume step: { builderUrl, embeddable }.
   const [rxEditor, setRxEditor] = useState(null);
+  // Preview shows the editor as a full-window workspace; "classic" swaps back to the old view.
+  const [showClassicPreview, setShowClassicPreview] = useState(false);
+  const [workspaceTop, setWorkspaceTop] = useState(0);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -3204,7 +3207,12 @@ export default function ResumeIQ() {
       const response = await fetch(`${base}/api/rxresume/open-in-builder`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resumeData: getFinalResume() }),
+        body: JSON.stringify({
+          resumeData: getFinalResume(),
+          name: [getFinalResume()?.name, selectedJob && [selectedJob.role, selectedJob.company].filter(Boolean).join(" @ ")]
+            .filter(Boolean)
+            .join(" – "),
+        }),
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok || !data.builderUrl) {
@@ -3231,6 +3239,22 @@ export default function ResumeIQ() {
     handleOpenInReactiveResume();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
+
+  const editorWorkspace =
+    step === "preview" && !showClassicPreview && !openInBuilderError && (openingInBuilder || !!rxEditor?.embeddable);
+  useEffect(() => {
+    if (!editorWorkspace) return;
+    const measure = () => setWorkspaceTop(document.querySelector("header")?.getBoundingClientRect().bottom ?? 0);
+    window.scrollTo(0, 0);
+    measure();
+    window.addEventListener("resize", measure);
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("resize", measure);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [editorWorkspace]);
 
   const currentStepOrder = getStepOrder(step);
 
@@ -4099,7 +4123,47 @@ body {
             </section>
           )}
 
-          {step === "preview" && (
+          {step === "preview" && editorWorkspace && (
+            <div style={{ position: "fixed", top: workspaceTop, left: 0, right: 0, bottom: 0, zIndex: 15, display: "flex", flexDirection: "column", background: "#0a0a14" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 20px", borderBottom: "1px solid #1e1e30" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+                  <button type="button" style={styles.smallBackButton} onClick={() => setStep("suggestions")}>
+                    ← Back to Suggestions
+                  </button>
+                  {approvedIds.size > 0 && (
+                    <span style={{ fontSize: 12, color: "#8b8ba7", whiteSpace: "nowrap" }}>
+                      {approvedIds.size} approved change{approvedIds.size > 1 ? "s" : ""} applied
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button type="button" style={styles.ghostButton} onClick={handleOpenInReactiveResume} disabled={openingInBuilder}>
+                    {openingInBuilder ? "Loading…" : "↻ Reload with latest edits"}
+                  </button>
+                  <button type="button" style={styles.ghostButton} onClick={() => setShowClassicPreview(true)}>
+                    Classic editor
+                  </button>
+                  <button type="button" style={styles.ghostButton} onClick={handleReset}>
+                    ← Analyze another job
+                  </button>
+                </div>
+              </div>
+              {rxEditor?.embeddable ? (
+                <iframe
+                  key={rxEditor.builderUrl}
+                  src={rxEditor.builderUrl}
+                  title="Resume editor"
+                  style={{ flex: 1, width: "100%", border: "none", display: "block", background: "#0a0a14" }}
+                />
+              ) : (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#8b8ba7", fontSize: 13 }}>
+                  Loading the resume editor…
+                </div>
+              )}
+            </div>
+          )}
+
+          {step === "preview" && !editorWorkspace && (
             <section style={styles.stepSection}>
               <div style={styles.backRow}>
                 <button
@@ -4129,8 +4193,16 @@ body {
                         Open in new tab ↗
                       </a>
                     )}
-                    <button type="button" onClick={handleOpenInReactiveResume} disabled={openingInBuilder} style={styles.primaryButton}>
-                      {openingInBuilder ? "Loading editor…" : rxEditor ? "Reload with latest edits" : "Load editor"}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowClassicPreview(false);
+                        if (!rxEditor?.embeddable) handleOpenInReactiveResume();
+                      }}
+                      disabled={openingInBuilder}
+                      style={styles.primaryButton}
+                    >
+                      {openingInBuilder ? "Loading editor…" : rxEditor?.embeddable ? "Back to editor" : "Load editor"}
                     </button>
                   </div>
                 </div>
@@ -4145,20 +4217,12 @@ body {
                     <a href={rxEditor.builderUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#4a7ba6" }}>open it in a new tab ↗</a>.
                   </p>
                 )}
-                {rxEditor?.embeddable && (
-                  <iframe
-                    key={rxEditor.builderUrl}
-                    src={rxEditor.builderUrl}
-                    title="Resume editor"
-                    style={{ width: "100%", height: "85vh", minHeight: 640, border: "1px solid #ddd", borderRadius: 8, background: "#fff" }}
-                  />
-                )}
                 {openInBuilderError && (
                   <p style={{ color: "#d33", fontSize: 13 }}>{openInBuilderError}</p>
                 )}
               </div>
 
-              <details style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+              <details open={showClassicPreview} style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
                 <summary style={{ cursor: "pointer", fontSize: 13, color: "#8b8ba7" }}>Classic editor &amp; PDF formatting</summary>
                 <div style={{ maxWidth: 640, margin: "16px auto 0" }}>
                   <ResumeDocument
