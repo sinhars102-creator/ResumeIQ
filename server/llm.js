@@ -17,7 +17,7 @@ const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
 const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5";
 // Opus 5.5 always thinks; effort sets how much (its default is "medium" – kept explicit).
 const DEFAULT_ANTHROPIC_EFFORT = "medium";
-const DEFAULT_GROQ_FALLBACK_MODELS = ["llama-3.3-70b-versatile", "openai/gpt-oss-20b"];
+const DEFAULT_GROQ_FALLBACK_MODELS = ["openai/gpt-oss-20b", "qwen/qwen3.8-27b"];
 
 /** Errors whose message is safe and useful to show users (everything else is logged, not returned). */
 export class LLMUserError extends Error {
@@ -27,6 +27,7 @@ export class LLMUserError extends Error {
   }
 }
 
+/** This model can't serve the request right now (rate limited, retired, or not enabled) – try the next one. */
 class RateLimitedError extends Error {}
 
 function groqModels() {
@@ -73,6 +74,8 @@ async function callGroq({ system, user, maxTokens, json }, model, attempt = 0) {
       // gpt-oss reasons before answering and those tokens share this budget, so leave headroom.
       max_completion_tokens: maxTokens + 2048,
       ...(/gpt-oss/.test(model) ? { reasoning_effort: "low" } : {}),
+      // Qwen otherwise inlines <think>…</think> in the reply, which breaks JSON answers.
+      ...(/qwen/.test(model) ? { reasoning_format: "hidden" } : {}),
       ...(json ? { response_format: { type: "json_object" } } : {}),
       messages: [
         { role: "system", content: system },
@@ -91,9 +94,9 @@ async function callGroq({ system, user, maxTokens, json }, model, attempt = 0) {
       return callGroq({ system, user, maxTokens, json }, model, attempt + 1);
     }
   }
-  if (response.status === 429) {
-    // Daily (or long) limit on this model – the caller moves on to the next model.
-    throw new RateLimitedError(data?.error?.message || `Groq rate limit on ${model}`);
+  if (response.status === 429 || response.status === 404 || data?.error?.code === "model_not_found" || data?.error?.code === "model_decommissioned") {
+    // Daily (or long) limit, or a model Groq has retired – the caller moves on to the next model.
+    throw new RateLimitedError(data?.error?.message || `Groq model ${model} unavailable (${response.status})`);
   }
   if (!response.ok) {
     throw new Error(data?.error?.message || `Groq API error ${response.status}`);
