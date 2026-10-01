@@ -600,15 +600,29 @@ function rxMetadataForTemplate(template) {
   };
 }
 
+/**
+ * Parsed resumes come from an LLM, so fields can arrive as numbers (e.g. year: 2019),
+ * objects or null. Reactive Resume's schema requires plain strings everywhere.
+ */
+function rxText(value) {
+  if (value == null) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(rxText).filter(Boolean).join(", ");
+  if (typeof value === "object") return rxText(value.name ?? value.language ?? value.title ?? value.text ?? Object.values(value)[0]);
+  return String(value);
+}
+const rxList = (value) => (Array.isArray(value) ? value : []);
+
 /** Map ResumeIQ's resumeData shape into Reactive Resume's ResumeData schema. */
 function mapToRxResumeData(resumeData, template = "azurill") {
-  const contact = resumeData.contact || "";
+  const contact = rxText(resumeData.contact);
   const emailMatch = contact.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
   return {
     picture: { hidden: true, url: "", size: 100, rotation: 0, aspectRatio: 1, borderRadius: 0, borderColor: "rgba(0, 0, 0, 0.5)", borderWidth: 0, shadowColor: "rgba(0, 0, 0, 0.5)", shadowWidth: 0 },
     basics: {
-      name: resumeData.name || "",
-      headline: resumeData.title || "",
+      name: rxText(resumeData.name),
+      headline: rxText(resumeData.title),
       email: emailMatch ? emailMatch[0] : "",
       phone: "",
       location: "",
@@ -619,38 +633,42 @@ function mapToRxResumeData(resumeData, template = "azurill") {
       title: "Summary",
       icon: "",
       columns: 1,
-      hidden: !resumeData.summary,
+      hidden: !rxText(resumeData.summary),
       keepTogether: false,
       startOnNewPage: false,
-      content: resumeData.summary ? `<p>${htmlEscape(resumeData.summary)}</p>` : "",
+      content: rxText(resumeData.summary) ? `<p>${htmlEscape(rxText(resumeData.summary))}</p>` : "",
     },
     sections: {
       profiles: rxEmptySection("Profiles"),
       experience: {
         ...rxEmptySection("Experience"),
-        items: (resumeData.experience || []).map((e) => ({
+        items: rxList(resumeData.experience)
+          .filter((e) => rxText(e?.company) || rxText(e?.role))
+          .map((e) => ({
           id: crypto.randomUUID(),
           hidden: false,
-          company: e.company || "",
-          position: e.role || "",
-          location: e.location || "",
-          period: e.period || "",
+          company: rxText(e?.company) || rxText(e?.role),
+          position: rxText(e?.role),
+          location: rxText(e?.location),
+          period: rxText(e?.period),
           website: RX_EMPTY_WEBSITE,
-          description: bulletsToHtml(e.bullets),
+          description: bulletsToHtml(rxList(e?.bullets).map(rxText)),
           roles: [],
         })),
       },
       education: {
         ...rxEmptySection("Education"),
-        items: (resumeData.education || []).map((ed) => ({
+        items: rxList(resumeData.education)
+          .filter((ed) => rxText(ed?.school) || rxText(ed?.degree))
+          .map((ed) => ({
           id: crypto.randomUUID(),
           hidden: false,
-          school: ed.school || "",
-          degree: ed.degree || "",
+          school: rxText(ed?.school) || rxText(ed?.degree),
+          degree: rxText(ed?.degree),
           area: "",
           grade: "",
           location: "",
-          period: ed.year || "",
+          period: rxText(ed?.year),
           website: RX_EMPTY_WEBSITE,
           description: "",
         })),
@@ -658,15 +676,15 @@ function mapToRxResumeData(resumeData, template = "azurill") {
       projects: rxEmptySection("Projects"),
       skills: {
         ...rxEmptySection("Skills"),
-        items: (resumeData.skills || []).map((s) => ({ id: crypto.randomUUID(), hidden: false, icon: "", iconColor: "", name: s, proficiency: "", level: 0 })),
+        items: rxList(resumeData.skills).map(rxText).filter(Boolean).map((s) => ({ id: crypto.randomUUID(), hidden: false, icon: "", iconColor: "", name: s, proficiency: "", level: 0 })),
       },
       languages: {
         ...rxEmptySection("Languages"),
-        items: (resumeData.languages || []).map((l) => ({ id: crypto.randomUUID(), hidden: false, language: l, fluency: "", level: 0 })),
+        items: rxList(resumeData.languages).map(rxText).filter(Boolean).map((l) => ({ id: crypto.randomUUID(), hidden: false, language: l, fluency: "", level: 0 })),
       },
       interests: {
         ...rxEmptySection("Interests"),
-        items: (resumeData.interests || []).map((i) => ({ id: crypto.randomUUID(), hidden: false, icon: "", iconColor: "", name: i, keywords: [] })),
+        items: rxList(resumeData.interests).map(rxText).filter(Boolean).map((i) => ({ id: crypto.randomUUID(), hidden: false, icon: "", iconColor: "", name: i, keywords: [] })),
       },
       awards: rxEmptySection("Awards"),
       certifications: rxEmptySection("Certifications"),
@@ -674,7 +692,9 @@ function mapToRxResumeData(resumeData, template = "azurill") {
       volunteer: rxEmptySection("Volunteer"),
       references: {
         ...rxEmptySection("References"),
-        items: (resumeData.references || []).map((r) => ({ id: crypto.randomUUID(), hidden: false, name: r.name || "", position: r.title || "", website: RX_EMPTY_WEBSITE, phone: "", description: "" })),
+        items: rxList(resumeData.references)
+          .filter((r) => rxText(typeof r === "object" && r ? r.name : r))
+          .map((r) => ({ id: crypto.randomUUID(), hidden: false, name: rxText(typeof r === "object" && r ? r.name : r), position: rxText(r?.title), website: RX_EMPTY_WEBSITE, phone: "", description: "" })),
       },
     },
     customSections: [],
@@ -687,7 +707,12 @@ async function importIntoRxResume(resumeData, template = "azurill") {
   const mapped = mapToRxResumeData(resumeData, template);
   const importResult = await rxFetch("/resumes/import", { method: "POST", body: JSON.stringify({ data: mapped }) });
   if (!importResult.ok || typeof importResult.data !== "string") {
-    throw new Error(importResult.data?.message || "Failed to import resume into Reactive Resume.");
+    // Surface which fields failed Reactive Resume's schema, not just "Input validation failed".
+    const issues = (importResult.data?.data?.issues || [])
+      .slice(0, 3)
+      .map((i) => `${(i.path || []).slice(1).join(".")}: ${i.message}`);
+    const message = importResult.data?.message || "Failed to import resume into Reactive Resume.";
+    throw new Error(issues.length ? `${message} — ${issues.join("; ")}` : message);
   }
   return { resumeId: importResult.data, mapped };
 }
