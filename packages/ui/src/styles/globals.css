@@ -2,6 +2,7 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource-variable/inter";
 @import "@phosphor-icons/web/regular/style.css";
 
 @plugin "@tailwindcss/typography";
@@ -80,6 +81,37 @@
 	--sidebar-primary: oklch(0.488 0.243 264.376);
 	--sidebar-ring: oklch(0.75 0 0);
 	--sidebar: oklch(0.205 0 0);
+}
+
+/* ResumeIQ embed: the builder adopts ResumeIQ's Sage & Paper palette and Inter. */
+html.rq-embed {
+	--font-body: "Inter Variable", sans-serif;
+	--radius: 0.5rem;
+	--background: #f7f6f2;
+	--foreground: #1f2a2e;
+	--card: #ffffff;
+	--card-foreground: #1f2a2e;
+	--popover: #ffffff;
+	--popover-foreground: #1f2a2e;
+	--primary: #3f7d6e;
+	--primary-foreground: #ffffff;
+	--secondary: #f1efe9;
+	--secondary-foreground: #1f2a2e;
+	--muted: #f1efe9;
+	--muted-foreground: #5f6b6e;
+	--accent: #e8f1ee;
+	--accent-foreground: #1f2a2e;
+	--border: #e6e3dc;
+	--input: #e6e3dc;
+	--ring: #3f7d6e;
+	--sidebar: #ffffff;
+	--sidebar-foreground: #1f2a2e;
+	--sidebar-primary: #3f7d6e;
+	--sidebar-primary-foreground: #ffffff;
+	--sidebar-accent: #e8f1ee;
+	--sidebar-accent-foreground: #1f2a2e;
+	--sidebar-border: #e6e3dc;
+	--sidebar-ring: #3f7d6e;
 }
 
 @theme inline {

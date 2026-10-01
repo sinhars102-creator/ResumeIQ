@@ -19,7 +19,11 @@ export function isTheme(theme: string): theme is Theme {
 	return themeSchema.safeParse(theme).success;
 }
 
+// Inside ResumeIQ's iframe the builder always uses ResumeIQ's light palette (see `.rq-embed` in globals.css).
+export const isEmbedded = typeof window !== "undefined" && window.self !== window.top;
+
 export const getTheme = () => {
+	if (isEmbedded) return "light";
 	const theme = Cookies.get(storageKey);
 	if (!theme || !isTheme(theme)) return defaultTheme;
 	return theme;

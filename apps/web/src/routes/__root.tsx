@@ -28,6 +28,7 @@ import { ConfirmDialogProvider } from "@/hooks/use-confirm";
 import { PromptDialogProvider } from "@/hooks/use-prompt";
 import { isRTL } from "@/libs/locale";
 import { loadRootContext } from "@/libs/root-context";
+import { isEmbedded } from "@/libs/theme";
 
 type RouterContext = {
 	theme: Theme;
@@ -102,6 +103,7 @@ function RootComponent() {
 		document.documentElement.lang = locale;
 		document.documentElement.dir = dir;
 		document.documentElement.classList.toggle("dark", theme === "dark");
+		document.documentElement.classList.toggle("rq-embed", isEmbedded);
 	}, [dir, locale, theme]);
 
 	return (
@@ -126,8 +128,8 @@ function RootComponent() {
 														<CommandPalette />
 														<Toaster />
 
-														{import.meta.env.DEV && <BreakpointIndicator />}
-														{import.meta.env.DEV && (
+														{import.meta.env.DEV && !isEmbedded && <BreakpointIndicator />}
+														{import.meta.env.DEV && !isEmbedded && (
 															<TanStackDevtools
 																config={{ position: "bottom-left" }}
 																plugins={[

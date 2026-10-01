@@ -4,6 +4,10 @@
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
 		<meta name="theme-color" content="#09090B" />
+		<script>
+			// Embedded in ResumeIQ: start in its light palette so the page never flashes dark.
+			if (window.self !== window.top) document.documentElement.classList.replace("dark", "rq-embed");
+		</script>
 		<meta name="application-name" content="Reactive Resume" />
 		<meta name="mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-capable" content="yes" />
