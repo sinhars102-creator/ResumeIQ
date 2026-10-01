@@ -445,7 +445,7 @@ const styles = {
   },
   jobGrid: {
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))",
+    gridTemplateColumns: "repeat(auto-fill, minmax(min(340px, 100%), 1fr))",
     gap: 18,
     marginTop: 10,
   },
@@ -3295,10 +3295,22 @@ export default function ResumeIQ() {
   const approvedCount = approvedIds.size;
 
   return (
-    <div style={styles.appRoot}>
+    <div className="rq-app-root" style={styles.appRoot}>
       <div style={styles.appInner}>
         <style>{`
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+/* Phones: wrap the header, compact the stepper, stack two-column layouts. */
+@media (max-width: 640px) {
+  .rq-app-root { padding: 12px 12px 32px !important; }
+  .rq-header-row { flex-wrap: wrap; row-gap: 10px !important; }
+  .rq-step-nav { width: 100%; overflow-x: auto; justify-content: space-between; gap: 6px !important; scrollbar-width: none; }
+  .rq-step:not(.rq-step-active) .rq-step-label { display: none; }
+  .rq-step-arrow { display: none; }
+  .rq-main-card { padding: 16px !important; border-radius: 14px !important; }
+  .rq-workspace-bar { flex-wrap: wrap; padding: 8px 12px !important; }
+  .rq-two-col > * { flex: 1 1 100% !important; width: 100% !important; position: static !important; }
+}
 
 /* Sage & Paper palette. Playfair Display and DM Sans are only used on the resume page itself. */
 :root {
@@ -3378,12 +3390,12 @@ body {
         `}</style>
 
         <header style={styles.stickyHeader}>
-          <div style={styles.headerRow}>
+          <div className="rq-header-row" style={styles.headerRow}>
             <div style={styles.logo}>
               <span style={styles.logoMark}>◈</span>
               <span>ResumeIQ</span>
             </div>
-            <nav style={styles.stepNav}>
+            <nav className="rq-step-nav" style={styles.stepNav}>
               {[
                 { id: "upload", num: 1, label: "Upload" },
                 { id: "parsing", num: 2, label: "Parsing" },
@@ -3402,6 +3414,7 @@ body {
                   <button
                     type="button"
                     key={s.id}
+                    className={state === "active" ? "rq-step rq-step-active" : "rq-step"}
                     style={styles.stepItem(state)}
                     onClick={goToStep}
                     onMouseEnter={(e) => { e.currentTarget.style.opacity = "1"; }}
@@ -3410,8 +3423,8 @@ body {
                     <div style={styles.stepCircle(state === "active")}>
                       {s.num}
                     </div>
-                    <span style={styles.stepLabel}>{s.label}</span>
-                    {idx < 4 && <span style={styles.stepArrow}>→</span>}
+                    <span className="rq-step-label" style={styles.stepLabel}>{s.label}</span>
+                    {idx < 4 && <span className="rq-step-arrow" style={styles.stepArrow}>→</span>}
                   </button>
                 );
               })}
@@ -3419,7 +3432,7 @@ body {
           </div>
         </header>
 
-        <main style={styles.mainCard}>
+        <main className="rq-main-card" style={styles.mainCard}>
           {step === "upload" && (
             <section style={styles.stepSection}>
               <div style={styles.uploadHero}>
@@ -4061,7 +4074,7 @@ body {
                 const acceptedEdits = suggestions.filter((s) => approvedIds.has(s.id));
                 const workingResume = applyApprovedChangesClientSide(resume, acceptedEdits);
                 return (
-                  <div style={{ ...styles.twoColumn, marginTop: 16 }}>
+                  <div className="rq-two-col" style={{ ...styles.twoColumn, marginTop: 16 }}>
                     <div style={styles.colLeft}>
                       <ResumeDocument
                         resume={workingResume}
@@ -4113,7 +4126,7 @@ body {
 
           {step === "preview" && editorWorkspace && (
             <div style={{ position: "fixed", top: workspaceTop, left: 0, right: 0, bottom: 0, zIndex: 15, display: "flex", flexDirection: "column", background: "var(--rq-bg)" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 20px", borderBottom: "1px solid var(--rq-border)" }}>
+              <div className="rq-workspace-bar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 20px", borderBottom: "1px solid var(--rq-border)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
                   <button type="button" style={styles.smallBackButton} onClick={() => setStep("suggestions")}>
                     ← Back to Suggestions
@@ -4124,7 +4137,13 @@ body {
                     </span>
                   )}
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  {/* Fallback for browsers that block the editor's sign-in inside a frame (e.g. Safari on iPhone). */}
+                  {rxEditor?.builderUrl && (
+                    <a href={rxEditor.builderUrl} target="_blank" rel="noopener noreferrer" style={{ ...styles.ghostButton, textDecoration: "none" }}>
+                      Open in new tab ↗
+                    </a>
+                  )}
                   <button type="button" style={styles.ghostButton} onClick={handleOpenInReactiveResume} disabled={openingInBuilder}>
                     {openingInBuilder ? "Loading…" : "↻ Reload with latest edits"}
                   </button>
