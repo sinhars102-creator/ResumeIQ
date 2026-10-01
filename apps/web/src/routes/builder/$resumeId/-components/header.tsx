@@ -42,6 +42,10 @@ import { useBuilderSidebar } from "../-store/sidebar";
 import { BuilderAiAssistant } from "./ai-assistant";
 import { BuilderVersionHistory } from "./version-history";
 
+// ResumeIQ embeds the builder in an iframe; there, links back to this app's dashboard
+// (home, and delete/duplicate which navigate away) would strand the user inside the frame.
+const isEmbedded = typeof window !== "undefined" && window.self !== window.top;
+
 export function BuilderHeader() {
 	// Subscribe to only the metadata fields this header renders. Selecting the whole resume re-renders
 	// the header on every keystroke (immer replaces the resume reference on each content edit).
@@ -67,27 +71,29 @@ export function BuilderHeader() {
 			</div>
 
 			<div className="flex min-w-0 items-center gap-x-1">
-				<Button
-					size="icon"
-					variant="ghost"
-					aria-label={t({
-						comment: "Accessible label for button navigating from builder to resumes dashboard",
-						message: "Go to resumes dashboard",
-					})}
-					nativeButton={false}
-					render={
-						<Link to="/dashboard/resumes" search={{ sort: "lastUpdatedAt", tags: [] }}>
-							<HouseSimpleIcon />
-						</Link>
-					}
-				/>
-				<span className="me-2.5 text-muted-foreground">/</span>
+				{!isEmbedded && (
+					<Button
+						size="icon"
+						variant="ghost"
+						aria-label={t({
+							comment: "Accessible label for button navigating from builder to resumes dashboard",
+							message: "Go to resumes dashboard",
+						})}
+						nativeButton={false}
+						render={
+							<Link to="/dashboard/resumes" search={{ sort: "lastUpdatedAt", tags: [] }}>
+								<HouseSimpleIcon />
+							</Link>
+						}
+					/>
+				)}
+				{!isEmbedded && <span className="me-2.5 text-muted-foreground">/</span>}
 				<h2 className="min-w-0 truncate font-medium">{name}</h2>
 				{isLocked && <LockSimpleIcon className="ms-2 text-muted-foreground" />}
 				<SaveStatusIndicator />
 				<BuilderAiAssistant resumeId={resumeId} />
 				<BuilderVersionHistory resumeId={resumeId} />
-				<BuilderHeaderDropdown />
+				{!isEmbedded && <BuilderHeaderDropdown />}
 			</div>
 
 			<div className="flex min-w-0 flex-1 items-center justify-end gap-x-1">
