@@ -9,13 +9,19 @@ import { readFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import * as cheerio from "cheerio";
+import { saveJobs, findJobs, repositorySize } from "./jobRepository.js";
+import { callLLM, llmProvider, llmModel } from "./llm.js";
+import { runAssistantTurn } from "./assistant.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootEnv = resolve(__dirname, "../.env");
 const serverEnv = resolve(__dirname, ".env");
 const cwdEnv = resolve(process.cwd(), ".env");
 
-const ENV_KEYS = ["RAPIDAPI_KEY", "APIFY_TOKEN", "APIFY_API_TOKEN"];
+const ENV_KEYS = [
+  "RAPIDAPI_KEY", "APIFY_TOKEN", "APIFY_API_TOKEN", "RXRESUME_API_KEY",
+  "GROQ_API_KEY", "GROQ_MODEL", "ANTHROPIC_API_KEY", "VITE_ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "LLM_PROVIDER",
+];
 
 function loadEnvFile(filePath) {
   if (!existsSync(filePath)) return false;
@@ -63,11 +69,20 @@ function getApifyToken() {
   return process.env.APIFY_TOKEN || "";
 }
 
+function getRxResumeKey() {
+  if (process.env.RXRESUME_API_KEY) return process.env.RXRESUME_API_KEY;
+  loadEnvFile(rootEnv);
+  loadEnvFile(serverEnv);
+  loadEnvFile(cwdEnv);
+  return process.env.RXRESUME_API_KEY || "";
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors({ origin: true }));
-app.use(express.json());
+// 2 MB: resumes can carry an embedded photo (data URL) when exported to Reactive Resume.
+app.use(express.json({ limit: "2mb" }));
 
 const RAPIDAPI_HOST = "linkedin-job-search-api.p.rapidapi.com";
 
@@ -160,7 +175,7 @@ function normalizeJob(raw, index) {
 }
 
 /** Fetch jobs via Apify LinkedIn Jobs Scraper. Returns { jobs } or { error: string } on failure. */
-async function fetchJobsApify(token, keywords, location, limit) {
+async function fetchJobsApify(token, keywords, location, limit, experienceLevels = []) {
   const requested = Math.min(Number(limit) || 25, 150);
   const maxPages = Math.min(Math.ceil(requested / 10), 15); // 10 jobs per page, cap 15 pages (150 jobs)
   const url = `https://api.apify.com/v2/acts/practicaltools~linkedin-jobs/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=180&format=json`;
@@ -175,6 +190,7 @@ async function fetchJobsApify(token, keywords, location, limit) {
       location: location || "India",
       maxPages,
       maxRequestsPerCrawl: Math.min(maxPages * 12, 200),
+      ...(experienceLevels.length ? { experienceLevel: experienceLevels } : {}),
     }),
   });
   const text = await response.text();
@@ -238,16 +254,17 @@ async function fetchJobsApify(token, keywords, location, limit) {
 }
 
 /** Fetch jobs with full JDs using Valig LinkedIn Jobs Scraper (returns description in one call). */
-async function fetchJobsValig(token, keywords, location, limit) {
+async function fetchJobsValig(token, keywords, location, limit, experienceLevels = []) {
   const reqLimit = Math.min(Number(limit) || 50, 100);
   const url = `https://api.apify.com/v2/acts/valig~linkedin-jobs-scraper/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=180&format=json`;
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
     body: JSON.stringify({
-      title: keywords || "Product Manager",
+      keywords: keywords || "Product Manager",
       location: location || "India",
       limit: reqLimit,
+      ...(experienceLevels.length ? { urlParam: [{ key: "f_E", value: experienceLevels.join(",") }] } : {}),
     }),
   });
   const text = await response.text();
@@ -297,9 +314,9 @@ async function fetchJobsRapidAPI(key, keywords, location, limit, offset) {
 }
 
 /** Fetch jobs via LinkedIn guest API (no key, unofficial). Returns { jobs } or null. */
-async function fetchJobsGuest(keywords, location, limit) {
+async function fetchJobsGuest(keywords, location, limit, experienceLevels = []) {
   const start = 0;
-  const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodeURIComponent(keywords || "Product Manager")}&location=${encodeURIComponent(location || "India")}&start=${start}`;
+  const url = `https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=${encodeURIComponent(keywords || "Product Manager")}&location=${encodeURIComponent(location || "India")}&start=${start}${experienceLevels.length ? `&f_E=${encodeURIComponent(experienceLevels.join(","))}` : ""}`;
   const response = await fetch(url, {
     headers: {
       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -335,6 +352,82 @@ async function fetchJobsGuest(keywords, location, limit) {
   return jobs.length ? { jobs } : null;
 }
 
+/**
+ * Prompt proxy for the browser – runs on whichever provider llm.js selects.
+ * Capped so a deployed server can't be used as an open, unlimited model proxy.
+ */
+const LLM_MAX_PROMPT_CHARS = 60000;
+const LLM_MAX_TOKENS = 4096;
+
+app.post("/api/llm", async (req, res) => {
+  const { system, user, maxTokens, json } = req.body || {};
+  if (typeof system !== "string" || typeof user !== "string" || !user.trim()) {
+    return res.status(400).json({ error: "system and user prompts are required" });
+  }
+  if (system.length + user.length > LLM_MAX_PROMPT_CHARS) {
+    return res.status(413).json({ error: "Prompt is too long." });
+  }
+  try {
+    const text = await callLLM({
+      system,
+      user,
+      maxTokens: Math.min(Number(maxTokens) || 1500, LLM_MAX_TOKENS),
+      json: !!json,
+    });
+    res.json({ text, provider: llmProvider(), model: llmModel() });
+  } catch (err) {
+    console.error(`[llm] ${llmProvider()} error:`, err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
+/**
+ * Conversational tailoring assistant – one turn per call. See server/assistant.js
+ * for the checks every proposed edit must pass.
+ */
+const ASSISTANT_MAX_MESSAGES = 40;
+
+app.post("/api/assistant", async (req, res) => {
+  const { resume, job, messages, decisions } = req.body || {};
+  if (!resume || typeof resume !== "object" || !job?.jd) {
+    return res.status(400).json({ error: "resume and job (with jd) are required" });
+  }
+  const chat = (Array.isArray(messages) ? messages : [])
+    .filter((m) => (m?.role === "user" || m?.role === "assistant") && typeof m.content === "string")
+    .map((m) => ({ role: m.role, content: m.content.slice(0, 2000) }));
+  if (chat.length > ASSISTANT_MAX_MESSAGES) {
+    return res.status(413).json({ error: "This conversation is too long. Continue to the preview, or start over for this job." });
+  }
+  try {
+    const turn = await runAssistantTurn({
+      resume,
+      job,
+      messages: chat,
+      decisions: Array.isArray(decisions) ? decisions.slice(-40) : [],
+    });
+    res.json(turn);
+  } catch (err) {
+    console.error("[assistant] error:", err.message);
+    res.status(502).json({ error: err.message });
+  }
+});
+
+/**
+ * Saved roles from earlier live searches that match this one – returns
+ * instantly so the job grid isn't empty while /api/linkedin-jobs scrapes.
+ */
+app.get("/api/jobs/saved", (req, res) => {
+  const keywords = (req.query.keywords || "").trim();
+  const location = (req.query.location || "").trim();
+  const levels = String(req.query.experienceLevel || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter((x) => /^[1-6]$/.test(x));
+  const limit = Math.min(Number(req.query.limit) || 30, 100);
+  const jobs = findJobs({ keywords, location, levels, limit });
+  res.json({ jobs, repositorySize: repositorySize() });
+});
+
 app.get("/api/linkedin-jobs", async (req, res) => {
   const apifyToken = getApifyToken();
   const rapidKey = getRapidApiKey();
@@ -342,22 +435,33 @@ app.get("/api/linkedin-jobs", async (req, res) => {
   const location = (req.query.location || "").trim() || "India";
   const limit = Math.min(Number(req.query.limit) || 50, 150);
   const offset = Number(req.query.offset) || 0;
+  // LinkedIn experience-level codes (f_E): 1 Internship, 2 Entry, 3 Associate, 4 Mid-Senior, 5 Director, 6 Executive.
+  const experienceLevels = String(req.query.experienceLevel || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter((x) => /^[1-6]$/.test(x));
 
-  console.log("[linkedin-jobs] request – Apify:", !!apifyToken, "RapidAPI:", !!rapidKey, "keywords:", keywords);
+  const respondWithJobs = (result) => {
+    const { added, total } = saveJobs(result.jobs, { location, levels: experienceLevels });
+    console.log(`[jobs-repo] saved search – ${added} new roles, ${total} in repository`);
+    return res.json(result);
+  };
+
+  console.log("[linkedin-jobs] request – Apify:", !!apifyToken, "RapidAPI:", !!rapidKey, "keywords:", keywords, "experienceLevel:", experienceLevels.join(",") || "any");
 
   try {
     let lastError = null;
     const fetchDescriptions = req.query.fetchDescriptions !== "0" && req.query.fetchDescriptions !== "false";
     if (apifyToken) {
       if (fetchDescriptions) {
-        const valigResult = await fetchJobsValig(apifyToken, keywords, location, limit);
+        const valigResult = await fetchJobsValig(apifyToken, keywords, location, limit, experienceLevels);
         if (valigResult && valigResult.jobs && valigResult.jobs.length > 0) {
-          return res.json(valigResult);
+          return respondWithJobs(valigResult);
         }
       }
-      const result = await fetchJobsApify(apifyToken, keywords, location, limit);
+      const result = await fetchJobsApify(apifyToken, keywords, location, limit, experienceLevels);
       if (result.jobs && result.jobs.length > 0) {
-        return res.json(result);
+        return respondWithJobs(result);
       }
       if (result.jobs && result.jobs.length === 0) {
         return res.json(result);
@@ -369,13 +473,13 @@ app.get("/api/linkedin-jobs", async (req, res) => {
     if (rapidKey) {
       const result = await fetchJobsRapidAPI(rapidKey, keywords, location, limit, offset);
       if (result && result.jobs && result.jobs.length > 0) {
-        return res.json(result);
+        return respondWithJobs(result);
       }
     }
 
-    const guestResult = await fetchJobsGuest(keywords, location, limit);
+    const guestResult = await fetchJobsGuest(keywords, location, limit, experienceLevels);
     if (guestResult && guestResult.jobs && guestResult.jobs.length > 0) {
-      return res.json(guestResult);
+      return respondWithJobs(guestResult);
     }
 
     const details = lastError || "No jobs returned. Try Apify (apify.com/practicaltools/linkedin-jobs) for more results.";
@@ -392,19 +496,450 @@ app.get("/api/linkedin-jobs", async (req, res) => {
   }
 });
 
+/**
+ * Reactive Resume (rxresu.me) integration – generates AI-tailored bullet
+ * suggestions via Reactive Resume's hosted AI instead of calling Claude
+ * directly. The account API key stays server-side (same reasoning as
+ * APIFY_TOKEN above): it can read/write the whole Reactive Resume account,
+ * not just make one inference call.
+ */
+const RX_BASE = "https://rxresu.me/api/openapi";
+
+async function rxFetch(path, options = {}) {
+  const key = getRxResumeKey();
+  const response = await fetch(`${RX_BASE}${path}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      "x-api-key": key,
+      ...(options.headers || {}),
+    },
+  });
+  const text = await response.text();
+  let data;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+  return { ok: response.ok, status: response.status, data };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function htmlEscape(str) {
+  return String(str || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function bulletsToHtml(bullets) {
+  const items = (bullets || [])
+    .filter((b) => typeof b === "string" && b.trim())
+    .map((b) => `<li>${htmlEscape(b.trim())}</li>`)
+    .join("");
+  return items ? `<ul>${items}</ul>` : "";
+}
+
+/** Extract <li> text from a Reactive Resume HTML description; falls back to plain text. */
+function htmlToListItems(html) {
+  if (typeof html !== "string" || !html.trim()) return [];
+  try {
+    const $ = cheerio.load(html);
+    const items = [];
+    $("li").each((_, el) => {
+      const t = $(el).text().replace(/\s+/g, " ").trim();
+      if (t) items.push(t);
+    });
+    if (items.length) return items;
+    const t = htmlToText(html);
+    return t ? [t] : [];
+  } catch {
+    return [];
+  }
+}
+
+const RX_EMPTY_WEBSITE = { url: "", label: "", inlineLink: false };
+
+function rxEmptySection(title) {
+  return { title, icon: "", columns: 1, hidden: false, keepTogether: false, startOnNewPage: false, items: [] };
+}
+
+const RX_TEMPLATES = [
+  "azurill", "bronzor", "chikorita", "ditgar", "ditto",
+  "gengar", "glalie", "kakuna", "lapras", "leafish",
+  "meowth", "onyx", "pikachu", "rhyhorn", "scizor",
+];
+
+function rxMetadataForTemplate(template) {
+  return {
+    template: RX_TEMPLATES.includes(template) ? template : "azurill",
+    layout: {
+      sidebarWidth: 30,
+      pages: [
+        {
+          fullWidth: false,
+          main: ["summary", "experience", "education"],
+          sidebar: ["skills", "languages", "interests", "references"],
+        },
+      ],
+    },
+    page: { gapX: 12, gapY: 8, marginX: 16, marginY: 16, format: "a4", locale: "en-US", hideLinkUnderline: false, hideIcons: false, hideSectionIcons: false },
+    design: { level: { icon: "star", type: "icon" }, colors: { primary: "rgba(0, 132, 209, 1)", text: "rgba(0, 0, 0, 1)", background: "rgba(255, 255, 255, 1)" } },
+    typography: {
+      body: { fontFamily: "IBM Plex Serif", fontWeights: ["400", "600"], fontSize: 10, lineHeight: 1.5 },
+      heading: { fontFamily: "Fira Sans Condensed", fontWeights: ["500"], fontSize: 12, lineHeight: 1.5 },
+    },
+    notes: "",
+  };
+}
+
+/** Map ResumeIQ's resumeData shape into Reactive Resume's ResumeData schema. */
+function mapToRxResumeData(resumeData, template = "azurill") {
+  const contact = resumeData.contact || "";
+  const emailMatch = contact.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
+  return {
+    picture: { hidden: true, url: "", size: 100, rotation: 0, aspectRatio: 1, borderRadius: 0, borderColor: "rgba(0, 0, 0, 0.5)", borderWidth: 0, shadowColor: "rgba(0, 0, 0, 0.5)", shadowWidth: 0 },
+    basics: {
+      name: resumeData.name || "",
+      headline: resumeData.title || "",
+      email: emailMatch ? emailMatch[0] : "",
+      phone: "",
+      location: "",
+      website: RX_EMPTY_WEBSITE,
+      customFields: contact ? [{ id: crypto.randomUUID(), icon: "", text: contact }] : [],
+    },
+    summary: {
+      title: "Summary",
+      icon: "",
+      columns: 1,
+      hidden: !resumeData.summary,
+      keepTogether: false,
+      startOnNewPage: false,
+      content: resumeData.summary ? `<p>${htmlEscape(resumeData.summary)}</p>` : "",
+    },
+    sections: {
+      profiles: rxEmptySection("Profiles"),
+      experience: {
+        ...rxEmptySection("Experience"),
+        items: (resumeData.experience || []).map((e) => ({
+          id: crypto.randomUUID(),
+          hidden: false,
+          company: e.company || "",
+          position: e.role || "",
+          location: e.location || "",
+          period: e.period || "",
+          website: RX_EMPTY_WEBSITE,
+          description: bulletsToHtml(e.bullets),
+          roles: [],
+        })),
+      },
+      education: {
+        ...rxEmptySection("Education"),
+        items: (resumeData.education || []).map((ed) => ({
+          id: crypto.randomUUID(),
+          hidden: false,
+          school: ed.school || "",
+          degree: ed.degree || "",
+          area: "",
+          grade: "",
+          location: "",
+          period: ed.year || "",
+          website: RX_EMPTY_WEBSITE,
+          description: "",
+        })),
+      },
+      projects: rxEmptySection("Projects"),
+      skills: {
+        ...rxEmptySection("Skills"),
+        items: (resumeData.skills || []).map((s) => ({ id: crypto.randomUUID(), hidden: false, icon: "", iconColor: "", name: s, proficiency: "", level: 0 })),
+      },
+      languages: {
+        ...rxEmptySection("Languages"),
+        items: (resumeData.languages || []).map((l) => ({ id: crypto.randomUUID(), hidden: false, language: l, fluency: "", level: 0 })),
+      },
+      interests: {
+        ...rxEmptySection("Interests"),
+        items: (resumeData.interests || []).map((i) => ({ id: crypto.randomUUID(), hidden: false, icon: "", iconColor: "", name: i, keywords: [] })),
+      },
+      awards: rxEmptySection("Awards"),
+      certifications: rxEmptySection("Certifications"),
+      publications: rxEmptySection("Publications"),
+      volunteer: rxEmptySection("Volunteer"),
+      references: {
+        ...rxEmptySection("References"),
+        items: (resumeData.references || []).map((r) => ({ id: crypto.randomUUID(), hidden: false, name: r.name || "", position: r.title || "", website: RX_EMPTY_WEBSITE, phone: "", description: "" })),
+      },
+    },
+    customSections: [],
+    metadata: rxMetadataForTemplate(template),
+  };
+}
+
+/** Import (or re-import) a ResumeIQ resumeData object into the user's Reactive Resume account. Returns the resume id. */
+async function importIntoRxResume(resumeData, template = "azurill") {
+  const mapped = mapToRxResumeData(resumeData, template);
+  const importResult = await rxFetch("/resumes/import", { method: "POST", body: JSON.stringify({ data: mapped }) });
+  if (!importResult.ok || typeof importResult.data !== "string") {
+    throw new Error(importResult.data?.message || "Failed to import resume into Reactive Resume.");
+  }
+  return { resumeId: importResult.data, mapped };
+}
+
+/** Fetch a binary PDF from Reactive Resume (rxFetch assumes JSON/text, which corrupts binary content). */
+async function rxFetchBinary(path) {
+  const key = getRxResumeKey();
+  const response = await fetch(`${RX_BASE}${path}`, { headers: { "x-api-key": key } });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "");
+    throw new Error(`Reactive Resume PDF request failed (${response.status}): ${text.slice(0, 200)}`);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
+async function listRxResumeIds() {
+  const { ok, data } = await rxFetch("/resumes", { method: "GET" });
+  if (ok && Array.isArray(data)) return new Set(data.map((r) => r.id));
+  return new Set();
+}
+
+/**
+ * Reactive Resume's edge gateway times out (HTTP 520) on AI calls that take
+ * longer than ~30s, even though the origin keeps working and the result
+ * still lands. tailor-resume has no persisted status endpoint to poll, so on
+ * a 520 we fall back to diffing the account's resume list for a new ID.
+ */
+async function triggerTailorResume(applicationId) {
+  const before = await listRxResumeIds();
+  const { ok, data } = await rxFetch(`/applications/${applicationId}/ai/tailor-resume`, { method: "POST" });
+  if (ok && data && data.resumeId) return data.resumeId;
+
+  const start = Date.now();
+  const maxWaitMs = 120000;
+  while (Date.now() - start < maxWaitMs) {
+    await sleep(4000);
+    const after = await listRxResumeIds();
+    for (const id of after) {
+      if (!before.has(id)) return id;
+    }
+  }
+  throw new Error("Reactive Resume tailoring timed out. Try again.");
+}
+
+/** Best-effort positional diff of two bullet lists into Rewrite/Addition/Removal suggestions. */
+function diffBullets(originalBullets, tailoredBullets, experienceIndex, label) {
+  const origRemaining = [];
+  const origSet = [...originalBullets];
+  const tailRemaining = [];
+  for (const t of tailoredBullets) {
+    const idx = origSet.indexOf(t);
+    if (idx !== -1) origSet.splice(idx, 1);
+    else tailRemaining.push(t);
+  }
+  origRemaining.push(...origSet);
+
+  const suggestions = [];
+  const pairs = Math.min(origRemaining.length, tailRemaining.length);
+  for (let i = 0; i < pairs; i++) {
+    suggestions.push({
+      section: "Experience",
+      type: "Rewrite",
+      title: `${label}: sharper phrasing`,
+      original: origRemaining[i],
+      proposed: tailRemaining[i],
+      why: "Reactive Resume's AI tailored this bullet to better match the target job.",
+      experienceIndex,
+    });
+  }
+  for (let i = pairs; i < tailRemaining.length; i++) {
+    suggestions.push({
+      section: "Experience",
+      type: "Addition",
+      title: `${label}: new bullet`,
+      original: "",
+      proposed: tailRemaining[i],
+      why: "Reactive Resume's AI added this to strengthen alignment with the job.",
+      experienceIndex,
+    });
+  }
+  for (let i = pairs; i < origRemaining.length; i++) {
+    suggestions.push({
+      section: "Experience",
+      type: "Removal",
+      title: `${label}: low-value bullet`,
+      original: origRemaining[i],
+      proposed: "",
+      why: "Reactive Resume's AI flagged this as redundant or low-impact for the target job.",
+      experienceIndex,
+    });
+  }
+  return suggestions;
+}
+
+function buildSuggestionsFromDiff(originalRx, tailoredRx) {
+  const suggestions = [];
+  let counter = 1;
+  const nextId = () => `rx-${counter++}`;
+
+  const origSummary = htmlToText(originalRx.summary?.content);
+  const tailSummary = htmlToText(tailoredRx.summary?.content);
+  if (tailSummary && tailSummary !== origSummary) {
+    suggestions.push({
+      id: nextId(),
+      section: "Summary",
+      type: "Rewrite",
+      title: "Sharper, job-aligned summary",
+      original: origSummary,
+      proposed: tailSummary,
+      why: "Reactive Resume's AI rewrote your summary to better match this job's language and priorities.",
+      experienceIndex: 0,
+    });
+  }
+
+  const origExp = originalRx.sections?.experience?.items || [];
+  const tailExp = tailoredRx.sections?.experience?.items || [];
+  origExp.forEach((origItem, i) => {
+    const tailItem = tailExp[i];
+    if (!tailItem) return;
+    const origBullets = htmlToListItems(origItem.description);
+    const tailBullets = htmlToListItems(tailItem.description);
+    const label = origItem.company || `Role ${i + 1}`;
+    diffBullets(origBullets, tailBullets, i, label).forEach((s) => suggestions.push({ id: nextId(), ...s }));
+  });
+
+  const origSkills = (originalRx.sections?.skills?.items || []).map((s) => s.name);
+  const tailSkills = (tailoredRx.sections?.skills?.items || []).map((s) => s.name);
+  const addedSkills = tailSkills.filter((s) => !origSkills.includes(s));
+  if (addedSkills.length) {
+    suggestions.push({
+      id: nextId(),
+      section: "Skills",
+      type: "Addition",
+      title: "Add job-relevant skills",
+      original: "",
+      proposed: addedSkills.join(", "),
+      why: "These skills appear in the tailored version and better match the job's keyword requirements.",
+      experienceIndex: 0,
+    });
+  }
+
+  return suggestions;
+}
+
+app.post("/api/rxresume/tailor-suggestions", async (req, res) => {
+  const key = getRxResumeKey();
+  if (!key) {
+    return res.status(400).json({ error: "RXRESUME_API_KEY not configured on the server (.env)." });
+  }
+  const { resumeData, job, userContext } = req.body || {};
+  if (!resumeData || !job || !job.jd) {
+    return res.status(400).json({ error: "resumeData and job (with jd) are required." });
+  }
+  try {
+    const { resumeId, mapped } = await importIntoRxResume(resumeData);
+
+    const jobDescription = userContext && String(userContext).trim()
+      ? `${job.jd}\n\nAdditional candidate emphasis to weave in: ${String(userContext).trim()}`
+      : job.jd;
+    const appResult = await rxFetch("/applications", {
+      method: "POST",
+      body: JSON.stringify({
+        company: job.company || "Unknown",
+        role: job.role || "Role",
+        jobDescription: jobDescription.slice(0, 20000),
+        resumeId,
+      }),
+    });
+    if (!appResult.ok || typeof appResult.data !== "string") {
+      throw new Error(appResult.data?.message || "Failed to create Reactive Resume application.");
+    }
+    const applicationId = appResult.data;
+
+    const tailoredResumeId = await triggerTailorResume(applicationId);
+    const tailoredResult = await rxFetch(`/resumes/${tailoredResumeId}`, { method: "GET" });
+    if (!tailoredResult.ok) {
+      throw new Error("Failed to fetch tailored resume from Reactive Resume.");
+    }
+    const tailoredRx = tailoredResult.data.data;
+
+    const suggestions = buildSuggestionsFromDiff(mapped, tailoredRx);
+    return res.json({ suggestions });
+  } catch (err) {
+    console.error("Reactive Resume tailoring error:", err);
+    return res.status(502).json({ error: "Reactive Resume tailoring failed", details: err.message });
+  }
+});
+
+/**
+ * Push the current ResumeIQ resume into the user's Reactive Resume account and
+ * hand back a link to their real builder — template gallery, drag-drop, live
+ * WYSIWYG editing, PDF export. We don't reimplement any of that; we just import
+ * the data and point the user at Reactive Resume's own editor for it.
+ */
+app.post("/api/rxresume/open-in-builder", async (req, res) => {
+  const key = getRxResumeKey();
+  if (!key) {
+    return res.status(400).json({ error: "RXRESUME_API_KEY not configured on the server (.env)." });
+  }
+  const { resumeData } = req.body || {};
+  if (!resumeData) {
+    return res.status(400).json({ error: "resumeData is required." });
+  }
+  try {
+    const { resumeId } = await importIntoRxResume(resumeData);
+    return res.json({ resumeId, builderUrl: `https://rxresu.me/builder/${resumeId}` });
+  } catch (err) {
+    console.error("Reactive Resume open-in-builder error:", err);
+    return res.status(502).json({ error: "Failed to open resume in Reactive Resume", details: err.message });
+  }
+});
+
+app.get("/api/rxresume/templates", (_req, res) => res.json({ templates: RX_TEMPLATES }));
+
+/**
+ * Renders the resume with Reactive Resume's actual template engine and
+ * streams back the PDF, so the design can be previewed inside ResumeIQ
+ * without sending the user to rxresu.me.
+ */
+app.post("/api/rxresume/render-pdf", async (req, res) => {
+  const key = getRxResumeKey();
+  if (!key) {
+    return res.status(400).json({ error: "RXRESUME_API_KEY not configured on the server (.env)." });
+  }
+  const { resumeData, template } = req.body || {};
+  if (!resumeData) {
+    return res.status(400).json({ error: "resumeData is required." });
+  }
+  try {
+    const { resumeId } = await importIntoRxResume(resumeData, template);
+    const pdfBuffer = await rxFetchBinary(`/resumes/${resumeId}/pdf`);
+    res.set("Content-Type", "application/pdf");
+    return res.send(pdfBuffer);
+  } catch (err) {
+    console.error("Reactive Resume render-pdf error:", err);
+    return res.status(502).json({ error: "Failed to render resume PDF", details: err.message });
+  }
+});
+
 // Health check for dev/proxy
 app.get("/api/health", (_, res) =>
   res.json({
     ok: true,
     linkedinConfigured: !!getApifyToken() || !!getRapidApiKey(),
+    llm: llmProvider() ? `${llmProvider()} (${llmModel()})` : null,
     apify: !!getApifyToken(),
     rapidapi: !!getRapidApiKey(),
+    rxresume: !!getRxResumeKey(),
   })
 );
 
 app.listen(PORT, () => {
   const apify = getApifyToken();
   const rapid = getRapidApiKey();
+  const rxresume = getRxResumeKey();
   console.log(`ResumeIQ API server running at http://localhost:${PORT}`);
   tried.forEach(([path]) => {
     const exists = existsSync(path);
@@ -413,4 +948,7 @@ app.listen(PORT, () => {
   if (apify) console.log("  APIFY_TOKEN: loaded (Apify LinkedIn Jobs – preferred)");
   if (rapid) console.log("  RAPIDAPI_KEY: loaded (fallback)");
   if (!apify && !rapid) console.log("  No API keys – will use free LinkedIn guest API when job search runs");
+  console.log(`  LLM: ${llmProvider() ? `${llmProvider()} – ${llmModel()}` : "not configured – set GROQ_API_KEY or ANTHROPIC_API_KEY"}`);
+  if (rxresume) console.log("  RXRESUME_API_KEY: loaded (Reactive Resume AI tailoring)");
+  else console.log("  RXRESUME_API_KEY: not set – suggestion generation will fail until it's configured");
 });

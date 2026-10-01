@@ -28,3 +28,6 @@ lerna-debug.log*
 *.njsproj
 *.sln
 *.sw?
+
+# Saved LinkedIn roles repository (server/jobRepository.js)
+server/data/

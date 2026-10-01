@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import * as pdfjsLib from "pdfjs-dist";
 import { jsPDF } from "jspdf";
 
@@ -6,8 +6,6 @@ import { jsPDF } from "jspdf";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
-const OPENAI_API_URL = "https://api.openai.com/v1/chat/completions";
-const OPENAI_API_KEY = import.meta.env.VITE_OPENAI_API_KEY || "";
 
 const SAMPLE_RESUME = {
   name: "Alex Chen",
@@ -56,42 +54,6 @@ const SAMPLE_RESUME = {
     "Agile/Scrum",
   ],
 };
-
-const JOB_DATABASE = [
-  {
-    id: "stripe-pm",
-    company: "Stripe",
-    role: "Senior Product Manager",
-    location: "San Francisco, CA · Remote OK",
-    salary: "$180k–$230k",
-    badge: "Hot",
-    source: "seed",
-    jd:
-      "Stripe is building the economic infrastructure that powers the internet. As a Senior Product Manager on our Payments Optimization team, you will own the roadmap for experiences that help high-growth businesses increase conversion, expand globally, and manage risk with confidence. You will partner closely with engineering, data science, and design to define strategy, ship experiments, and measure impact across a complex, distributed platform.\n\nIn this role, you’ll dive deep into payment performance data, identify friction points across checkout, authorization, and fraud, and turn insights into a prioritized roadmap. You’ll work directly with strategic customers to understand their needs and translate them into clear product requirements and narratives. You’ll write crisp product specs, align stakeholders across go-to-market and operations, and ensure every launch is supported with thoughtful rollout plans and documentation.\n\nThe ideal candidate has experience building B2B SaaS or platform products, is comfortable reasoning from both qualitative and quantitative signals, and can communicate complex technical concepts to both executives and engineers. You are opinionated yet low-ego, capable of driving alignment in ambiguous spaces, and motivated by seeing measurable improvements in key business metrics. Experience in payments, fintech, or marketplaces is a plus but not required. You should be excited to join a highly collaborative, fast-moving team that values craft, curiosity, and continuous learning.",
-  },
-  {
-    id: "notion-staff",
-    company: "Notion",
-    role: "Staff Software Engineer – Platform",
-    location: "New York, NY · Hybrid",
-    salary: "$200k–$260k",
-    badge: "Urgent",
-    source: "seed",
-    jd:
-      "Notion’s mission is to make toolmaking ubiquitous. As a Staff Software Engineer on our Platform team, you will shape the foundational systems that power how millions of people think, collaborate, and build software in Notion every day. You’ll work across our product surface area to create primitives, APIs, and abstractions that enable other teams to ship delightful experiences quickly and safely.\n\nIn this role, you’ll lead the design and implementation of highly reliable, observable services that support complex workflows, real-time collaboration, and integrations with the broader productivity ecosystem. You’ll partner with product, design, security, and infra to make thoughtful trade-offs between flexibility, performance, and simplicity. You’ll set technical direction for key initiatives, mentor engineers across multiple teams, and raise the bar for code quality and technical rigor.\n\nYou are comfortable moving between high-level architectural discussions and deep dives into performance bottlenecks. You have experience evolving large-scale codebases, paying down technical debt, and building systems that are easy to extend. You care deeply about developer experience and believe great APIs feel almost invisible. Experience with TypeScript, React, and distributed systems is helpful, but we care more about your ability to learn quickly and collaborate effectively. This role is ideal for someone who wants to have outsized impact on both the product surface area and the infrastructure that underlies it.",
-  },
-  {
-    id: "figma-designer",
-    company: "Figma",
-    role: "Product Designer – Growth",
-    location: "Remote · US",
-    salary: "$150k–$195k",
-    badge: "New",
-    source: "seed",
-    jd:
-      "Figma is where teams design, prototype, and build products together. As a Product Designer on our Growth team, you will craft experiences that help millions of designers, developers, and product thinkers discover value in Figma faster and return to it more often. You’ll work at the intersection of product, marketing, and data to design thoughtful flows that feel personal, inviting, and deeply useful.\n\nYou’ll own projects from opportunity discovery through polished execution: exploring new ideas alongside research and data science, developing flows and interaction patterns, and partnering with engineering to ship experiments that measurably improve activation, collaboration, and retention. You’ll design across the product surface area, from onboarding and invitations to sharing, notifications, and in-product education, always with an eye toward clarity, craft, and coherence.\n\nThe ideal candidate has experience designing for complex products, is comfortable working in fast-paced, experiment-driven environments, and brings strong systems thinking to every problem. You are adept at telling a story with your work, communicating clearly with stakeholders, and using both qualitative and quantitative signals to iterate. You care deeply about typography, hierarchy, and accessibility, and you’re excited to collaborate with a world-class team of designers and engineers. Familiarity with growth, self-serve SaaS, or collaboration tools is helpful but not required.",
-  },
-];
 
 const styles = {
   appRoot: {
@@ -550,7 +512,7 @@ const styles = {
     } else if (badge === "Urgent") {
       bg = "rgba(245,200,66,0.12)";
       color = "#f5c842";
-    } else if (badge === "New" || badge === "Remote") {
+    } else if (badge === "New" || badge === "Remote" || badge === "Just in") {
       bg = "rgba(0,229,160,0.12)";
       color = "#00e5a0";
     }
@@ -563,6 +525,19 @@ const styles = {
       background: bg,
       color,
       textTransform: "uppercase",
+    };
+  },
+  matchPill: (score) => {
+    const tier = getScoreTier(score);
+    return {
+      fontFamily: "'DM Mono', monospace",
+      fontSize: 11,
+      fontWeight: 700,
+      padding: "4px 9px",
+      borderRadius: 999,
+      border: `1px solid ${tier.color}`,
+      background: `${tier.color}22`,
+      color: tier.color,
     };
   },
   sourcePill: {
@@ -601,6 +576,89 @@ const styles = {
     transition: "opacity 0.16s ease, transform 0.16s ease",
     cursor: visible ? "pointer" : "default",
   }),
+  jobModalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(5,5,12,0.82)",
+    backdropFilter: "blur(4px)",
+    display: "flex",
+    alignItems: "flex-start",
+    justifyContent: "center",
+    padding: "6vh 20px",
+    overflowY: "auto",
+    zIndex: 1000,
+  },
+  jobModalCard: {
+    position: "relative",
+    width: "100%",
+    maxWidth: 720,
+    background:
+      "radial-gradient(circle at top left, rgba(35,35,70,0.9), rgba(7,7,16,0.99))",
+    border: "1px solid #2a2a44",
+    borderRadius: 20,
+    padding: "32px 32px 28px",
+    boxShadow: "0 30px 80px rgba(0,0,0,0.7)",
+  },
+  jobModalClose: {
+    position: "absolute",
+    top: 18,
+    right: 18,
+    width: 30,
+    height: 30,
+    borderRadius: "50%",
+    border: "1px solid #333",
+    background: "rgba(255,255,255,0.04)",
+    color: "#aaa",
+    cursor: "pointer",
+    fontSize: 13,
+    lineHeight: 1,
+  },
+  jobModalDivider: {
+    height: 1,
+    background: "#1e1e30",
+    margin: "16px 0",
+  },
+  jobModalJd: {
+    fontSize: 13.5,
+    lineHeight: 1.7,
+    color: "#ccc",
+    whiteSpace: "pre-wrap",
+  },
+  jobSummaryGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+    gap: 18,
+  },
+  jobSummaryItem: {},
+  jobSummaryLabel: {
+    fontFamily: "'DM Mono', monospace",
+    fontSize: 10,
+    textTransform: "uppercase",
+    letterSpacing: 1.2,
+    color: "#888",
+    marginBottom: 4,
+  },
+  jobSummaryValue: {
+    fontSize: 14,
+    color: "#f0f0e8",
+  },
+  skillChip: {
+    fontFamily: "'DM Mono', monospace",
+    fontSize: 11,
+    padding: "5px 10px",
+    borderRadius: 999,
+    border: "1px solid #333",
+    background: "rgba(255,255,255,0.04)",
+    color: "#ddd",
+  },
+  jobModalActions: {
+    marginTop: 24,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    flexWrap: "wrap",
+  },
   backRow: {
     display: "flex",
     alignItems: "center",
@@ -1044,11 +1102,10 @@ function getStepOrder(step) {
     case "select":
       return 3;
     case "analyze":
-      return 4;
     case "suggestions":
-      return 5;
+      return 4;
     case "preview":
-      return 6;
+      return 5;
     default:
       return 1;
   }
@@ -1064,33 +1121,94 @@ function getScoreTier(score) {
   return { color: "#ff5f5f", label: "Needs Alignment" };
 }
 
-async function callOpenAI(system, user, maxTokens) {
-  if (!OPENAI_API_KEY) {
-    throw new Error("Missing OpenAI API key");
-  }
-  const response = await fetch(OPENAI_API_URL, {
+const MATCH_STOPWORDS = new Set([
+  "the", "and", "for", "with", "you", "your", "will", "are", "that", "this",
+  "from", "have", "has", "our", "to", "of", "in", "on", "at", "as", "is",
+  "be", "by", "or", "we", "it", "its", "their", "they", "them", "who",
+  "what", "when", "where", "why", "how", "not", "but", "if", "can",
+  "across", "into", "more", "most", "also", "than", "then", "over",
+  "under", "about", "each", "every", "both", "other", "such", "only",
+  "own", "same", "too", "very", "just", "should", "now", "new", "team",
+  "teams", "role", "work", "working", "years", "year",
+]);
+
+function tokenizeForMatch(text) {
+  return (text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9+#./\s-]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 3 && !MATCH_STOPWORDS.has(w));
+}
+
+function buildResumeCorpus(resume) {
+  const parts = [
+    resume.title || "",
+    resume.summary || "",
+    (resume.skills || []).join(" "),
+    ...(resume.experience || []).flatMap((e) => [e.role || "", ...(e.bullets || [])]),
+  ];
+  return parts.join(" \n ");
+}
+
+/**
+ * Client-side keyword/skills overlap score — no API calls, so it can run
+ * instantly across an entire job grid (up to 150 results) without hitting
+ * Claude rate limits or cost. The detailed Claude-scored breakdown still
+ * runs on-demand in scoreResume() once a specific job is opened.
+ */
+function computeLocalMatchScore(resume, job) {
+  if (!resume || !job) return null;
+  const jdText = `${job.role || ""} ${job.jd || ""}`;
+  const jdTokens = tokenizeForMatch(jdText);
+  const resumeTokens = tokenizeForMatch(buildResumeCorpus(resume));
+  if (!jdTokens.length || !resumeTokens.length) return null;
+
+  const resumeSet = new Set(resumeTokens);
+  const jdFreq = new Map();
+  jdTokens.forEach((t) => jdFreq.set(t, (jdFreq.get(t) || 0) + 1));
+
+  let matchedWeight = 0;
+  let totalWeight = 0;
+  jdFreq.forEach((count, term) => {
+    const weight = Math.min(count, 4);
+    totalWeight += weight;
+    if (resumeSet.has(term)) matchedWeight += weight;
+  });
+  const keywordScore = totalWeight ? matchedWeight / totalWeight : 0;
+
+  const skills = resume.skills || [];
+  const jdLower = jdText.toLowerCase();
+  const matchedSkills = skills.filter((s) => s && jdLower.includes(s.toLowerCase()));
+  const skillScore = skills.length ? matchedSkills.length / skills.length : keywordScore;
+
+  const titleTokens = new Set(tokenizeForMatch(resume.title || ""));
+  const roleTokens = tokenizeForMatch(job.role || "");
+  const titleOverlap = roleTokens.length
+    ? roleTokens.filter((t) => titleTokens.has(t)).length / roleTokens.length
+    : 0;
+
+  const combined = skillScore * 0.45 + keywordScore * 0.35 + titleOverlap * 0.2;
+  const score = Math.round(30 + combined * 66);
+
+  return { score: Math.max(5, Math.min(98, score)), matchedSkills };
+}
+
+/**
+ * Run a prompt through the API server (server/llm.js picks Groq or Claude),
+ * so no model API key is shipped to the browser. Every caller expects JSON.
+ */
+async function callLLM(system, user, maxTokens) {
+  const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/$/, "");
+  const response = await fetch(`${base}/api/llm`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o",
-      max_tokens: maxTokens,
-      temperature: 0.2,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: user },
-      ],
-    }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ system, user, maxTokens, json: true }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const errMsg = data?.error?.message || data?.message || `OpenAI API error ${response.status}`;
-    throw new Error(errMsg);
+    throw new Error(data?.error || `AI request failed (${response.status})`);
   }
-  const text = data?.choices?.[0]?.message?.content;
-  return text || "";
+  return data.text || "";
 }
 
 async function extractLinkedInJob(pastedText) {
@@ -1117,7 +1235,7 @@ async function extractLinkedInJob(pastedText) {
 
 LinkedIn post:
 ${pastedText}`;
-    const text = await callOpenAI(system, user, 1000);
+    const text = await callLLM(system, user, 1500);
     const cleaned = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(cleaned);
     return {
@@ -1134,6 +1252,110 @@ ${pastedText}`;
   }
 }
 
+const COMMON_SKILL_TERMS = [
+  "SQL", "Python", "JavaScript", "TypeScript", "React", "Node.js", "Java", "AWS", "GCP", "Azure",
+  "Kubernetes", "Docker", "Figma", "Jira", "A/B testing", "Agile", "Scrum", "SEO", "SEM",
+  "Product roadmapping", "User research", "Data analysis", "Machine learning", "REST APIs",
+  "GraphQL", "Salesforce", "HubSpot", "Excel", "Tableau", "Looker", "Power BI",
+  "Stakeholder management", "Go-to-market", "Growth strategy", "Financial modeling",
+];
+
+function heuristicExtractSkills(jd) {
+  const text = (jd || "").toLowerCase();
+  return COMMON_SKILL_TERMS.filter((s) => text.includes(s.toLowerCase())).slice(0, 8);
+}
+
+function heuristicExtractYears(jd) {
+  const match = (jd || "").match(/(\d{1,2}\+?\s*(?:-|to)?\s*\d{0,2}\+?)\s*\+?\s*years?/i);
+  return match ? `${match[1].trim()} years` : "Not specified";
+}
+
+/** Total years of experience: the parser's figure, else the span from the earliest role's start year to today. */
+function getCandidateYears(resume) {
+  if (!resume) return null;
+  const stated = Number(resume.yearsOfExperience);
+  if (Number.isFinite(stated) && stated > 0) return Math.round(stated);
+  const startYears = (resume.experience || [])
+    .map((e) => (String(e.period || "").match(/(19|20)\d{2}/) || [])[0])
+    .filter(Boolean)
+    .map(Number);
+  if (!startYears.length) return null;
+  return Math.max(0, new Date().getFullYear() - Math.min(...startYears));
+}
+
+/** LinkedIn experience-level codes (f_E) to search for a given number of years. */
+function yearsToLinkedInLevels(years) {
+  if (years == null) return [];
+  if (years < 1) return ["1", "2"];
+  if (years < 3) return ["2", "3"];
+  if (years < 6) return ["3", "4"];
+  if (years < 12) return ["4", "5"];
+  return ["5", "6"];
+}
+
+/** Years range a JD asks for, e.g. "4-6 years" → { min: 4, max: 6 }, "5+ years" → { min: 5, max: null }. */
+function parseJdYearsRange(jd) {
+  const match = (jd || "").match(/(\d{1,2})\s*(?:(?:-|–|—|to)\s*(\d{1,2}))?\s*(\+)?\s*(?:\+\s*)?years?/i);
+  if (!match) return null;
+  const min = Number(match[1]);
+  const max = match[2] ? Number(match[2]) : null;
+  if (min > 30 || (max != null && max < min)) return null;
+  return { min, max };
+}
+
+/** True when the JD's stated range sits clearly below the candidate's experience. */
+function isBelowCandidateLevel(job, candidateYears) {
+  if (!candidateYears) return false;
+  const range = parseJdYearsRange(job.jd);
+  if (!range) return false;
+  if (range.max != null) return range.max <= candidateYears - 3;
+  return range.min <= candidateYears - 6;
+}
+
+/**
+ * On-demand Claude summary for the job detail modal — called once per job
+ * when a card is opened (not for the whole grid), so a single API call here
+ * is cheap, unlike the bulk scoring computeLocalMatchScore() avoids.
+ */
+async function summarizeJobPosting(job) {
+  const fallback = {
+    skills: heuristicExtractSkills(job.jd),
+    yearsOfExperience: heuristicExtractYears(job.jd),
+    domain: "Not specified",
+  };
+  try {
+    const system =
+      "You summarize job postings into structured fields for a quick-glance card. Return ONLY valid JSON, no markdown, no explanation.";
+    const user = `Read this job description and extract a concise summary.
+
+Return ONLY a JSON object with this shape:
+{
+  "skills": ["up to 8 key skills/technologies/tools mentioned, short labels"],
+  "yearsOfExperience": "required experience, e.g. '5+ years' or 'Not specified'",
+  "domain": "one short industry/domain label, e.g. 'Fintech', 'E-commerce', 'Healthcare', 'B2B SaaS', 'Consumer Social' — infer from context, 'Not specified' if unclear"
+}
+
+Job title: ${job.role || ""}
+Company: ${job.company || ""}
+Job description:
+${job.jd || ""}`;
+    const text = await callLLM(system, user, 500);
+    const cleaned = text.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    return {
+      skills:
+        Array.isArray(parsed.skills) && parsed.skills.length
+          ? parsed.skills.slice(0, 8)
+          : fallback.skills,
+      yearsOfExperience: parsed.yearsOfExperience || fallback.yearsOfExperience,
+      domain: parsed.domain || fallback.domain,
+    };
+  } catch (e) {
+    console.error("Job summary error, using fallback:", e);
+    return fallback;
+  }
+}
+
 async function extractResumeFromText(pastedText) {
   try {
     const system =
@@ -1142,8 +1364,10 @@ async function extractResumeFromText(pastedText) {
 
 {
   "name": "full name",
-  "title": "current or most recent job title",
+  "title": "the professional headline/tagline directly beneath the candidate's name if the resume has one (e.g. a pipe-separated list of specialties or a positioning statement); otherwise their current or most recent job title",
+  "targetRoles": ["2-4 concise job title phrases (2-5 words each) this candidate should search for, based on their WHOLE profile — headline, top-rated skills, and career trajectory across all roles — not just their literal most recent job title. E.g. a candidate whose skills emphasize Business Strategy and Digital Transformation alongside Product should get roles like 'Strategy Manager', 'Digital Transformation Lead', 'Product Strategy Manager', not only 'Product Manager'."],
   "contact": "email, phone, location, LinkedIn — one line",
+  "yearsOfExperience": "total years of professional work experience as a number (use a stated figure if the resume gives one, otherwise compute from the earliest role's start date to today)",
   "summary": "professional summary or objective paragraph",
   "experience": [
     {
@@ -1163,18 +1387,25 @@ async function extractResumeFromText(pastedText) {
   "references": [{"name": "Ref Name", "title": "Their Title"}] or []
 }
 
+Rules:
+- Include EVERY role. If a role has dates and bullets but no company or title (e.g. a continuation on the next page), still include it with company/role as "" – never drop its bullets.
+- Copy every bullet and the summary VERBATIM from the resume text (only remove bullet symbols and fix line breaks). Do not shorten, reword or merge them.
+- The text may list a sidebar (contact, skills, education) separately from the main column; assign each item to its correct section.
+
 Resume text:
 ${pastedText}`;
-    const text = await callOpenAI(system, user, 1500);
+    const text = await callLLM(system, user, 4096);
     if (!text || typeof text !== "string") {
-      throw new Error("OpenAI returned no content. Check your API key and quota.");
+      throw new Error("The AI model returned no content. Check your API key and quota.");
     }
     const cleaned = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(cleaned);
     return {
       name: parsed.name || "Unknown",
       title: parsed.title || "",
+      targetRoles: Array.isArray(parsed.targetRoles) ? parsed.targetRoles.filter(Boolean).slice(0, 4) : [],
       contact: parsed.contact || "",
+      yearsOfExperience: Number.isFinite(Number(parsed.yearsOfExperience)) ? Number(parsed.yearsOfExperience) : null,
       summary: parsed.summary || "",
       experience: Array.isArray(parsed.experience) ? parsed.experience : [],
       education: Array.isArray(parsed.education) ? parsed.education : [],
@@ -1189,23 +1420,22 @@ ${pastedText}`;
   }
 }
 
+/** The resume without its embedded photo – the AI never needs it, and the data URL alone can exceed request limits. */
+function resumeForAI(resume) {
+  if (!resume) return resume;
+  // eslint-disable-next-line no-unused-vars
+  const { photoUrl, ...rest } = resume;
+  return rest;
+}
+
 async function scoreResume(job, resumeData) {
+  // Used for any field the model leaves out; on a failed call the step shows "Score unavailable" instead of made-up numbers.
   const fallback = {
-    score: 78,
-    label: "Strong Match",
-    summary:
-      "Your product background aligns well with the responsibilities of this role, especially around cross-functional collaboration and roadmap ownership. Strengthening quantified impact and tailoring language to the specific domain could further increase your competitiveness.",
-    breakdown: {
-      skills: 20,
-      experience: 21,
-      impact: 18,
-      keywords: 19,
-    },
-    keyGaps: [
-      "Limited quantified metrics tied directly to revenue, conversion, or retention.",
-      "Few references to experimentation frameworks (A/B testing, experimentation platforms).",
-      "Domain language is generic rather than tailored to this company’s product surface.",
-    ],
+    score: null,
+    label: "Score unavailable",
+    summary: "",
+    breakdown: { skills: 0, experience: 0, impact: 0, keywords: 0 },
+    keyGaps: [],
   };
   try {
     const system =
@@ -1230,8 +1460,8 @@ Job description:
 ${job.jd}
 
 Resume JSON:
-${JSON.stringify(resumeData, null, 2)}`;
-    const text = await callOpenAI(system, user, 900);
+${JSON.stringify(resumeForAI(resumeData), null, 2)}`;
+    const text = await callLLM(system, user, 1500);
     const cleaned = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(cleaned);
     return {
@@ -1262,129 +1492,12 @@ ${JSON.stringify(resumeData, null, 2)}`;
           : fallback.keyGaps,
     };
   } catch (e) {
-    console.error("Score error, using fallback:", e);
-    return fallback;
-  }
-}
-
-async function generateSuggestions(job, resumeData, userContext) {
-  const fallback = [
-    {
-      id: "s1",
-      section: "Summary",
-      type: "Rewrite",
-      title: "Make summary more impact-focused for growth-oriented PM roles",
-      original:
-        resumeData.summary ||
-        "Product manager with 4 years of experience building consumer and B2B products.",
-      proposed:
-        "Product manager with 4+ years owning roadmap and execution for B2B analytics and mobile products, partnering with design, engineering, and go-to-market teams to ship experiences that increase adoption, retention, and revenue.",
-      why:
-        "This reframing keeps your experience accurate while emphasizing ownership, cross-functional leadership, and business outcomes that align with high-growth product teams.",
-    },
-    {
-      id: "s2",
-      section: "Experience",
-      type: "Rewrite",
-      title: "Quantify impact of analytics dashboard work",
-      original:
-        "Managed product roadmap for a B2B analytics dashboard used by 200+ companies",
-      proposed:
-        "Owned roadmap for a B2B analytics dashboard used by 200+ companies, improving feature adoption by ~20% and helping expand ARR through upsell into higher tiers.",
-      why:
-        "Adding directional metrics and explicit impact makes this bullet more compelling without inventing new facts.",
-    },
-    {
-      id: "s3",
-      section: "Experience",
-      type: "Addition",
-      title: "Highlight experimentation and data-informed decision making",
-      original: "",
-      proposed:
-        "Partnered with data science to design and analyze experiments, using A/B tests and cohort analysis to prioritize features and deprecate low-impact functionality.",
-      why:
-        "Experimentation experience is frequently requested in senior product roles and reinforces your ability to make data-informed decisions.",
-    },
-    {
-      id: "s4",
-      section: "Skills",
-      type: "Rewrite",
-      title: "Group skills into clearer themes",
-      original: resumeData.skills.join(", "),
-      proposed:
-        "Product strategy & roadmapping · User research & discovery · Experimentation & A/B testing · Analytics & SQL · Design collaboration (Figma) · Agile/Scrum & stakeholder communication",
-      why:
-        "Clustering related skills into themes makes them easier to skim and connects them directly to how you work day-to-day.",
-    },
-    {
-      id: "s5",
-      section: "Experience",
-      type: "Rewrite",
-      title: "Clarify ownership at MidSize Corp",
-      original:
-        "Assisted senior PMs with writing product specs and user stories",
-      proposed:
-        "Collaborated with senior PMs to draft product specs and user stories, increasingly taking ownership of smaller feature areas from discovery through release.",
-      why:
-        "This preserves your level while signaling growing ownership, which is attractive for companies hiring beyond entry-level roles.",
-    },
-  ];
-  try {
-    const system =
-      "You are an expert resume writer. Return ONLY a valid JSON array, no markdown.";
-    const expCount = (resumeData.experience || []).length;
-    const contextBlock = userContext && String(userContext).trim()
-      ? `\nThe candidate wants to emphasize or add the following. Use this to tailor suggestions and proposed bullet text—weave it into rewrites or new bullets where relevant:\n"${String(userContext).trim()}"\n\n`
-      : "";
-    const user = `Given the job description and resume below, propose edit suggestions that make the resume more compelling for this role.${contextBlock}
-
-Read ALL ${expCount} experience(s) and every bullet. Suggest changes ONLY where they are needed: skip bullets that are already strong and well-aligned. Do not exhaust the list—suggest Rewrite only for weak or off-target bullets, Removal for redundant or low-value ones, and Addition only when it clearly adds value. Aim for a small, high-value set (e.g. 5–12 suggestions total), not one per bullet.
-
-Each suggestion MUST be an object with this exact shape:
-{
-  "id": "short-unique-id",
-  "section": "Summary | Experience | Education | Skills | Other",
-  "type": "Rewrite | Addition | Removal",
-  "title": "Short human-readable title",
-  "original": "Original text (exact bullet or text; empty string for Addition)",
-  "proposed": "Proposed revised or added text (empty string for Removal)",
-  "why": "Short explanation of why this helps",
-  "experienceIndex": 0
-}
-
-For Experience suggestions ONLY: include "experienceIndex" (0-based), the index of the job in the resume experience array (0 = first job, 1 = second job, etc.).
-
-Rules:
-- Do NOT change factual details: company names, dates, job titles, schools, degrees, or numeric facts.
-- When proposing bullet text (Rewrite or Addition), include numbers and figures where plausible (e.g. percentages, scale, time saved, revenue impact, team size). Use approximate or directional metrics if exact ones are unknown.
-- Cover all experiences but suggest only where improvement is needed; leave good bullets unchanged.
-- Final resume: at most 3 bullets per job—suggest Removal or merging for long lists.
-- Keep each suggestion and "why" brief to save tokens.
-
-Job description:
-${job.jd}
-
-Resume JSON:
-${JSON.stringify(resumeData, null, 2)}`;
-    const text = await callOpenAI(system, user, 2000);
-    const cleaned = text.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(cleaned);
-    if (!Array.isArray(parsed) || !parsed.length) return fallback;
-    return parsed.slice(0, 40).map((s, idx) => ({
-      id: s.id || `s-${idx + 1}`,
-      section: s.section || "Other",
-      type: s.type || "Rewrite",
-      title: s.title || `Suggestion ${idx + 1}`,
-      original: s.original ?? "",
-      proposed: s.proposed ?? "",
-      why:
-        s.why ||
-        "This improves clarity and alignment with the responsibilities described in the job posting.",
-      experienceIndex: typeof s.experienceIndex === "number" ? s.experienceIndex : 0,
-    }));
-  } catch (e) {
-    console.error("Suggestions error, using fallback:", e);
-    return fallback;
+    console.error("Score error:", e);
+    return {
+      ...fallback,
+      unavailable: true,
+      summary: `We couldn't score this resume against the job (${e.message || "AI request failed"}). The assistant below can still help you tailor it.`,
+    };
   }
 }
 
@@ -1400,7 +1513,14 @@ function applyApprovedChangesClientSide(resumeData, approvedSuggestions) {
     const experienceIndex = typeof s.experienceIndex === "number" ? s.experienceIndex : 0;
 
     if (section === "Summary" && (type === "Rewrite" || type === "Addition")) {
-      if (proposed && typeof proposed === "string") resume.summary = proposed;
+      if (!proposed || typeof proposed !== "string") return;
+      // The assistant can rewrite one sentence of the summary; replace just that sentence when it's found.
+      const current = resume.summary || "";
+      if (type === "Rewrite" && original && original !== current && current.includes(original)) {
+        resume.summary = current.replace(original, proposed);
+      } else {
+        resume.summary = proposed;
+      }
       return;
     }
 
@@ -1421,7 +1541,10 @@ function applyApprovedChangesClientSide(resumeData, approvedSuggestions) {
         const targetExp = experiences[experienceIndex] ?? experiences[0];
         if (targetExp) {
           targetExp.bullets = targetExp.bullets || [];
-          targetExp.bullets.push(proposed.trim());
+          const bullet = proposed.replace(/^\s*[•\-–*]\s*/, "").trim();
+          const norm = (t) => String(t || "").replace(/^\s*[•\-–*]\s*/, "").replace(/\s+/g, " ").trim().toLowerCase();
+          // Skip a bullet that's already there (e.g. the same addition accepted twice).
+          if (!targetExp.bullets.some((b) => norm(b) === norm(bullet))) targetExp.bullets.push(bullet);
         }
         return;
       }
@@ -1467,6 +1590,24 @@ const PDF_FONT_OPTIONS = [
   { value: "helvetica", label: "Helvetica" },
   { value: "times", label: "Times New Roman" },
   { value: "courier", label: "Courier" },
+];
+
+const RX_TEMPLATE_OPTIONS = [
+  { id: "azurill", label: "Azurill", tags: ["Creative", "Tech", "Two-column", "Visual flair"] },
+  { id: "bronzor", label: "Bronzor", tags: ["Clean", "Consulting", "Corporate", "Professional"] },
+  { id: "chikorita", label: "Chikorita", tags: ["Client-facing", "HR", "Marketing", "Soft accent"] },
+  { id: "ditgar", label: "Ditgar", tags: ["Dark sidebar", "Data science", "Developer", "Modern"] },
+  { id: "ditto", label: "Ditto", tags: ["ATS friendly", "Minimal", "Text-dense", "Traditional"] },
+  { id: "gengar", label: "Gengar" },
+  { id: "glalie", label: "Glalie" },
+  { id: "kakuna", label: "Kakuna" },
+  { id: "lapras", label: "Lapras" },
+  { id: "leafish", label: "Leafish" },
+  { id: "meowth", label: "Meowth" },
+  { id: "onyx", label: "Onyx" },
+  { id: "pikachu", label: "Pikachu" },
+  { id: "rhyhorn", label: "Rhyhorn" },
+  { id: "scizor", label: "Scizor" },
 ];
 
 const DEFAULT_PDF_FORMAT = {
@@ -1523,6 +1664,140 @@ function parseDividerColor(hexOrRgb) {
 }
 
 /**
+ * Rebuild a PDF page's reading order from text positions. Design tools (Canva
+ * etc.) store text in arbitrary order – a job's bullets can come before its
+ * title line – so trusting the stored order files bullets under the wrong job.
+ * Detects a column gutter (a vertical strip no text crosses), then reads each
+ * column top-to-bottom, line by line.
+ */
+function pageTextInReadingOrder(items, pageWidth) {
+  const words = items
+    .filter((it) => typeof it.str === "string" && it.str.trim())
+    .map((it) => ({
+      str: it.str,
+      x: it.transform[4],
+      y: it.transform[5],
+      w: it.width || 0,
+      h: Math.abs(it.height || it.transform[3] || 10),
+    }));
+  if (!words.length) return "";
+
+  // Coverage of each 2pt-wide vertical strip; full-width text (headers) is ignored so it can't hide a gutter.
+  const step = 2;
+  const coverage = new Array(Math.ceil(pageWidth / step) + 1).fill(0);
+  words
+    .filter((wd) => wd.w < pageWidth * 0.5)
+    .forEach((wd) => {
+      for (let x = Math.max(0, Math.floor(wd.x / step)); x <= Math.min(coverage.length - 1, Math.ceil((wd.x + wd.w) / step)); x++) coverage[x]++;
+    });
+  // Widest empty strip between 20% and 75% of the page width is the gutter.
+  let best = null;
+  let runStart = null;
+  for (let i = 0; i <= coverage.length; i++) {
+    const empty = i < coverage.length && coverage[i] === 0 && i * step > pageWidth * 0.2 && i * step < pageWidth * 0.75;
+    if (empty && runStart === null) runStart = i;
+    if (!empty && runStart !== null) {
+      if (!best || i - runStart > best.len) best = { start: runStart, len: i - runStart };
+      runStart = null;
+    }
+  }
+  const gutterX = best && best.len * step >= 8 ? (best.start + best.len / 2) * step : null;
+
+  const columns = gutterX == null ? [words] : [words.filter((wd) => wd.x < gutterX), words.filter((wd) => wd.x >= gutterX)];
+  return columns
+    .filter((col) => col.length)
+    .map((col) => {
+      // Group into lines (PDF y grows upward), then read lines top-to-bottom and words left-to-right.
+      const sorted = [...col].sort((a, b) => b.y - a.y || a.x - b.x);
+      const lines = [];
+      for (const wd of sorted) {
+        const line = lines[lines.length - 1];
+        if (line && Math.abs(line.y - wd.y) <= Math.max(2, Math.min(line.h, wd.h) * 0.5)) line.words.push(wd);
+        else lines.push({ y: wd.y, h: wd.h, words: [wd] });
+      }
+      return lines
+        .map((line) => line.words.sort((a, b) => a.x - b.x).map((wd) => wd.str).join(" ").replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .join("\n");
+    })
+    .join("\n\n");
+}
+
+/**
+ * Pull the profile photo out of an uploaded PDF resume as a PNG data URL, or
+ * null. Walks page 1's drawing operations to find embedded images and their
+ * on-page size, then picks the largest roughly-square one — skipping icons and
+ * page-sized backgrounds. Uses the original image, so a photo the PDF clips to
+ * a circle comes back whole.
+ */
+async function extractPdfPhoto(file) {
+  try {
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const page = await pdf.getPage(1);
+    const { width: pageW, height: pageH } = page.getViewport({ scale: 1 });
+    const { fnArray, argsArray } = await page.getOperatorList();
+    const { OPS } = pdfjsLib;
+    const multiply = (m, n) => [
+      m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1],
+      m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3],
+      m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5],
+    ];
+    let ctm = [1, 0, 0, 1, 0, 0];
+    const stack = [];
+    const candidates = [];
+    fnArray.forEach((fn, i) => {
+      const args = argsArray[i];
+      if (fn === OPS.save) stack.push(ctm);
+      else if (fn === OPS.restore) ctm = stack.pop() || [1, 0, 0, 1, 0, 0];
+      else if (fn === OPS.transform) ctm = multiply(ctm, args);
+      else if (fn === OPS.paintFormXObjectBegin) {
+        stack.push(ctm);
+        if (Array.isArray(args?.[0]) && args[0].length === 6) ctm = multiply(ctm, args[0]);
+      } else if (fn === OPS.paintFormXObjectEnd) ctm = stack.pop() || [1, 0, 0, 1, 0, 0];
+      else if (fn === OPS.paintImageXObject) {
+        // Images are drawn into a unit square, so the matrix's column lengths are the on-page size.
+        const w = Math.hypot(ctm[0], ctm[1]);
+        const h = Math.hypot(ctm[2], ctm[3]);
+        const share = (w * h) / (pageW * pageH);
+        const ratio = w / h;
+        if (share > 0.01 && share < 0.25 && ratio > 0.5 && ratio < 2) candidates.push({ name: args[0], area: w * h });
+      }
+    });
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.area - a.area);
+    const { name } = candidates[0];
+    const store = name.startsWith("g_") ? page.commonObjs : page.objs;
+    const img = await new Promise((resolve) => store.get(name, resolve));
+    if (!img?.width || !img?.height) return null;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext("2d");
+    if (img.bitmap) {
+      ctx.drawImage(img.bitmap, 0, 0);
+    } else if (img.data) {
+      // Raw pixels: kind 2 is RGB, 3 is RGBA (1-bit masks aren't photos).
+      const rgba = new Uint8ClampedArray(img.width * img.height * 4);
+      if (img.kind === 3) rgba.set(img.data.subarray(0, rgba.length));
+      else if (img.kind === 2) {
+        for (let p = 0, q = 0; q < rgba.length; p += 3, q += 4) {
+          rgba[q] = img.data[p];
+          rgba[q + 1] = img.data[p + 1];
+          rgba[q + 2] = img.data[p + 2];
+          rgba[q + 3] = 255;
+        }
+      } else return null;
+      ctx.putImageData(new ImageData(rgba, img.width, img.height), 0, 0);
+    } else return null;
+    return canvas.toDataURL("image/png");
+  } catch (e) {
+    console.warn("Could not extract photo from PDF:", e);
+    return null;
+  }
+}
+
+/**
  * Single-column resume PDF: photo top-left, name/title/contact to the right, then Summary, Experience, Education, Skills.
  * Uses format options so it matches the on-screen PDF preview.
  */
@@ -1534,8 +1809,9 @@ function downloadResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FORMAT
   const singlePage = format.singlePage === true;
   const scale = singlePage ? 0.78 : 1;
   let margin = (format.marginMm ?? 14) * scale;
-  const photoGap = (format.photoGapMm ?? 10) * scale;
-  const photoW = (format.photoWidthMm ?? PHOTO_WIDTH_MM) * scale;
+  const hasPhoto = typeof photoDataUrl === "string" && photoDataUrl.length > 0;
+  const photoGap = hasPhoto ? (format.photoGapMm ?? 10) * scale : 0;
+  const photoW = hasPhoto ? (format.photoWidthMm ?? PHOTO_WIDTH_MM) * scale : 0;
   const photoH = Math.round(photoW * (4 / 3) * 10) / 10;
   const headerTextX = margin + photoW + photoGap;
   const contentW = pageW - margin * 2;
@@ -1583,7 +1859,7 @@ function downloadResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FORMAT
     : DEFAULT_SECTION_ORDER;
 
   // —— Photo top-left ——
-  if (photoDataUrl && typeof photoDataUrl === "string") {
+  if (hasPhoto) {
     try {
       doc.addImage(photoDataUrl, "PNG", margin, margin, photoW, photoH);
     } catch (e) {
@@ -1769,9 +2045,10 @@ function PdfStylePreview({ resume, format }) {
   const pageWidth = m(210);
   const pageHeight = m(297);
   const margin = m(format.marginMm);
-  const photoW = m(format.photoWidthMm);
+  const hasPhoto = !!resume.photoUrl;
+  const photoW = hasPhoto ? m(format.photoWidthMm) : 0;
   const photoH = m(format.photoWidthMm * (4 / 3));
-  const photoGap = m(format.photoGapMm);
+  const photoGap = hasPhoto ? m(format.photoGapMm) : 0;
   const headerX = margin + photoW + photoGap;
   const contentW = pageWidth - margin * 2;
   const headerW = pageWidth - headerX - margin;
@@ -1825,18 +2102,20 @@ function PdfStylePreview({ resume, format }) {
       }}
     >
       <div style={{ display: "flex", gap: photoGap, alignItems: "flex-start" }}>
-        <img
-          src={resume.photoUrl || "/resume-photo.png"}
-          alt=""
-          style={{
-            width: photoW,
-            height: photoH,
-            objectFit: "cover",
-            borderRadius: 4,
-            flexShrink: 0,
-          }}
-          onError={(e) => { e.target.style.display = "none"; }}
-        />
+        {hasPhoto && (
+          <img
+            src={resume.photoUrl}
+            alt=""
+            style={{
+              width: photoW,
+              height: photoH,
+              objectFit: "cover",
+              borderRadius: 4,
+              flexShrink: 0,
+            }}
+            onError={(e) => { e.target.style.display = "none"; }}
+          />
+        )}
         <div style={{ flex: 1, minWidth: 0, maxWidth: headerW, paddingTop: ascentPx }}>
           <div
             style={{
@@ -2006,7 +2285,281 @@ function renderWithHighlights(text, highlightPhrases, highlightStyle) {
   );
 }
 
-function ResumeDocument({ resume, highlights = [], dim = false, afterMode = false }) {
+/** Click-to-edit text bound to `value`; commits via `onCommit` on blur (not per keystroke, to avoid cursor jumps). */
+function EditableText({ value, onCommit, as: Tag = "div", style, multiline = false }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    if (ref.current && document.activeElement !== ref.current && ref.current.textContent !== (value || "")) {
+      ref.current.textContent = value || "";
+    }
+  }, [value]);
+  return (
+    <Tag
+      ref={ref}
+      contentEditable
+      suppressContentEditableWarning
+      className="rq-editable"
+      style={{ ...style, minWidth: 20, minHeight: multiline ? "1.4em" : undefined, whiteSpace: multiline ? "pre-wrap" : undefined }}
+      onBlur={(e) => onCommit(e.currentTarget.textContent || "")}
+      onKeyDown={(e) => {
+        if (!multiline && e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
+      }}
+    />
+  );
+}
+
+let assistantEditSeq = 0;
+
+/**
+ * Conversational tailoring: the assistant diagnoses fit against the JD, asks
+ * for missing facts, and proposes one checked edit at a time (server/assistant.js).
+ * Chat state lives in the parent so it survives moving to the preview and back.
+ */
+function TailoringAssistant({ job, resume, chat, setChat, onAccept }) {
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const scrollRef = useRef(null);
+  const startedRef = useRef(false);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [chat.messages, loading]);
+
+  const sendTurn = async (nextChat) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/$/, "");
+      const response = await fetch(`${base}/api/assistant`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          resume: resumeForAI(resume),
+          job: { role: job.role, company: job.company, jd: job.jd },
+          messages: nextChat.messages.filter((m) => m.role !== "note").map((m) => ({ role: m.role, content: m.text })),
+          decisions: nextChat.decisions,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Assistant request failed (${response.status})`);
+      const edits = (data.edits || []).map((e) => ({ ...e, id: `a${Date.now()}-${++assistantEditSeq}`, status: "pending" }));
+      setChat((c) => ({
+        ...c,
+        messages: [...c.messages, { role: "assistant", text: data.message, edits, quickReplies: data.quickReplies || [], done: !!data.done }],
+      }));
+    } catch (e) {
+      setError(e.message || "The assistant is unavailable right now.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (startedRef.current || chat.messages.length) return;
+    startedRef.current = true;
+    sendTurn(chat);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const sendUserText = (text) => {
+    const trimmed = text.trim();
+    if (!trimmed || loading) return;
+    const nextChat = { ...chat, messages: [...chat.messages, { role: "user", text: trimmed }] };
+    setChat(nextChat);
+    setInput("");
+    sendTurn(nextChat);
+  };
+
+  const decide = (messageIndex, editId, decision) => {
+    const message = chat.messages[messageIndex];
+    const edit = message.edits.find((e) => e.id === editId);
+    if (!edit || edit.status !== "pending") return;
+    if (decision === "accepted") onAccept(edit);
+    const edits = message.edits.map((e) => (e.id === editId ? { ...e, status: decision } : e));
+    const messages = chat.messages.map((m, i) => (i === messageIndex ? { ...m, edits } : m));
+    const decisions = [...chat.decisions, { decision, section: edit.section, original: edit.original, proposed: edit.proposed }];
+    let nextChat = { ...chat, messages, decisions };
+    // Once every edit in this message is decided, move the conversation on.
+    if (edits.every((e) => e.status !== "pending")) {
+      const accepted = edits.filter((e) => e.status === "accepted").length;
+      const summary = accepted === edits.length ? "I accepted the edit." : accepted ? "I accepted some of the edits and rejected the rest." : "I rejected that edit.";
+      nextChat = { ...nextChat, messages: [...nextChat.messages, { role: "user", text: summary, isDecision: true }] };
+      setChat(nextChat);
+      sendTurn(nextChat);
+    } else {
+      setChat(nextChat);
+    }
+  };
+
+  const updateProposed = (messageIndex, editId, proposed) => {
+    setChat((c) => ({
+      ...c,
+      messages: c.messages.map((m, i) =>
+        i === messageIndex ? { ...m, edits: m.edits.map((e) => (e.id === editId ? { ...e, proposed } : e)) } : m
+      ),
+    }));
+  };
+
+  const last = chat.messages[chat.messages.length - 1];
+  const awaitingDecision = last?.role === "assistant" && last.edits?.some((e) => e.status === "pending");
+
+  return (
+    <div style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, background: "rgba(255,255,255,0.02)", display: "flex", flexDirection: "column", height: "min(640px, calc(100vh - 120px))", minHeight: 420 }}>
+      <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 12, color: "#8b8ba7" }}>
+        <span style={{ color: "#00e5a0", fontWeight: 600 }}>Tailoring assistant</span> · Every edit is checked: it keeps your specifics and adds nothing you haven't confirmed.
+      </div>
+      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14, maskImage: "linear-gradient(to bottom, transparent 0, #000 32px)", WebkitMaskImage: "linear-gradient(to bottom, transparent 0, #000 32px)" }}>
+        {chat.messages.map((m, mi) =>
+          m.role === "user" ? (
+            m.isDecision ? (
+              <div key={mi} style={{ alignSelf: "center", fontSize: 11, color: "#6b6b85", fontFamily: "'DM Mono', monospace" }}>{m.text}</div>
+            ) : (
+              <div key={mi} style={{ alignSelf: "flex-end", maxWidth: "80%", background: "rgba(0,229,160,0.12)", border: "1px solid rgba(0,229,160,0.25)", borderRadius: "12px 12px 2px 12px", padding: "8px 12px", fontSize: 13, color: "#e6e6f0", whiteSpace: "pre-wrap" }}>
+                {m.text}
+              </div>
+            )
+          ) : (
+            <div key={mi} style={{ alignSelf: "flex-start", maxWidth: "92%", display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ background: "rgba(255,255,255,0.05)", borderRadius: "12px 12px 12px 2px", padding: "10px 14px", fontSize: 13, lineHeight: 1.55, color: "#e6e6f0", whiteSpace: "pre-wrap" }}>
+                {m.text}
+              </div>
+              {(m.edits || []).map((e) => (
+                <div key={e.id} style={{ border: `1px solid ${e.status === "accepted" ? "rgba(0,229,160,0.45)" : e.status === "rejected" ? "rgba(255,95,95,0.3)" : "rgba(255,255,255,0.12)"}`, borderRadius: 10, padding: 12, background: "rgba(0,0,0,0.25)", opacity: e.status === "rejected" ? 0.55 : 1 }}>
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
+                    <div style={styles.sectionPill}>{e.section}{e.section === "Experience" && resume.experience?.[e.experienceIndex] ? ` · ${resume.experience[e.experienceIndex].company}` : ""}</div>
+                    <div style={styles.typePill}>{e.type}</div>
+                    {e.status !== "pending" && (
+                      <span style={{ fontSize: 11, color: e.status === "accepted" ? "#00e5a0" : "#ff5f5f", fontFamily: "'DM Mono', monospace" }}>
+                        {e.status === "accepted" ? "✓ Applied" : "✕ Rejected"}
+                      </span>
+                    )}
+                  </div>
+                  {e.jdRequirement && (
+                    <div style={{ fontSize: 11, color: "#8b8ba7", marginBottom: 8 }}>
+                      Targets: <span style={{ color: "#c9c9dc" }}>{e.jdRequirement}</span>
+                    </div>
+                  )}
+                  {e.original && (
+                    <div style={{ fontSize: 12.5, color: "#ff8f8f", textDecoration: e.type === "Removal" ? "line-through" : "none", background: "rgba(255,95,95,0.06)", borderRadius: 6, padding: "6px 8px", marginBottom: 6 }}>
+                      {e.original}
+                    </div>
+                  )}
+                  {e.type !== "Removal" && (
+                    e.status === "pending" ? (
+                      <DiffTextarea
+                        original={e.original}
+                        value={e.proposed}
+                        onChange={(v) => updateProposed(mi, e.id, v)}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 12.5, color: "#c9c9dc", background: "rgba(0,229,160,0.06)", borderRadius: 6, padding: "6px 8px", whiteSpace: "pre-wrap" }}>
+                        <DiffText original={e.original} text={e.proposed} />
+                      </div>
+                    )
+                  )}
+                  {e.why && <div style={{ ...styles.whyLine, marginTop: 8 }}>💡 {e.why}</div>}
+                  {e.status === "pending" && (
+                    <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
+                      <button type="button" style={styles.dangerButton} disabled={loading} onClick={() => decide(mi, e.id, "rejected")}>✕ Reject</button>
+                      <button type="button" style={styles.successButton} disabled={loading} onClick={() => decide(mi, e.id, "accepted")}>✓ Accept</button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )
+        )}
+        {loading && <div style={{ alignSelf: "flex-start", fontSize: 12, color: "#8b8ba7", fontFamily: "'DM Mono', monospace" }}>Assistant is thinking…</div>}
+        {error && (
+          <div style={{ alignSelf: "stretch", fontSize: 12, color: "#ff8f8f", background: "rgba(255,95,95,0.08)", borderRadius: 8, padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <span>{error}</span>
+            <button type="button" style={styles.ghostButton} onClick={() => sendTurn(chat)}>Retry</button>
+          </div>
+        )}
+      </div>
+      {last?.role === "assistant" && !loading && !awaitingDecision && last.quickReplies?.length > 0 && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "0 16px 10px" }}>
+          {last.quickReplies.map((q) => (
+            <button key={q} type="button" onClick={() => sendUserText(q)} style={{ ...styles.ghostButton, fontSize: 12, padding: "5px 10px" }}>{q}</button>
+          ))}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 8, padding: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendUserText(input); } }}
+          placeholder={awaitingDecision ? "Accept or reject the edit above, or tell the assistant what to change…" : "Answer the question, add a fact, or ask for a change…"}
+          disabled={loading}
+          style={{ ...styles.input, flex: 1 }}
+        />
+        <button type="button" onClick={() => sendUserText(input)} disabled={loading || !input.trim()} style={{ ...styles.primaryButton, ...(loading || !input.trim() ? styles.disabledButton : {}) }}>
+          Send
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Word-level diff: marks each token of `text` that isn't carried over from `original`.
+// Words are compared ignoring case and surrounding punctuation; whitespace is kept as-is.
+function diffAddedWords(original, text) {
+  const norm = (w) => w.toLowerCase().replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+  const tokens = (text || "").split(/(\s+)/).filter(Boolean);
+  const a = (original || "").split(/\s+/).filter(Boolean).map(norm);
+  const words = [];
+  tokens.forEach((t, i) => { if (!/^\s+$/.test(t)) words.push(i); });
+  const b = words.map((i) => norm(tokens[i]));
+  // LCS table over words.
+  const dp = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--)
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+  const added = new Set();
+  let i = 0, j = 0;
+  while (j < b.length) {
+    if (i < a.length && a[i] === b[j]) { i++; j++; }
+    else if (i < a.length && dp[i + 1][j] >= dp[i][j + 1]) i++;
+    else { added.add(words[j]); j++; }
+  }
+  return tokens.map((t, k) => ({ text: t, added: added.has(k) }));
+}
+
+const addedWordStyle = { color: "#00e5a0", background: "rgba(0,229,160,0.16)", borderRadius: 3 };
+
+function DiffText({ original, text }) {
+  if (!original) return <span style={addedWordStyle}>{text}</span>;
+  return diffAddedWords(original, text).map((t, k) => (t.added ? <span key={k} style={addedWordStyle}>{t.text}</span> : t.text));
+}
+
+// Editable textarea that shows words added relative to `original` in a different color.
+// A highlighted copy of the text sits behind a transparent textarea with identical metrics.
+function DiffTextarea({ original, value, onChange }) {
+  const backdropRef = useRef(null);
+  const metrics = { padding: 8, border: "1px solid transparent", fontSize: 12.5, lineHeight: 1.5, fontFamily: "inherit", whiteSpace: "pre-wrap", overflowWrap: "break-word", boxSizing: "border-box", width: "100%", margin: 0, letterSpacing: "normal" };
+  return (
+    <div style={{ position: "relative", borderRadius: 6, background: "rgba(0,229,160,0.06)" }}>
+      <div ref={backdropRef} aria-hidden style={{ ...metrics, position: "absolute", inset: 0, overflow: "hidden", color: "#c9c9dc", pointerEvents: "none" }}>
+        <DiffText original={original} text={value} />
+        {value.endsWith("\n") ? " " : null}
+      </div>
+      <textarea
+        value={value}
+        onChange={(ev) => onChange(ev.target.value)}
+        onScroll={(ev) => { if (backdropRef.current) backdropRef.current.scrollTop = ev.target.scrollTop; }}
+        rows={4}
+        style={{ ...metrics, display: "block", position: "relative", borderRadius: 6, border: "1px solid rgba(0,229,160,0.4)", background: "transparent", color: "transparent", caretColor: "#fff", resize: "vertical" }}
+      />
+    </div>
+  );
+}
+
+function ResumeDocument({ resume, highlights = [], dim = false, afterMode = false, editable = false, onEdit }) {
   if (!resume || typeof resume !== "object") {
     return (
       <div style={{ ...styles.resumePaper, opacity: dim ? 0.55 : 1, color: "#888" }}>
@@ -2027,65 +2580,137 @@ function ResumeDocument({ resume, highlights = [], dim = false, afterMode = fals
     return text;
   };
 
-  const photoUrl = resume.photoUrl || "/resume-photo.png";
+  const photoUrl = resume.photoUrl || null;
 
+  if (!editable) {
+    return (
+      <div style={{ ...styles.resumePaper, opacity: dim ? 0.55 : 1 }}>
+        <div style={styles.resumeHeaderRow}>
+          {photoUrl && (
+            <img
+              src={photoUrl}
+              alt=""
+              style={styles.resumePhoto}
+              onError={(e) => { e.target.style.display = "none"; }}
+            />
+          )}
+          <div style={styles.resumeHeaderText}>
+            <div style={styles.resumeNameText}>{resume.name}</div>
+            <div style={styles.resumeTitleText}>{resume.title}</div>
+            <div style={styles.resumeContactText}>{resume.contact}</div>
+          </div>
+        </div>
+        <hr style={styles.resumeHr} />
+        <div style={styles.resumeSectionTitle}>Summary</div>
+        <div style={styles.resumeBodyText}>{wrapMaybe(resume.summary)}</div>
+
+        <div style={styles.resumeSectionTitle}>Experience</div>
+        {(resume.experience || []).map((exp, idx) => (
+          <div key={idx}>
+            <div style={styles.resumeExpHeaderRow}>
+              <div style={styles.resumeExpTitle}>
+                {exp.role} · {exp.company}
+              </div>
+              <div style={styles.resumeExpPeriod}>{exp.period}</div>
+            </div>
+            <ul style={styles.resumeBullets}>
+              {(exp.bullets || []).map((b, i) => (
+                <li key={i} style={styles.resumeBullet}>
+                  {wrapMaybe(b)}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+
+        <div style={styles.resumeSectionTitle}>Education</div>
+        {(resume.education || []).map((ed, idx) => (
+          <div key={idx} style={styles.resumeEducationRow}>
+            <strong>{ed.degree}</strong> · {ed.school} · {ed.year}
+          </div>
+        ))}
+
+        <div style={styles.resumeSectionTitle}>Skills</div>
+        <div style={styles.resumeSkillsWrap}>
+          {(resume.skills || []).map((s, idx) => (
+            <div key={idx} style={styles.resumeSkillChip}>
+              {wrapMaybe(s)}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  // Editable (WYSIWYG) rendering: same visual layout, but every field is click-to-edit in place.
   return (
-    <div
-      style={{
-        ...styles.resumePaper,
-        opacity: dim ? 0.55 : 1,
-      }}
-    >
+    <div style={{ ...styles.resumePaper, opacity: dim ? 0.55 : 1 }}>
       <div style={styles.resumeHeaderRow}>
-        <img
-          src={photoUrl}
-          alt=""
-          style={styles.resumePhoto}
-          onError={(e) => { e.target.style.display = "none"; }}
-        />
+        {photoUrl && (
+          <img
+            src={photoUrl}
+            alt=""
+            style={styles.resumePhoto}
+            onError={(e) => { e.target.style.display = "none"; }}
+          />
+        )}
         <div style={styles.resumeHeaderText}>
-          <div style={styles.resumeNameText}>{resume.name}</div>
-          <div style={styles.resumeTitleText}>{resume.title}</div>
-          <div style={styles.resumeContactText}>{resume.contact}</div>
+          <EditableText value={resume.name} onCommit={onEdit.updateName} style={styles.resumeNameText} />
+          <EditableText value={resume.title} onCommit={onEdit.updateTitle} style={styles.resumeTitleText} />
+          <EditableText value={resume.contact} onCommit={onEdit.updateContact} style={styles.resumeContactText} />
         </div>
       </div>
       <hr style={styles.resumeHr} />
       <div style={styles.resumeSectionTitle}>Summary</div>
-      <div style={styles.resumeBodyText}>{wrapMaybe(resume.summary)}</div>
+      <EditableText value={resume.summary} onCommit={onEdit.updateSummary} style={styles.resumeBodyText} multiline />
 
       <div style={styles.resumeSectionTitle}>Experience</div>
       {(resume.experience || []).map((exp, idx) => (
-        <div key={idx}>
+        <div key={idx} className="rq-editable-row" style={{ marginBottom: 6 }}>
           <div style={styles.resumeExpHeaderRow}>
-            <div style={styles.resumeExpTitle}>
-              {exp.role} · {exp.company}
+            <div style={{ display: "flex", alignItems: "baseline", gap: 4, flex: 1 }}>
+              <EditableText value={exp.role} onCommit={(v) => onEdit.updateExpField(idx, "role", v)} style={styles.resumeExpTitle} />
+              <span style={styles.resumeExpTitle}>·</span>
+              <EditableText value={exp.company} onCommit={(v) => onEdit.updateExpField(idx, "company", v)} style={styles.resumeExpTitle} />
             </div>
-            <div style={styles.resumeExpPeriod}>{exp.period}</div>
+            <EditableText value={exp.period} onCommit={(v) => onEdit.updateExpField(idx, "period", v)} style={styles.resumeExpPeriod} />
+            <button type="button" className="rq-remove-btn" title="Remove role" onClick={() => onEdit.removeExperience(idx)}>×</button>
           </div>
           <ul style={styles.resumeBullets}>
             {(exp.bullets || []).map((b, i) => (
-              <li key={i} style={styles.resumeBullet}>
-                {wrapMaybe(b)}
+              <li key={i} className="rq-editable-row" style={{ ...styles.resumeBullet, display: "flex", alignItems: "flex-start", gap: 4 }}>
+                <EditableText value={b} onCommit={(v) => onEdit.updateBullet(idx, i, v)} style={{ flex: 1 }} multiline />
+                <button type="button" className="rq-remove-btn" title="Remove bullet" onClick={() => onEdit.removeBullet(idx, i)}>×</button>
               </li>
             ))}
           </ul>
+          <button type="button" className="rq-add-btn" onClick={() => onEdit.addBullet(idx)}>+ Add bullet</button>
         </div>
       ))}
+      <button type="button" className="rq-add-btn" onClick={onEdit.addExperience}>+ Add role</button>
 
       <div style={styles.resumeSectionTitle}>Education</div>
       {(resume.education || []).map((ed, idx) => (
-        <div key={idx} style={styles.resumeEducationRow}>
-          <strong>{ed.degree}</strong> · {ed.school} · {ed.year}
+        <div key={idx} className="rq-editable-row" style={{ ...styles.resumeEducationRow, display: "flex", alignItems: "baseline", gap: 4 }}>
+          <EditableText value={ed.degree} onCommit={(v) => onEdit.updateEduField(idx, "degree", v)} style={{ fontWeight: 700 }} />
+          <span>·</span>
+          <EditableText value={ed.school} onCommit={(v) => onEdit.updateEduField(idx, "school", v)} />
+          <span>·</span>
+          <EditableText value={ed.year} onCommit={(v) => onEdit.updateEduField(idx, "year", v)} />
+          <button type="button" className="rq-remove-btn" title="Remove education" onClick={() => onEdit.removeEducation(idx)}>×</button>
         </div>
       ))}
+      <button type="button" className="rq-add-btn" onClick={onEdit.addEducation}>+ Add education</button>
 
       <div style={styles.resumeSectionTitle}>Skills</div>
       <div style={styles.resumeSkillsWrap}>
         {(resume.skills || []).map((s, idx) => (
-          <div key={idx} style={styles.resumeSkillChip}>
-            {wrapMaybe(s)}
+          <div key={idx} className="rq-editable-row" style={{ ...styles.resumeSkillChip, display: "flex", alignItems: "center", gap: 4 }}>
+            <EditableText value={s} onCommit={(v) => onEdit.updateSkill(idx, v)} style={{ minWidth: 10 }} />
+            <button type="button" className="rq-remove-btn" title="Remove skill" onClick={() => onEdit.removeSkill(idx)}>×</button>
           </div>
         ))}
+        <button type="button" className="rq-add-btn" onClick={onEdit.addSkill}>+ Add skill</button>
       </div>
     </div>
   );
@@ -2095,8 +2720,19 @@ const DEFAULT_PARSING_STATUS = { extractText: false, parseStructure: false, find
 
 export default function ResumeIQ() {
   const [step, setStep] = useState("upload");
-  const [jobs, setJobs] = useState(JOB_DATABASE);
+  const [jobs, setJobs] = useState([]);
+  const jobsRef = useRef(jobs);
+  const searchIdRef = useRef(0);
+  const lastSearchKeyRef = useRef("");
+  useEffect(() => {
+    jobsRef.current = jobs;
+  }, [jobs]);
   const [selectedJob, setSelectedJob] = useState(null);
+  const [expandedJob, setExpandedJob] = useState(null);
+  const [jobSummary, setJobSummary] = useState(null);
+  const [jobSummaryLoading, setJobSummaryLoading] = useState(false);
+  const [showFullJd, setShowFullJd] = useState(false);
+  const jobSummaryCacheRef = useRef(new Map());
   const [resume, setResume] = useState(null);
   const [resumeText, setResumeText] = useState("");
   const [extractingResume, setExtractingResume] = useState(false);
@@ -2104,6 +2740,11 @@ export default function ResumeIQ() {
   const [linkedInText, setLinkedInText] = useState("");
   const [extracting, setExtracting] = useState(false);
   const [linkedInSearchKeywords, setLinkedInSearchKeywords] = useState("Product Manager");
+  const [suggestedRoles, setSuggestedRoles] = useState([]);
+  const [candidateYears, setCandidateYears] = useState("");
+  const [showBelowLevelJobs, setShowBelowLevelJobs] = useState(false);
+  // { keywords, savedCount, freshCount } for the current search; freshCount is null until LinkedIn returns.
+  const [jobFeedStatus, setJobFeedStatus] = useState(null);
   const [linkedInSearchLocation, setLinkedInSearchLocation] = useState("India");
   const [linkedInSearchIndiaOnly, setLinkedInSearchIndiaOnly] = useState(true);
   const [linkedInSearchLimit, setLinkedInSearchLimit] = useState(100);
@@ -2119,17 +2760,21 @@ export default function ResumeIQ() {
   const [scoreBreakdown, setScoreBreakdown] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
   const [approvedIds, setApprovedIds] = useState(() => new Set());
-  const [rejectedIds, setRejectedIds] = useState(() => new Set());
   const [updatedResume, setUpdatedResume] = useState(null);
-  const [previewHighlights, setPreviewHighlights] = useState([]);
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState("");
   const [applyingChanges, setApplyingChanges] = useState(false);
   const [hoveredJobId, setHoveredJobId] = useState(null);
   const [pdfFormat, setPdfFormat] = useState(() => ({ ...DEFAULT_PDF_FORMAT }));
-  const [regenerationContext, setRegenerationContext] = useState("");
-  const [regeneratingSuggestions, setRegeneratingSuggestions] = useState(false);
-  const [skillsEditText, setSkillsEditText] = useState("");
+  // Tailoring assistant conversation for the selected job: { messages, decisions }.
+  const [assistantChat, setAssistantChat] = useState({ messages: [], decisions: [] });
+  const [openingInBuilder, setOpeningInBuilder] = useState(false);
+  const [openInBuilderError, setOpenInBuilderError] = useState(null);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [templatePdfUrl, setTemplatePdfUrl] = useState(null);
+  const [renderingTemplate, setRenderingTemplate] = useState(false);
+  const [templateRenderError, setTemplateRenderError] = useState(null);
+  const templatePdfUrlRef = useRef(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -2137,23 +2782,81 @@ export default function ResumeIQ() {
     }
   }, [step]);
 
-  const prevStepRef = useRef(step);
   useEffect(() => {
-    if (prevStepRef.current !== "preview" && step === "preview") {
-      const data = updatedResume || resume;
-      setSkillsEditText((data.skills || []).join(" · "));
+    if (!expandedJob) return;
+    const onKeyDown = (e) => {
+      if (e.key === "Escape") setExpandedJob(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [expandedJob]);
+
+  useEffect(() => {
+    setShowFullJd(false);
+    if (!expandedJob) {
+      setJobSummary(null);
+      setJobSummaryLoading(false);
+      return;
     }
-    prevStepRef.current = step;
-  }, [step, updatedResume, resume]);
+    const cached = jobSummaryCacheRef.current.get(expandedJob.id);
+    if (cached) {
+      setJobSummary(cached);
+      setJobSummaryLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setJobSummary(null);
+    setJobSummaryLoading(true);
+    summarizeJobPosting(expandedJob)
+      .then((summary) => {
+        if (cancelled) return;
+        jobSummaryCacheRef.current.set(expandedJob.id, summary);
+        setJobSummary(summary);
+      })
+      .finally(() => {
+        if (!cancelled) setJobSummaryLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expandedJob]);
+
+  const jobMatchScores = useMemo(() => {
+    const resumeForMatch = resume || SAMPLE_RESUME;
+    const map = new Map();
+    jobs.forEach((job) => {
+      map.set(job.id, computeLocalMatchScore(resumeForMatch, job));
+    });
+    return map;
+  }, [jobs, resume]);
+
+  const [jobSortBy, setJobSortBy] = useState("match");
+
+  const yearsNum = Number(candidateYears) || null;
+  const belowLevelJobIds = useMemo(
+    () => new Set(jobs.filter((job) => isBelowCandidateLevel(job, yearsNum)).map((job) => job.id)),
+    [jobs, yearsNum]
+  );
+
+  const sortedJobs = useMemo(() => {
+    const list = showBelowLevelJobs ? [...jobs] : jobs.filter((job) => !belowLevelJobIds.has(job.id));
+    if (jobSortBy === "match") {
+      list.sort((a, b) => (jobMatchScores.get(b.id)?.score ?? 0) - (jobMatchScores.get(a.id)?.score ?? 0));
+    } else if (jobSortBy === "company") {
+      list.sort((a, b) => (a.company || "").localeCompare(b.company || ""));
+    }
+    return list;
+  }, [jobs, jobSortBy, jobMatchScores, showBelowLevelJobs, belowLevelJobIds]);
 
   const handleJobAnalyzeClick = (job) => {
     setSelectedJob(job);
-    setStep("analyze");
+    setStep("suggestions");
     setScore(null);
     setScoreBreakdown(null);
     setSuggestions([]);
+    setAssistantChat({ messages: [], decisions: [] });
     setApprovedIds(new Set());
-    setRejectedIds(new Set());
+    scoreAgainstJob(job);
   };
 
   const handleExtractJob = async () => {
@@ -2180,34 +2883,80 @@ export default function ResumeIQ() {
     }
   };
 
-  const handleSearchLinkedInJobs = async () => {
+  /**
+   * Merge jobs into the grid by id. Roles already shown get their fields
+   * refreshed; with markFresh, roles not shown before are badged "Just in".
+   * Returns how many were added.
+   */
+  const mergeJobs = (incoming, { markFresh = false } = {}) => {
+    const shownIds = new Set(jobsRef.current.map((job) => job.id));
+    const addedCount = new Set(incoming.map((job) => job.id).filter((id) => !shownIds.has(id))).size;
+    setJobs((prev) => {
+      const byId = new Map(prev.map((job) => [job.id, job]));
+      for (const job of incoming) {
+        const existing = byId.get(job.id);
+        if (existing) {
+          byId.set(job.id, { ...existing, ...job, jd: job.jd || existing.jd, badge: existing.badge });
+        } else {
+          byId.set(job.id, { ...job, source: "linkedin", badge: markFresh ? "Just in" : null });
+        }
+      }
+      return [...byId.values()];
+    });
+    return addedCount;
+  };
+
+  /**
+   * Two-stage search: saved roles from earlier searches load instantly, then
+   * the live LinkedIn scrape (30–180s) streams in fresh listings and the
+   * server saves them for the next search.
+   */
+  const handleSearchLinkedInJobs = async (overrideKeywords, overrideYears) => {
+    const keywords = (overrideKeywords ?? linkedInSearchKeywords).trim() || "Product Manager";
+    const levels = yearsToLinkedInLevels(overrideYears !== undefined ? overrideYears : yearsNum);
+    const location = linkedInSearchIndiaOnly ? "India" : (linkedInSearchLocation.trim() || "India");
+    const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/$/, "");
+    const params = new URLSearchParams({ keywords, location });
+    if (levels.length) params.set("experienceLevel", levels.join(","));
+
+    // A search for a different role starts a fresh grid; re-running the same search refreshes it.
+    // Results from a search that has since been superseded are dropped.
+    const searchId = ++searchIdRef.current;
+    const isCurrent = () => searchIdRef.current === searchId;
+    if (lastSearchKeyRef.current !== `${keywords}|${location}`) {
+      jobsRef.current = [];
+      setJobs([]);
+    }
+    lastSearchKeyRef.current = `${keywords}|${location}`;
+
     setLinkedInSearchError(null);
     setLinkedInSearching(true);
+    setJobFeedStatus({ keywords, savedCount: 0, freshCount: null });
+
+    fetch(`${base}/api/jobs/saved?${params}`)
+      .then((res) => (res.ok ? res.json() : { jobs: [] }))
+      .then((data) => {
+        if (!isCurrent()) return;
+        const savedCount = mergeJobs(data.jobs || []);
+        setJobFeedStatus((s) => (s && s.keywords === keywords ? { ...s, savedCount } : s));
+      })
+      .catch(() => {});
+
     try {
-      const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/$/, "");
-      const location = linkedInSearchIndiaOnly ? "India" : (linkedInSearchLocation.trim() || "India");
-      const params = new URLSearchParams({
-        keywords: linkedInSearchKeywords.trim() || "Product Manager",
-        location,
-        limit: String(linkedInSearchLimit),
-      });
+      params.set("limit", String(linkedInSearchLimit));
       const res = await fetch(`${base}/api/linkedin-jobs?${params}`);
       const data = await res.json().catch(() => ({}));
+      if (!isCurrent()) return;
       if (!res.ok) {
-        setLinkedInSearchError(data.error || data.details || `Search failed (${res.status})`);
+        setLinkedInSearchError(data.details || data.error || `Search failed (${res.status})`);
         return;
       }
-      const newJobs = (data.jobs || []).map((j) => ({ ...j, source: "linkedin" }));
-      setJobs((prev) => {
-        const ids = new Set(prev.map((x) => x.id));
-        const added = newJobs.filter((j) => !ids.has(j.id));
-        added.forEach((j) => ids.add(j.id));
-        return [...prev, ...added];
-      });
+      const freshCount = mergeJobs(data.jobs || [], { markFresh: true });
+      setJobFeedStatus((s) => (s && s.keywords === keywords ? { ...s, freshCount } : s));
     } catch (e) {
-      setLinkedInSearchError(e.message || "Search failed");
+      if (isCurrent()) setLinkedInSearchError(e.message || "Search failed");
     } finally {
-      setLinkedInSearching(false);
+      if (isCurrent()) setLinkedInSearching(false);
     }
   };
 
@@ -2245,8 +2994,7 @@ export default function ResumeIQ() {
         for (let i = 1; i <= numPages; i++) {
           const page = await pdf.getPage(i);
           const content = await page.getTextContent();
-          const strings = content.items.map((item) => item.str || "").filter(Boolean);
-          fullText += strings.join(" ") + "\n";
+          fullText += pageTextInReadingOrder(content.items, page.getViewport({ scale: 1 }).width) + "\n\n";
         }
         return fullText.trim();
       } catch (e) {
@@ -2274,43 +3022,54 @@ export default function ResumeIQ() {
     setParsingStatus({ ...DEFAULT_PARSING_STATUS });
     setParsingError(null);
     setStep("parsing");
+    // A new resume means a new search: drop the previous resume's roles and ignore its in-flight search.
+    searchIdRef.current++;
+    lastSearchKeyRef.current = "";
+    jobsRef.current = [];
+    setJobs([]);
+    setJobFeedStatus(null);
+    setLinkedInSearching(false);
+    setShowBelowLevelJobs(false);
 
     try {
       const text = await readFileToText(file);
       setParsingStatus((s) => ({ ...s, extractText: true }));
 
-      const extracted = await extractResumeFromText(text);
+      const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+      const [extracted, photoUrl] = await Promise.all([
+        extractResumeFromText(text),
+        isPdf ? extractPdfPhoto(file) : Promise.resolve(null),
+      ]);
+      if (photoUrl) extracted.photoUrl = photoUrl;
       setResume(extracted);
       setResumeText(text);
       setParsingStatus((s) => ({ ...s, parseStructure: true }));
 
-      const keywords = (extracted.title || "").trim() || "Product Manager";
-      const location = linkedInSearchIndiaOnly ? "India" : (linkedInSearchLocation.trim() || "India");
-      const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/$/, "");
-      const params = new URLSearchParams({ keywords, location, limit: String(linkedInSearchLimit) });
-      const res = await fetch(`${base}/api/linkedin-jobs?${params}`);
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && Array.isArray(data.jobs) && data.jobs.length) {
-        setJobs((prev) => {
-          const ids = new Set(prev.map((x) => x.id));
-          const added = (data.jobs || []).filter((j) => !ids.has(j.id));
-          added.forEach((j) => ids.add(j.id));
-          return [...prev, ...added.map((j) => ({ ...j, source: "linkedin" }))];
-        });
-      } else if (!res.ok) {
-        setParsingError(data.details || data.error || "Could not fetch jobs");
-      }
+      // Move to the job grid now instead of blocking on the LinkedIn search —
+      // that's a live Apify scrape (server/index.js) that can take 30–180s.
+      // Fetch it in the background and stream results into the grid once ready.
       setStep("select");
+      setParsingStatus((s) => ({ ...s, findJobs: true }));
+
+      const roles = extracted.targetRoles && extracted.targetRoles.length
+        ? extracted.targetRoles
+        : [(extracted.title || "").trim() || "Product Manager"];
+      setSuggestedRoles(roles);
+      const years = getCandidateYears(extracted);
+      setCandidateYears(years != null ? String(years) : "");
+      const keywords = roles[0];
+      setLinkedInSearchKeywords(keywords);
+      handleSearchLinkedInJobs(keywords, years);
     } catch (err) {
       console.error("Upload/parse error:", err);
       const msg = err.message || "Something went wrong";
       const isNetwork = /fetch failed|failed to fetch|network error|connection refused/i.test(msg);
-      const isApiKey = /missing|not configured|api key|invalid.*key|openai|quota|401|429/i.test(msg);
+      const isApiKey = /missing|not configured|api key|invalid.*key|anthropic|quota|401|429/i.test(msg);
       setParsingError(
         isNetwork
           ? "Could not reach the server. Start it with: npm run dev:all"
           : isApiKey
-            ? "Resume parsing is temporarily unavailable. Please try again later."
+            ? (import.meta.env.DEV ? `Resume parsing failed: ${msg}` : "Resume parsing is temporarily unavailable. Please try again later.")
             : msg
       );
       setResume(null);
@@ -2340,23 +3099,17 @@ export default function ResumeIQ() {
     }
   };
 
-  const handleAnalyzeResume = async () => {
-    if (!selectedJob) return;
-    const resumeToUse = resume || SAMPLE_RESUME;
+  /** Score the resume against a job; runs in the background when a job is picked so the assistant can start right away. */
+  const scoreAgainstJob = async (job) => {
+    if (!job || !resume) return;
     setLoading(true);
     setLoadingMsg("Scoring your resume against this job…");
     try {
-      const scoreData = await scoreResume(selectedJob, resumeToUse);
+      const scoreData = await scoreResume(job, resume);
       setScore(scoreData.score);
       setScoreBreakdown(scoreData);
-      setLoadingMsg("Generating tailored suggestions…");
-      const suggs = await generateSuggestions(selectedJob, resumeToUse);
-      setSuggestions(suggs);
-      setApprovedIds(new Set());
-      setRejectedIds(new Set());
-      setStep("suggestions");
     } catch (e) {
-      console.error("Analyze resume error:", e);
+      console.error("Scoring error:", e);
     } finally {
       setLoading(false);
       setLoadingMsg("");
@@ -2365,18 +3118,23 @@ export default function ResumeIQ() {
 
   const handleReset = () => {
     setStep("upload");
-    setJobs(JOB_DATABASE);
+    searchIdRef.current++;
+    lastSearchKeyRef.current = "";
+    setLinkedInSearching(false);
+    setJobs([]);
     setSelectedJob(null);
     setResume(null);
     setScore(null);
     setScoreBreakdown(null);
     setSuggestions([]);
+    setAssistantChat({ messages: [], decisions: [] });
     setApprovedIds(new Set());
-    setRejectedIds(new Set());
     setUpdatedResume(null);
-    setPreviewHighlights([]);
     setLinkedInText("");
-    setRegenerationContext("");
+    setSuggestedRoles([]);
+    setCandidateYears("");
+    setShowBelowLevelJobs(false);
+    setJobFeedStatus(null);
     setUploadedFileName("");
     setUploadedFileSize("");
     setParsingStatus({ ...DEFAULT_PARSING_STATUS });
@@ -2386,64 +3144,12 @@ export default function ResumeIQ() {
     setApplyingChanges(false);
   };
 
-  const toggleApprove = (id) => {
-    setApprovedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-    setRejectedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  };
-
-  const toggleReject = (id) => {
-    setRejectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-    setApprovedIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
-  };
-
-  function handleApproveAll() {
-    if (approvedIds.size === suggestions.length) {
-      setApprovedIds(new Set());
-    } else {
-      setApprovedIds(new Set(suggestions.map((s) => s.id)));
-      setRejectedIds(new Set());
-    }
-  }
-
-  const allApproved =
-    suggestions.length > 0 && approvedIds.size === suggestions.length;
-
   const handleApplyChanges = async () => {
-    if (!approvedIds.size) return;
     setApplyingChanges(true);
     try {
       const approved = suggestions.filter((s) => approvedIds.has(s.id));
-      const newResume = applyApprovedChangesClientSide(resume, approved);
-      setUpdatedResume(newResume);
-
-      const highlightPhrases = approved
-        .map((s) => s.proposed)
-        .filter((t) => typeof t === "string" && t.trim().length > 0);
-      setPreviewHighlights(highlightPhrases);
+      // With nothing approved, continue with the original resume.
+      setUpdatedResume(approved.length ? applyApprovedChangesClientSide(resume, approved) : null);
       setStep("preview");
     } catch (e) {
       console.error("Apply changes failed:", e);
@@ -2452,66 +3158,119 @@ export default function ResumeIQ() {
     }
   };
 
-  const handleRegenerateSuggestions = async () => {
-    if (!selectedJob || !resume) return;
-    setRegeneratingSuggestions(true);
+  const getFinalResume = () => updatedResume || resume;
+  const updateFinalResume = (mutate) => {
+    const next = JSON.parse(JSON.stringify(getFinalResume()));
+    mutate(next);
+    setUpdatedResume(next);
+  };
+
+  const resumeEditHandlers = {
+    updateName: (v) => updateFinalResume((r) => { r.name = v; }),
+    updateTitle: (v) => updateFinalResume((r) => { r.title = v; }),
+    updateContact: (v) => updateFinalResume((r) => { r.contact = v; }),
+    updateSummary: (v) => updateFinalResume((r) => { r.summary = v; }),
+    updateExpField: (expIdx, field, v) => updateFinalResume((r) => {
+      if (r.experience?.[expIdx]) r.experience[expIdx][field] = v;
+    }),
+    addExperience: () => updateFinalResume((r) => {
+      r.experience = r.experience || [];
+      r.experience.push({ role: "", company: "", location: "", period: "", bullets: [""] });
+    }),
+    removeExperience: (expIdx) => updateFinalResume((r) => {
+      r.experience?.splice(expIdx, 1);
+    }),
+    updateBullet: (expIdx, bulletIdx, v) => updateFinalResume((r) => {
+      if (!r.experience?.[expIdx]) return;
+      r.experience[expIdx].bullets = r.experience[expIdx].bullets || [];
+      r.experience[expIdx].bullets[bulletIdx] = v;
+    }),
+    removeBullet: (expIdx, bulletIdx) => updateFinalResume((r) => {
+      r.experience?.[expIdx]?.bullets?.splice(bulletIdx, 1);
+    }),
+    addBullet: (expIdx) => updateFinalResume((r) => {
+      if (!r.experience?.[expIdx]) return;
+      r.experience[expIdx].bullets = r.experience[expIdx].bullets || [];
+      r.experience[expIdx].bullets.push("");
+    }),
+    updateEduField: (eduIdx, field, v) => updateFinalResume((r) => {
+      if (r.education?.[eduIdx]) r.education[eduIdx][field] = v;
+    }),
+    addEducation: () => updateFinalResume((r) => {
+      r.education = r.education || [];
+      r.education.push({ degree: "", school: "", year: "" });
+    }),
+    removeEducation: (eduIdx) => updateFinalResume((r) => {
+      r.education?.splice(eduIdx, 1);
+    }),
+    updateSkill: (idx, v) => updateFinalResume((r) => {
+      if (Array.isArray(r.skills)) r.skills[idx] = v;
+    }),
+    addSkill: () => updateFinalResume((r) => {
+      r.skills = r.skills || [];
+      r.skills.push("");
+    }),
+    removeSkill: (idx) => updateFinalResume((r) => {
+      r.skills?.splice(idx, 1);
+    }),
+  };
+
+  const handleOpenInReactiveResume = async () => {
+    setOpeningInBuilder(true);
+    setOpenInBuilderError(null);
     try {
-      const suggs = await generateSuggestions(selectedJob, resume, regenerationContext);
-      setSuggestions(suggs);
-      setApprovedIds(new Set());
-      setRejectedIds(new Set());
+      const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/$/, "");
+      const response = await fetch(`${base}/api/rxresume/open-in-builder`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resumeData: getFinalResume() }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.builderUrl) {
+        throw new Error(data?.details || data?.error || `Failed to open in Reactive Resume (${response.status})`);
+      }
+      window.open(data.builderUrl, "_blank", "noopener,noreferrer");
     } catch (e) {
-      console.error("Regenerate suggestions failed:", e);
+      console.error("Open in Reactive Resume failed:", e);
+      setOpenInBuilderError(e.message || "Failed to open in Reactive Resume.");
     } finally {
-      setRegeneratingSuggestions(false);
+      setOpeningInBuilder(false);
     }
   };
 
-  const updateSuggestionProposed = (id, value) => {
-    setSuggestions((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, proposed: value } : s))
-    );
+  const handleSelectTemplate = async (templateId) => {
+    setSelectedTemplate(templateId);
+    setRenderingTemplate(true);
+    setTemplateRenderError(null);
+    try {
+      const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/$/, "");
+      const response = await fetch(`${base}/api/rxresume/render-pdf`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resumeData: getFinalResume(), template: templateId }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.details || data?.error || `Failed to render template (${response.status})`);
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      if (templatePdfUrlRef.current) URL.revokeObjectURL(templatePdfUrlRef.current);
+      templatePdfUrlRef.current = url;
+      setTemplatePdfUrl(url);
+    } catch (e) {
+      console.error("Template render failed:", e);
+      setTemplateRenderError(e.message || "Failed to render template.");
+    } finally {
+      setRenderingTemplate(false);
+    }
   };
 
-  const updateSuggestionOriginal = (id, value) => {
-    setSuggestions((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, original: value } : s))
-    );
-  };
-
-  const getFinalResume = () => updatedResume || resume;
-  const setFinalResume = (next) => setUpdatedResume(next);
-
-  const updateFinalSummary = (value) => {
-    const next = JSON.parse(JSON.stringify(getFinalResume()));
-    next.summary = value;
-    setFinalResume(next);
-  };
-  const updateFinalBullet = (expIdx, bulletIdx, value) => {
-    const next = JSON.parse(JSON.stringify(getFinalResume()));
-    if (!next.experience?.[expIdx]) return;
-    next.experience[expIdx].bullets = next.experience[expIdx].bullets || [];
-    next.experience[expIdx].bullets[bulletIdx] = value;
-    setFinalResume(next);
-  };
-  const removeFinalBullet = (expIdx, bulletIdx) => {
-    const next = JSON.parse(JSON.stringify(getFinalResume()));
-    if (!next.experience?.[expIdx]?.bullets) return;
-    next.experience[expIdx].bullets.splice(bulletIdx, 1);
-    setFinalResume(next);
-  };
-  const addFinalBullet = (expIdx) => {
-    const next = JSON.parse(JSON.stringify(getFinalResume()));
-    if (!next.experience?.[expIdx]) return;
-    next.experience[expIdx].bullets = next.experience[expIdx].bullets || [];
-    next.experience[expIdx].bullets.push("");
-    setFinalResume(next);
-  };
-  const updateFinalSkills = (value) => {
-    const next = JSON.parse(JSON.stringify(getFinalResume()));
-    next.skills = value.split(/[,·|]|\s+\|\s+/).map((s) => s.trim()).filter(Boolean);
-    setFinalResume(next);
-  };
+  useEffect(() => {
+    return () => {
+      if (templatePdfUrlRef.current) URL.revokeObjectURL(templatePdfUrlRef.current);
+    };
+  }, []);
 
   const currentStepOrder = getStepOrder(step);
 
@@ -2562,7 +3321,7 @@ export default function ResumeIQ() {
           fontWeight="700"
           fontSize="32"
         >
-          {clamped}
+          {typeof score === "number" ? clamped : "–"}
         </text>
         <text
           x={center}
@@ -2597,6 +3356,53 @@ body {
   margin: 0;
   font-family: 'DM Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
+
+.rq-editable {
+  cursor: text;
+  border-radius: 3px;
+  transition: background 0.12s ease;
+}
+.rq-editable:hover {
+  background: rgba(0, 132, 209, 0.08);
+}
+.rq-editable:focus {
+  background: rgba(0, 132, 209, 0.1);
+  box-shadow: 0 0 0 2px rgba(0, 132, 209, 0.4);
+  outline: none;
+}
+.rq-editable-row {
+  position: relative;
+}
+.rq-remove-btn {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+  cursor: pointer;
+  border: none;
+  background: rgba(220, 60, 60, 0.12);
+  color: #d33;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.rq-editable-row:hover .rq-remove-btn {
+  opacity: 1;
+}
+.rq-add-btn {
+  cursor: pointer;
+  border: 1px dashed #a8c8e0;
+  background: transparent;
+  color: #4a7ba6;
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 3px 10px;
+  margin-top: 4px;
+}
+.rq-add-btn:hover {
+  background: rgba(0, 132, 209, 0.08);
+}
         `}</style>
 
         <header style={styles.stickyHeader}>
@@ -2610,9 +3416,8 @@ body {
                 { id: "upload", num: 1, label: "Upload" },
                 { id: "parsing", num: 2, label: "Parsing" },
                 { id: "select", num: 3, label: "Job Matches" },
-                { id: "analyze", num: 4, label: "Resume" },
-                { id: "suggestions", num: 5, label: "Suggestions" },
-                { id: "preview", num: 6, label: "Preview" },
+                { id: "suggestions", num: 4, label: "Tailor" },
+                { id: "preview", num: 5, label: "Preview" },
               ].map((s, idx) => {
                 const order = getStepOrder(s.id);
                 let state = "future";
@@ -2634,7 +3439,7 @@ body {
                       {s.num}
                     </div>
                     <span style={styles.stepLabel}>{s.label}</span>
-                    {idx < 5 && <span style={styles.stepArrow}>→</span>}
+                    {idx < 4 && <span style={styles.stepArrow}>→</span>}
                   </button>
                 );
               })}
@@ -2760,15 +3565,44 @@ body {
 
           {step === "select" && (
             <section style={styles.stepSection}>
-              <div style={styles.sectionHeader}>
-                <h2 style={styles.sectionTitle}>Your Job Matches</h2>
-                <p style={styles.sectionSubtitle}>
-                  Jobs matched to your profile. Pick one to analyze fit and get tailored suggestions.
-                </p>
+              <div style={{ ...styles.sectionHeader, display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+                <div>
+                  <h2 style={styles.sectionTitle}>Your Job Matches</h2>
+                  <p style={styles.sectionSubtitle}>
+                    Jobs matched to your profile. Pick one to analyze fit and get tailored suggestions.
+                  </p>
+                </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#888" }}>
+                  Sort by
+                  <select
+                    value={jobSortBy}
+                    onChange={(e) => setJobSortBy(e.target.value)}
+                    style={{ ...styles.input, width: 160, padding: "8px 10px" }}
+                  >
+                    <option value="match">Best Match</option>
+                    <option value="company">Company (A–Z)</option>
+                    <option value="original">Original order</option>
+                  </select>
+                </label>
               </div>
               {parsingError && (
                 <div style={{ marginBottom: 16, padding: 10, background: "rgba(245,200,66,0.1)", borderRadius: 8, fontSize: 12, color: "#f5c842" }}>
                   {parsingError}. You can add roles manually below.
+                </div>
+              )}
+              {linkedInSearching && jobFeedStatus && (
+                <div style={{ marginBottom: 16, padding: 10, background: "rgba(0,229,160,0.08)", borderRadius: 8, fontSize: 12, color: "#00e5a0", display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={styles.monoStatus}>●</span>
+                  {jobFeedStatus.savedCount > 0
+                    ? `Showing ${jobFeedStatus.savedCount} recent role${jobFeedStatus.savedCount === 1 ? "" : "s"} for “${jobFeedStatus.keywords}”. Looking for fresh listings on LinkedIn — new ones will appear here as they arrive.`
+                    : `Looking for fresh “${jobFeedStatus.keywords}” listings on LinkedIn — this can take a couple of minutes. New roles will appear here as they arrive.`}
+                </div>
+              )}
+              {!linkedInSearching && jobFeedStatus && jobFeedStatus.freshCount != null && (
+                <div style={{ marginBottom: 16, fontSize: 12, color: "#8b8ba7" }}>
+                  {jobFeedStatus.freshCount > 0
+                    ? `Up to date · ${jobFeedStatus.freshCount} new listing${jobFeedStatus.freshCount === 1 ? "" : "s"} from LinkedIn, marked “Just in”.`
+                    : "Up to date · no new listings since the last search."}
                 </div>
               )}
 
@@ -2804,6 +3638,18 @@ body {
                     />
                     India only
                   </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#888" }}>
+                    <input
+                      type="number"
+                      min={0}
+                      max={40}
+                      placeholder="–"
+                      value={candidateYears}
+                      onChange={(e) => setCandidateYears(e.target.value)}
+                      style={{ ...styles.input, width: 56, padding: "8px 10px" }}
+                    />
+                    yrs exp
+                  </label>
                   <select
                     value={linkedInSearchLimit}
                     onChange={(e) => setLinkedInSearchLimit(Number(e.target.value))}
@@ -2821,11 +3667,38 @@ body {
                       ...(linkedInSearching ? styles.disabledButton : {}),
                     }}
                     disabled={linkedInSearching}
-                    onClick={handleSearchLinkedInJobs}
+                    onClick={() => handleSearchLinkedInJobs()}
                   >
                     {linkedInSearching ? "Searching…" : "Search LinkedIn"}
                   </button>
                 </div>
+                {suggestedRoles.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 12 }}>
+                    <span style={{ fontSize: 11, color: "#666" }}>Based on your whole profile, try:</span>
+                    {suggestedRoles.map((role) => {
+                      const active = role === linkedInSearchKeywords;
+                      return (
+                        <button
+                          key={role}
+                          type="button"
+                          style={{
+                            ...styles.smallPill,
+                            cursor: "pointer",
+                            background: active ? "rgba(0,229,160,0.14)" : "transparent",
+                            color: active ? "#00e5a0" : "#888",
+                            borderColor: active ? "#00e5a0" : "#333",
+                          }}
+                          onClick={() => {
+                            setLinkedInSearchKeywords(role);
+                            handleSearchLinkedInJobs(role);
+                          }}
+                        >
+                          {role}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
                 {linkedInSearchError && (
                   <div style={{ marginBottom: 8, fontSize: 12, color: "#ff5f5f" }}>{linkedInSearchError}</div>
                 )}
@@ -2869,16 +3742,36 @@ body {
                 </div>
               </div>
 
+              {belowLevelJobIds.size > 0 && (
+                <div style={{ marginBottom: 12, fontSize: 12, color: "#8b8ba7", display: "flex", alignItems: "center", gap: 8 }}>
+                  {showBelowLevelJobs
+                    ? `Showing ${belowLevelJobIds.size} role${belowLevelJobIds.size === 1 ? "" : "s"} that ask for less experience than your ${yearsNum} years.`
+                    : `Hid ${belowLevelJobIds.size} role${belowLevelJobIds.size === 1 ? "" : "s"} that ask for less experience than your ${yearsNum} years.`}
+                  <button
+                    type="button"
+                    onClick={() => setShowBelowLevelJobs((v) => !v)}
+                    style={{ background: "none", border: "none", color: "#00e5a0", cursor: "pointer", fontSize: 12, padding: 0 }}
+                  >
+                    {showBelowLevelJobs ? "Hide them" : "Show them"}
+                  </button>
+                </div>
+              )}
+              {sortedJobs.length === 0 && !linkedInSearching && (
+                <div style={{ padding: 24, textAlign: "center", fontSize: 13, color: "#8b8ba7", border: "1px dashed rgba(255,255,255,0.12)", borderRadius: 12, marginBottom: 16 }}>
+                  No jobs yet. Search LinkedIn above to find roles that match your resume.
+                </div>
+              )}
               <div style={styles.jobGrid}>
-                {jobs.map((job) => {
+                {sortedJobs.map((job) => {
                   const hovered = hoveredJobId === job.id;
+                  const matchInfo = jobMatchScores.get(job.id);
                   return (
                     <div
                       key={job.id}
                       style={styles.jobCard(hovered)}
                       onMouseEnter={() => setHoveredJobId(job.id)}
                       onMouseLeave={() => setHoveredJobId(null)}
-                      onClick={() => handleJobAnalyzeClick(job)}
+                      onClick={() => setExpandedJob(job)}
                     >
                       <div
                         style={{
@@ -2913,9 +3806,16 @@ body {
                         <div style={styles.jobSalary}>{job.salary}</div>
                       </div>
                       <div style={styles.jobMetaRow}>
-                        <div style={styles.badgePill(job.badge)}>
-                          {job.badge}
-                        </div>
+                        {matchInfo && (
+                          <div style={styles.matchPill(matchInfo.score)}>
+                            {matchInfo.score}% Match
+                          </div>
+                        )}
+                        {job.badge && (
+                          <div style={styles.badgePill(job.badge)}>
+                            {job.badge}
+                          </div>
+                        )}
                         {job.source === "linkedin" && (
                           <div style={styles.sourcePill}>LinkedIn</div>
                         )}
@@ -2939,7 +3839,7 @@ body {
                           type="button"
                           style={styles.analyzeCta(hovered)}
                         >
-                          Analyze My Fit →
+                          View Details →
                         </button>
                         <span
                           style={{
@@ -2957,93 +3857,126 @@ body {
             </section>
           )}
 
-          {step === "analyze" && (
-            <section style={styles.stepSection}>
-              <div style={styles.backRow}>
-                <div style={styles.backLabelRow}>
+          {expandedJob && (
+            <div
+              style={styles.jobModalOverlay}
+              onClick={() => setExpandedJob(null)}
+            >
+              <div style={styles.jobModalCard} onClick={(e) => e.stopPropagation()}>
+                <button
+                  type="button"
+                  style={styles.jobModalClose}
+                  onClick={() => setExpandedJob(null)}
+                >
+                  ✕
+                </button>
+                <div style={styles.jobCompany}>{expandedJob.company.toUpperCase()}</div>
+                <div style={{ ...styles.jobTitle, fontSize: 24, marginBottom: 10 }}>
+                  {expandedJob.role}
+                </div>
+                <div style={{ ...styles.jobMetaRow, justifyContent: "flex-start", flexWrap: "wrap", gap: 8 }}>
+                  {jobMatchScores.get(expandedJob.id) && (
+                    <div style={styles.matchPill(jobMatchScores.get(expandedJob.id).score)}>
+                      {jobMatchScores.get(expandedJob.id).score}% Match
+                    </div>
+                  )}
+                  <div style={styles.badgePill(expandedJob.badge)}>{expandedJob.badge}</div>
+                  {expandedJob.source === "linkedin" && (
+                    <div style={styles.sourcePill}>LinkedIn</div>
+                  )}
+                </div>
+                {expandedJob.url && (
+                  <a
+                    href={expandedJob.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ fontSize: 12, color: "#9bbcf6", display: "inline-block", marginTop: 4 }}
+                  >
+                    View full posting on LinkedIn →
+                  </a>
+                )}
+                <div style={styles.jobModalDivider} />
+
+                {jobSummaryLoading && (
+                  <div style={{ ...styles.monoStatus, marginBottom: 16 }}>
+                    Summarizing role details…
+                  </div>
+                )}
+
+                <div style={styles.jobSummaryGrid}>
+                  <div style={styles.jobSummaryItem}>
+                    <div style={styles.jobSummaryLabel}>Designation</div>
+                    <div style={styles.jobSummaryValue}>{expandedJob.role || "Not specified"}</div>
+                  </div>
+                  <div style={styles.jobSummaryItem}>
+                    <div style={styles.jobSummaryLabel}>Years of Experience</div>
+                    <div style={styles.jobSummaryValue}>
+                      {jobSummary ? jobSummary.yearsOfExperience : "…"}
+                    </div>
+                  </div>
+                  <div style={styles.jobSummaryItem}>
+                    <div style={styles.jobSummaryLabel}>Domain</div>
+                    <div style={styles.jobSummaryValue}>{jobSummary ? jobSummary.domain : "…"}</div>
+                  </div>
+                  <div style={styles.jobSummaryItem}>
+                    <div style={styles.jobSummaryLabel}>Salary</div>
+                    <div style={styles.jobSummaryValue}>{expandedJob.salary || "Not mentioned"}</div>
+                  </div>
+                  <div style={styles.jobSummaryItem}>
+                    <div style={styles.jobSummaryLabel}>Location</div>
+                    <div style={styles.jobSummaryValue}>{expandedJob.location || "Not specified"}</div>
+                  </div>
+                  <div style={{ ...styles.jobSummaryItem, gridColumn: "1 / -1" }}>
+                    <div style={styles.jobSummaryLabel}>Skill Sets</div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                      {jobSummary && jobSummary.skills.length ? (
+                        jobSummary.skills.map((s) => (
+                          <span key={s} style={styles.skillChip}>{s}</span>
+                        ))
+                      ) : (
+                        <span style={styles.jobSummaryValue}>{jobSummary ? "Not specified" : "…"}</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  style={{ ...styles.ghostButton, marginTop: 20 }}
+                  onClick={() => setShowFullJd((v) => !v)}
+                >
+                  {showFullJd ? "Hide full description" : "Show full description"}
+                </button>
+                {showFullJd && (
+                  <div style={{ ...styles.jobModalJd, marginTop: 12 }}>
+                    {expandedJob.jd || "No job description available."}
+                  </div>
+                )}
+
+                <div style={styles.jobModalActions}>
                   <button
                     type="button"
-                    style={styles.smallBackButton}
-                    onClick={() => setStep("select")}
+                    style={styles.dangerButton}
+                    onClick={() => {
+                      handleDeleteJob(expandedJob.id);
+                      setExpandedJob(null);
+                    }}
                   >
-                    ← Back to Job Matches
+                    ✕ Remove role
                   </button>
-                  <div>
-                    <div style={styles.backText}>Analyzing for</div>
-                    <div style={styles.analyzeTitle}>
-                      {selectedJob
-                        ? `${selectedJob.role} @ ${selectedJob.company}`
-                        : "Select a job"}
-                    </div>
-                  </div>
+                  <button
+                    type="button"
+                    style={styles.primaryButton}
+                    onClick={() => {
+                      handleJobAnalyzeClick(expandedJob);
+                      setExpandedJob(null);
+                    }}
+                  >
+                    Analyze My Fit →
+                  </button>
                 </div>
               </div>
-
-              <div style={styles.twoColumn}>
-                <div style={styles.colLeft}>
-                  <ResumeDocument resume={resume || SAMPLE_RESUME} />
-                </div>
-                <aside style={styles.colRightFixed}>
-                  <div style={styles.sideCard}>
-                    <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                      <div style={styles.avatarCircle}>
-                        {(resume || SAMPLE_RESUME).name
-                          .split(" ")
-                          .map((n) => n[0])
-                          .join("")
-                          .slice(0, 2)}
-                      </div>
-                      <div>
-                        <div style={styles.resumeName}>{(resume || SAMPLE_RESUME).name}</div>
-                        <div style={styles.resumeTitle}>{(resume || SAMPLE_RESUME).title}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div style={styles.sideCard}>
-                    <div
-                      style={{
-                        ...styles.panelLabel,
-                        marginBottom: 6,
-                      }}
-                    >
-                      Job Description
-                    </div>
-                    <div style={styles.jdScrollBox}>
-                      {selectedJob ? selectedJob.jd : "No job selected."}
-                    </div>
-                  </div>
-
-                  <div style={styles.sideCard}>
-                    <button
-                      type="button"
-                      style={{
-                        ...styles.primaryButton,
-                        width: "100%",
-                        justifyContent: "center",
-                        ...(loading ? styles.disabledButton : {}),
-                      }}
-                      disabled={loading}
-                      onClick={handleAnalyzeResume}
-                    >
-                      ⚡ Analyze My Resume
-                    </button>
-                    {loading && (
-                      <div style={{ marginTop: 8 }}>
-                        <span style={styles.monoStatus}>{loadingMsg}</span>
-                      </div>
-                    )}
-                    {!loading && score != null && (
-                      <div style={{ marginTop: 8 }}>
-                        <span style={styles.monoStatus}>
-                          Last score: {score}/100
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                </aside>
-              </div>
-            </section>
+            </div>
           )}
 
           {step === "suggestions" && (
@@ -3052,24 +3985,30 @@ body {
                 <button
                   type="button"
                   style={styles.smallBackButton}
-                  onClick={() => setStep("analyze")}
+                  onClick={() => setStep("select")}
                 >
-                  ← Back to Resume
+                  ← Back to Job Matches
                 </button>
                 <div style={styles.analyzeTitle}>
                   {selectedJob
                     ? `${selectedJob.role} @ ${selectedJob.company}`
-                    : "Suggestions"}
+                    : "Tailor"}
                 </div>
               </div>
               <div style={styles.sectionHeader}>
-                <h2 style={styles.sectionTitle}>Your Match & Roadmap</h2>
+                <h2 style={styles.sectionTitle}>Tailor your resume</h2>
                 <p style={styles.sectionSubtitle}>
-                  Review how closely your current story fits this role, then
-                  selectively apply edits that keep every fact intact.
+                  See how you fit this role, then work through the gaps with the
+                  assistant. Accepted edits appear in your resume on the left.
                 </p>
               </div>
 
+              {loading && score == null && !scoreBreakdown && (
+                <div style={{ ...styles.scoreCard, padding: 18 }}>
+                  <span style={styles.monoStatus}>{loadingMsg || "Scoring your resume against this job…"}</span>
+                </div>
+              )}
+              {scoreBreakdown && (
               <div style={styles.scoreCard}>
                 <div style={styles.scoreLayout}>
                   <div style={styles.scoreCircleWrapper}>
@@ -3089,10 +4028,9 @@ body {
                             {breakdown.label || tier.label}
                           </div>
                           <div style={styles.scoreSummary}>
-                            {breakdown.summary ||
-                              "We estimate your experience is directionally aligned with this role. Targeted edits below can further sharpen the match and make impact easier to see at a glance."}
+                            {breakdown.summary}
                           </div>
-                          <div style={styles.breakdownGrid}>
+                          {!breakdown.unavailable && <div style={styles.breakdownGrid}>
                             {[
                               { key: "skills", label: "Skills" },
                               { key: "experience", label: "Experience" },
@@ -3127,20 +4065,17 @@ body {
                                 </div>
                               );
                             })}
-                          </div>
-                          <div style={styles.keyGapsTitle}>Key Gaps</div>
-                          <ul style={styles.keyGapsList}>
-                            {(keyGaps && keyGaps.length
-                              ? keyGaps.slice(0, 3)
-                              : [
-                                  "Clarify quantified impact using directional or approximate metrics.",
-                                  "Surface experimentation, testing, or measurement where relevant.",
-                                  "Dial in language to mirror terms used in the job description.",
-                                ]
-                            ).map((gap, idx) => (
-                              <li key={idx}>⚠ {gap}</li>
-                            ))}
-                          </ul>
+                          </div>}
+                          {keyGaps && keyGaps.length > 0 && (
+                            <>
+                              <div style={styles.keyGapsTitle}>Key Gaps</div>
+                              <ul style={styles.keyGapsList}>
+                                {keyGaps.slice(0, 3).map((gap, idx) => (
+                                  <li key={idx}>⚠ {gap}</li>
+                                ))}
+                              </ul>
+                            </>
+                          )}
                         </>
                       );
                     })()}
@@ -3148,215 +4083,57 @@ body {
                 </div>
               </div>
 
-              <div style={styles.suggestionsHeaderRow}>
-                <div>
-                  <h3
-                    style={{
-                      ...styles.sectionTitle,
-                      fontSize: 20,
-                      marginBottom: 2,
-                    }}
-                  >
-                    Tailored Suggestions
-                  </h3>
-                  <p style={styles.sectionSubtitle}>
-                    Review each suggestion. We won't change any facts about your
-                    resume.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleApproveAll}
-                  style={{
-                    ...styles.ghostButton,
-                    border: allApproved
-                      ? "1px solid rgba(0,229,160,0.5)"
-                      : "1px solid #333",
-                    color: allApproved ? "#00e5a0" : "#888",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {allApproved ? "✓ All Approved" : "Approve All"}
-                </button>
-              </div>
+              )}
 
-              <div
-                style={{
-                  marginBottom: 20,
-                  padding: 16,
-                  background: "rgba(0,0,0,0.03)",
-                  borderRadius: 8,
-                  border: "1px solid rgba(0,0,0,0.06)",
-                }}
-              >
-                <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 14 }}>
-                  Regenerate with more context
-                </div>
-                <p style={{ margin: "0 0 10px", fontSize: 13, color: "#555" }}>
-                  Add details you want to emphasize (e.g. "I have worked extensively in omni-channel setup"). We'll generate new suggestions and bullet text that incorporate this.
-                </p>
-                <textarea
-                  value={regenerationContext}
-                  onChange={(e) => setRegenerationContext(e.target.value)}
-                  placeholder="e.g. I have worked extensively in omni-channel setup, or: Led cross-functional teams across 3 regions…"
-                  rows={3}
-                  style={{
-                    width: "100%",
-                    maxWidth: 560,
-                    padding: 10,
-                    borderRadius: 6,
-                    border: "1px solid #ccc",
-                    fontSize: 13,
-                    resize: "vertical",
-                    boxSizing: "border-box",
+              {selectedJob && resume && (() => {
+                const acceptedEdits = suggestions.filter((s) => approvedIds.has(s.id));
+                const workingResume = applyApprovedChangesClientSide(resume, acceptedEdits);
+                return (
+                  <div style={{ ...styles.twoColumn, marginTop: 16 }}>
+                    <div style={styles.colLeft}>
+                      <ResumeDocument
+                        resume={workingResume}
+                        highlights={acceptedEdits.map((e) => e.proposed).filter(Boolean)}
+                        afterMode
+                      />
+                    </div>
+                    <aside style={{ width: 460, maxWidth: "100%", flexShrink: 0, position: "sticky", top: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+                <TailoringAssistant
+                  key={selectedJob.id}
+                  job={selectedJob}
+                  resume={workingResume}
+                  chat={assistantChat}
+                  setChat={setAssistantChat}
+                  onAccept={(edit) => {
+                    setSuggestions((prev) => [...prev, { ...edit, title: edit.jdRequirement }]);
+                    setApprovedIds((prev) => new Set(prev).add(edit.id));
                   }}
                 />
-                <div style={{ marginTop: 10 }}>
-                  <button
-                    type="button"
-                    onClick={handleRegenerateSuggestions}
-                    disabled={regeneratingSuggestions}
-                    style={{
-                      ...styles.primaryButton,
-                      opacity: regeneratingSuggestions ? 0.7 : 1,
-                    }}
-                  >
-                    {regeneratingSuggestions ? "Regenerating…" : "Regenerate suggestions with this context"}
-                  </button>
-                </div>
-              </div>
-
-              <div style={styles.suggestionsList}>
-                {suggestions.map((s) => {
-                  const approved = approvedIds.has(s.id);
-                  const rejected = rejectedIds.has(s.id);
-                  const state = approved
-                    ? "approved"
-                    : rejected
-                    ? "rejected"
-                    : "default";
-                  const isAddition = !s.original;
-                  return (
-                    <div key={s.id} style={styles.suggestionCard(state)}>
-                      <div style={styles.suggestionTopRow}>
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <div style={styles.sectionPill}>{s.section}</div>
-                          <div style={styles.typePill}>{s.type}</div>
-                        </div>
-                        <div
-                          style={{
-                            display: "flex",
-                            gap: 6,
-                            alignItems: "center",
-                          }}
-                        >
-                          <button
-                            type="button"
-                            style={styles.dangerButton}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleReject(s.id);
-                            }}
-                          >
-                            ✕ Reject
-                          </button>
-                          <button
-                            type="button"
-                            style={styles.successButton}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              toggleApprove(s.id);
-                            }}
-                          >
-                            ✓ Approve
-                          </button>
-                        </div>
-                      </div>
-                      <div style={styles.suggestionTitle}>{s.title}</div>
-                      <div style={styles.diffBlock}>
-                        {isAddition ? (
-                          <>
-                            <div style={styles.diffLabel}>Add to Resume (editable)</div>
-                            <textarea
-                              value={s.proposed}
-                              onChange={(e) => updateSuggestionProposed(s.id, e.target.value)}
-                              rows={3}
-                              style={{
-                                width: "100%",
-                                padding: 8,
-                                borderRadius: 4,
-                                border: "1px solid rgba(0,229,160,0.4)",
-                                fontSize: 13,
-                                background: "rgba(0,229,160,0.06)",
-                                color: "#fff",
-                                resize: "vertical",
-                                boxSizing: "border-box",
-                              }}
-                            />
-                          </>
-                        ) : (
-                          <>
-                            <div style={styles.diffLabel}>Before (editable)</div>
-                            <textarea
-                              value={s.original}
-                              onChange={(e) => updateSuggestionOriginal(s.id, e.target.value)}
-                              rows={2}
-                              style={{
-                                width: "100%",
-                                padding: 8,
-                                borderRadius: 4,
-                                border: "1px solid rgba(255,100,100,0.3)",
-                                fontSize: 13,
-                                background: "rgba(255,100,100,0.05)",
-                                color: "#fff",
-                                resize: "vertical",
-                                boxSizing: "border-box",
-                              }}
-                            />
-                            <div style={{ ...styles.diffLabel, marginTop: 6 }}>After (editable)</div>
-                            <textarea
-                              value={s.proposed}
-                              onChange={(e) => updateSuggestionProposed(s.id, e.target.value)}
-                              rows={3}
-                              style={{
-                                width: "100%",
-                                padding: 8,
-                                borderRadius: 4,
-                                border: "1px solid rgba(0,229,160,0.4)",
-                                fontSize: 13,
-                                background: "rgba(0,229,160,0.06)",
-                                color: "#fff",
-                                resize: "vertical",
-                                boxSizing: "border-box",
-                              }}
-                            />
-                          </>
-                        )}
-                      </div>
-                      <div style={styles.whyLine}>💡 {s.why}</div>
-                    </div>
-                  );
-                })}
-              </div>
+                      <details style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "10px 14px", background: "rgba(255,255,255,0.02)" }}>
+                        <summary style={{ cursor: "pointer", fontSize: 12, color: "#8b8ba7" }}>Job description</summary>
+                        <div style={{ ...styles.jdScrollBox, marginTop: 10 }}>{selectedJob.jd || "No job description available."}</div>
+                      </details>
+                    </aside>
+                  </div>
+                );
+              })()}
 
               <div style={styles.suggestionsFooterRow}>
                 <div>
                   {approvedCount
-                    ? `${approvedCount} suggestion(s) approved`
-                    : "Select suggestions to apply"}
+                    ? `${approvedCount} edit${approvedCount === 1 ? "" : "s"} applied`
+                    : "No edits applied yet – you can continue with your original resume"}
                 </div>
                 <button
                   type="button"
                   onClick={handleApplyChanges}
-                  disabled={!approvedCount || applyingChanges}
+                  disabled={applyingChanges}
                   style={{
                     ...styles.primaryButton,
-                    ...(!approvedCount || applyingChanges
-                      ? styles.disabledButton
-                      : {}),
+                    ...(applyingChanges ? styles.disabledButton : {}),
                   }}
                 >
-                  Apply {approvedCount || 0} Changes →
+                  {approvedCount ? `Continue with ${approvedCount} edit${approvedCount === 1 ? "" : "s"} →` : "Continue with original resume →"}
                 </button>
               </div>
             </section>
@@ -3380,98 +4157,71 @@ body {
                   {approvedIds.size
                     ? `${approvedIds.size} approved change${
                         approvedIds.size > 1 ? "s" : ""
-                      } applied to the AFTER version.`
-                    : "Preview your original resume alongside an updated version with suggested edits."}
+                      } applied. Click any text below to edit it directly.`
+                    : "Click any text below to edit it directly."}
                 </p>
               </div>
 
-              <div style={styles.previewLayout}>
-                <div style={styles.previewColumn}>
-                  <div style={styles.previewLabelRow}>
-                    <span style={styles.previewLabel}>Before</span>
-                  </div>
-                  <ResumeDocument resume={resume} dim />
-                </div>
-                <div style={styles.previewColumn}>
-                  <div style={styles.previewLabelRow}>
-                    <span style={styles.previewAfterLabel}>
-                      AFTER ✓ <span>Highlighting applied text</span>
-                    </span>
-                  </div>
-                  <ResumeDocument
-                    resume={updatedResume || resume}
-                    highlights={previewHighlights}
-                    afterMode
-                  />
-                </div>
+              <div style={{ maxWidth: 640, margin: "0 auto" }}>
+                <ResumeDocument
+                  resume={getFinalResume()}
+                  editable
+                  onEdit={resumeEditHandlers}
+                />
               </div>
 
               <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
-                <div style={{ fontWeight: 600, marginBottom: 8, fontSize: 15 }}>
-                  Edit final version
-                </div>
-                <p style={{ margin: "0 0 14px", color: "#555", fontSize: 13 }}>
-                  Remove bullets or edit text below. Changes apply to the version shown in the preview and in the downloaded PDF without breaking the layout.
+                <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 15 }}>Preview in a designed template</div>
+                <p style={{ margin: "0 0 12px", color: "#555", fontSize: 13 }}>
+                  Rendered live by Reactive Resume's template engine — pick one to preview as a PDF, right here.
                 </p>
-                {(() => {
-                  const data = getFinalResume();
-                  return (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 20, maxWidth: 640 }}>
-                      <div>
-                        <label style={{ display: "block", fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Summary</label>
-                        <textarea
-                          value={data.summary || ""}
-                          onChange={(e) => updateFinalSummary(e.target.value)}
-                          rows={4}
-                          style={{ width: "100%", padding: 10, borderRadius: 6, border: "1px solid #ccc", fontSize: 13, resize: "vertical", boxSizing: "border-box" }}
-                        />
-                      </div>
-                      <div>
-                        <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 10 }}>Experience bullets</div>
-                        {(data.experience || []).map((exp, expIdx) => (
-                          <div key={expIdx} style={{ marginBottom: 16, padding: 12, background: "rgba(0,0,0,0.03)", borderRadius: 8 }}>
-                            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>{exp.role} · {exp.company}</div>
-                            {(exp.bullets || []).map((bullet, bulletIdx) => (
-                              <div key={bulletIdx} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 8 }}>
-                                <textarea
-                                  value={bullet}
-                                  onChange={(e) => updateFinalBullet(expIdx, bulletIdx, e.target.value)}
-                                  rows={2}
-                                  style={{ flex: 1, padding: 8, borderRadius: 4, border: "1px solid #ccc", fontSize: 13, resize: "vertical", boxSizing: "border-box" }}
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => removeFinalBullet(expIdx, bulletIdx)}
-                                  style={{ ...styles.dangerButton, flexShrink: 0, padding: "8px 10px" }}
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                            ))}
-                            <button
-                              type="button"
-                              onClick={() => addFinalBullet(expIdx)}
-                              style={{ ...styles.ghostButton, fontSize: 12 }}
-                            >
-                              + Add bullet
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                      <div>
-                        <label style={{ display: "block", fontWeight: 600, fontSize: 12, marginBottom: 6 }}>Skills (comma or · separated; spaces allowed)</label>
-                        <textarea
-                          value={skillsEditText}
-                          onChange={(e) => setSkillsEditText(e.target.value)}
-                          onBlur={(e) => updateFinalSkills(e.target.value)}
-                          rows={2}
-                          placeholder="e.g. SCM, Inventory Management, Demand Planning"
-                          style={{ width: "100%", padding: 10, borderRadius: 6, border: "1px solid #ccc", fontSize: 13, resize: "vertical", boxSizing: "border-box" }}
-                        />
-                      </div>
-                    </div>
-                  );
-                })()}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                  {RX_TEMPLATE_OPTIONS.map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => handleSelectTemplate(t.id)}
+                      disabled={renderingTemplate}
+                      title={t.tags ? t.tags.join(" · ") : undefined}
+                      style={{
+                        ...styles.ghostButton,
+                        fontSize: 12,
+                        ...(selectedTemplate === t.id
+                          ? { background: "#0084d1", color: "#fff", borderColor: "#0084d1" }
+                          : {}),
+                      }}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+
+                {renderingTemplate && (
+                  <p style={{ fontSize: 13, color: "#555" }}>Rendering {selectedTemplate}…</p>
+                )}
+                {templateRenderError && (
+                  <p style={{ color: "#d33", fontSize: 13 }}>{templateRenderError}</p>
+                )}
+                {templatePdfUrl && !renderingTemplate && (
+                  <iframe
+                    src={templatePdfUrl}
+                    title="Template preview"
+                    style={{ width: "100%", height: 800, border: "1px solid #ddd", borderRadius: 8 }}
+                  />
+                )}
+
+                <p style={{ marginTop: 12, fontSize: 12 }}>
+                  <a
+                    href="#"
+                    onClick={(e) => { e.preventDefault(); handleOpenInReactiveResume(); }}
+                    style={{ color: "#4a7ba6" }}
+                  >
+                    {openingInBuilder ? "Opening…" : "Prefer full drag-and-drop editing? Open in Reactive Resume →"}
+                  </a>
+                </p>
+                {openInBuilderError && (
+                  <p style={{ color: "#d33", fontSize: 13 }}>{openInBuilderError}</p>
+                )}
               </div>
 
               <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
@@ -3695,9 +4445,9 @@ body {
                   }}
                   onClick={async () => {
                     const data = updatedResume || resume;
-                    const photoUrl = data?.photoUrl || "/resume-photo.png";
-                    let photoDataUrl = null;
-                    try {
+                    const photoUrl = data?.photoUrl || null;
+                    let photoDataUrl = photoUrl && photoUrl.startsWith("data:") ? photoUrl : null;
+                    if (photoUrl && !photoDataUrl) try {
                       const r = await fetch(photoUrl);
                       const blob = await r.blob();
                       photoDataUrl = await new Promise((res) => {

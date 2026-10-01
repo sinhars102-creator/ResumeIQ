@@ -33,8 +33,11 @@ Edit `.env`:
 
 | Variable | Required | Purpose |
 |----------|----------|---------|
-| `VITE_OPENAI_API_KEY` | Yes | OpenAI API key for resume parsing, scoring, suggestions. [Get one](https://platform.openai.com/api-keys). |
+| `GROQ_API_KEY` | One AI key required | Groq key for resume parsing, fit scoring and job summaries (open-source models, free tier). Used by default when set. [Get one](https://console.groq.com/keys). |
+| `ANTHROPIC_API_KEY` | One AI key required | Anthropic (Claude) key; used when no Groq key is set, or when `LLM_PROVIDER=anthropic`. [Get one](https://console.anthropic.com/settings/keys). |
+| `LLM_PROVIDER`, `GROQ_MODEL`, `ANTHROPIC_MODEL` | Optional | Force a provider (`groq` or `anthropic`) or override its model (defaults: `openai/gpt-oss-120b`, `claude-sonnet-4-6`). All AI calls run on the API server, so keys never reach the browser. |
 | `APIFY_TOKEN` | For job search | Apify token for LinkedIn jobs (and JDs). [Get one](https://console.apify.com/account/integrations). |
+| `RXRESUME_API_KEY` | For tailored suggestions | Reactive Resume account API key; powers AI-tailored bullet suggestions server-side. [Get one](https://rxresu.me) (Settings → API Keys), and add an Anthropic Claude provider under Settings → Integrations. |
 | `VITE_API_URL` | Production only | API base URL when frontend and API are on different hosts (e.g. `https://your-api.fly.dev`). |
 
 ### 3. Run locally
