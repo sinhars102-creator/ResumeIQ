@@ -4,6 +4,7 @@ import { isIP } from "node:net";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
 import { prepareStagedBody, withStagedBody } from "@reactive-resume/api/features/storage/transport";
+import { env } from "@reactive-resume/env/server";
 import { handleMcp } from "../mcp/handler";
 import { handleOpenApi } from "../openapi/handler";
 import {
@@ -45,8 +46,13 @@ export function createApp(options: AppOptions = {}) {
 
 	app.use("/auth/*", async (c, next) => {
 		await next();
-		c.header("Content-Security-Policy", "frame-ancestors 'none'");
-		c.header("X-Frame-Options", "DENY");
+		// Sign-in runs inside the trusted embedder's iframe too; everyone else stays denied.
+		if (env.FRAME_ANCESTORS) {
+			c.header("Content-Security-Policy", `frame-ancestors 'self' ${env.FRAME_ANCESTORS}`);
+		} else {
+			c.header("Content-Security-Policy", "frame-ancestors 'none'");
+			c.header("X-Frame-Options", "DENY");
+		}
 		c.header("Referrer-Policy", "no-referrer");
 		c.header("Cache-Control", "no-store");
 	});

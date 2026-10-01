@@ -26,6 +26,13 @@ export const env = createEnv({
 			.transform((value) => value || undefined)
 			.optional(),
 		SERVER_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+		// Space-separated origins allowed to embed the app in an iframe (e.g. "https://app.example.com").
+		// Unset keeps framing denied everywhere.
+		FRAME_ANCESTORS: z
+			.string()
+			.trim()
+			.transform((value) => value || undefined)
+			.optional(),
 
 		// Database
 		DATABASE_URL: z.url({ protocol: /postgres(ql)?/ }),
