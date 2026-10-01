@@ -3312,6 +3312,8 @@ export default function ResumeIQ() {
   .rq-step:not(.rq-step-active) .rq-step-label { display: none; }
   .rq-step-arrow { display: none; }
   .rq-main-card { padding: 16px !important; border-radius: 14px !important; }
+  .rq-score-layout { flex-direction: column; align-items: stretch !important; }
+  .rq-score-layout > * { flex: 1 1 auto !important; width: 100% !important; min-width: 0 !important; }
   .rq-workspace-bar { flex-wrap: wrap; padding: 8px 12px !important; }
   .rq-two-col > * { flex: 1 1 100% !important; width: 100% !important; position: static !important; }
 }
@@ -3999,7 +4001,7 @@ body {
               )}
               {scoreBreakdown && (
               <div style={styles.scoreCard}>
-                <div style={styles.scoreLayout}>
+                <div className="rq-score-layout" style={styles.scoreLayout}>
                   <div style={styles.scoreCircleWrapper}>
                     {renderScoreCircle()}
                   </div>
@@ -4229,11 +4231,14 @@ body {
                   </p>
                 )}
                 {openInBuilderError && (
-                  <p style={{ color: "var(--rq-danger)", fontSize: 13 }}>{openInBuilderError}</p>
+                  // The editor is optional: when it can't load, the classic editor below still covers editing and PDF export.
+                  <p style={{ fontSize: 13, color: "var(--rq-text-2)", margin: "4px 0 0" }}>
+                    The design editor isn't available right now — you can edit your resume and download it as a PDF below.
+                  </p>
                 )}
               </div>
 
-              <details open={showClassicPreview} style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid color-mix(in srgb, var(--rq-text) 8%, transparent)" }}>
+              <details open={showClassicPreview || !!openInBuilderError} style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid color-mix(in srgb, var(--rq-text) 8%, transparent)" }}>
                 <summary style={{ cursor: "pointer", fontSize: 13, color: "var(--rq-text-2)" }}>Classic editor &amp; PDF formatting</summary>
                 <div style={{ maxWidth: 640, margin: "16px auto 0" }}>
                   <ResumeDocument
@@ -4462,6 +4467,7 @@ body {
                     ...styles.primaryButton,
                     background: "color-mix(in srgb, var(--rq-accent) 15%, transparent)",
                     border: "1px solid color-mix(in srgb, var(--rq-accent) 50%, transparent)",
+                    color: "var(--rq-accent)",
                   }}
                   onClick={async () => {
                     const data = updatedResume || resume;
