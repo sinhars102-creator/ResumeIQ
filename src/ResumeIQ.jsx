@@ -3211,8 +3211,7 @@ export default function ResumeIQ() {
         throw new Error(data?.details || data?.error || `Failed to open in Reactive Resume (${response.status})`);
       }
       // rxresu.me refuses to be framed; only a self-hosted instance can be embedded.
-      if (data.embeddable) setRxEditor({ builderUrl: data.builderUrl });
-      else window.open(data.builderUrl, "_blank", "noopener,noreferrer");
+      setRxEditor({ builderUrl: data.builderUrl, embeddable: !!data.embeddable });
     } catch (e) {
       console.error("Open in Reactive Resume failed:", e);
       setOpenInBuilderError(e.message || "Failed to open in Reactive Resume.");
@@ -3220,6 +3219,18 @@ export default function ResumeIQ() {
       setOpeningInBuilder(false);
     }
   };
+
+  const editorRequestedRef = useRef(false);
+  useEffect(() => {
+    if (step !== "preview") {
+      editorRequestedRef.current = false;
+      return;
+    }
+    if (editorRequestedRef.current) return;
+    editorRequestedRef.current = true;
+    handleOpenInReactiveResume();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   const currentStepOrder = getStepOrder(step);
 
@@ -4104,29 +4115,14 @@ body {
                 <h2 style={styles.sectionTitle}>Updated Resume</h2>
                 <p style={styles.sectionSubtitle}>
                   {approvedIds.size
-                    ? `${approvedIds.size} approved change${
-                        approvedIds.size > 1 ? "s" : ""
-                      } applied. Click any text below to edit it directly.`
-                    : "Click any text below to edit it directly."}
+                    ? `${approvedIds.size} approved change${approvedIds.size > 1 ? "s" : ""} applied. `
+                    : ""}
+                  Pick a template, restyle and edit your resume, then export the PDF.
                 </p>
               </div>
 
-              <div style={{ maxWidth: 640, margin: "0 auto" }}>
-                <ResumeDocument
-                  resume={getFinalResume()}
-                  editable
-                  onEdit={resumeEditHandlers}
-                />
-              </div>
-
-              <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
-                  <div>
-                    <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 15 }}>Design &amp; edit</div>
-                    <p style={{ margin: 0, color: "#555", fontSize: 13 }}>
-                      Pick a template, restyle and fine-tune your resume, then export the PDF — all in the editor below.
-                    </p>
-                  </div>
+              <div>
+                <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     {rxEditor && (
                       <a href={rxEditor.builderUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#4a7ba6", fontSize: 12 }}>
@@ -4134,11 +4130,22 @@ body {
                       </a>
                     )}
                     <button type="button" onClick={handleOpenInReactiveResume} disabled={openingInBuilder} style={styles.primaryButton}>
-                      {openingInBuilder ? "Loading editor…" : rxEditor ? "Reload with latest edits" : "Open editor"}
+                      {openingInBuilder ? "Loading editor…" : rxEditor ? "Reload with latest edits" : "Load editor"}
                     </button>
                   </div>
                 </div>
-                {rxEditor && (
+                {openingInBuilder && !rxEditor && (
+                  <div style={{ height: 320, display: "flex", alignItems: "center", justifyContent: "center", color: "#8b8ba7", fontSize: 13, border: "1px dashed rgba(255,255,255,0.12)", borderRadius: 8 }}>
+                    Loading the resume editor…
+                  </div>
+                )}
+                {rxEditor && !rxEditor.embeddable && (
+                  <p style={{ fontSize: 13, color: "#8b8ba7" }}>
+                    This Reactive Resume instance (rxresu.me) can't be shown inside ResumeIQ. Set RXRESUME_URL to a self-hosted copy, or{" "}
+                    <a href={rxEditor.builderUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#4a7ba6" }}>open it in a new tab ↗</a>.
+                  </p>
+                )}
+                {rxEditor?.embeddable && (
                   <iframe
                     key={rxEditor.builderUrl}
                     src={rxEditor.builderUrl}
@@ -4151,7 +4158,16 @@ body {
                 )}
               </div>
 
-              <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
+              <details style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                <summary style={{ cursor: "pointer", fontSize: 13, color: "#8b8ba7" }}>Classic editor &amp; PDF formatting</summary>
+                <div style={{ maxWidth: 640, margin: "16px auto 0" }}>
+                  <ResumeDocument
+                    resume={getFinalResume()}
+                    editable
+                    onEdit={resumeEditHandlers}
+                  />
+                </div>
+              <div style={{ marginTop: 24 }}>
                 <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 15 }}>
                   PDF formatting
                 </div>
@@ -4361,6 +4377,8 @@ body {
                   </div>
                 </div>
               </div>
+
+              </details>
 
               <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 18, alignItems: "center" }}>
                 <button
