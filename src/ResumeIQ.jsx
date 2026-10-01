@@ -59,11 +59,11 @@ const styles = {
   appRoot: {
     width: "100%",
     minHeight: "100vh",
-    background: "#0a0a14",
-    color: "#f0f0e8",
+    background: "var(--rq-bg)",
+    color: "var(--rq-text)",
     padding: "24px 20px 40px",
     fontFamily:
-      "'DM Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
+      "'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
     display: "flex",
     justifyContent: "center",
     boxSizing: "border-box",
@@ -79,9 +79,9 @@ const styles = {
     zIndex: 20,
     padding: "12px 0 16px",
     background:
-      "linear-gradient(to bottom, rgba(10,10,20,0.96), rgba(10,10,20,0.9), rgba(10,10,20,0))",
-    backdropFilter: "blur(22px)",
-    borderBottom: "1px solid #1e1e30",
+      "color-mix(in srgb, var(--rq-bg) 92%, transparent)",
+    backdropFilter: "blur(8px)",
+    borderBottom: "1px solid var(--rq-border)",
     marginBottom: 24,
   },
   headerRow: {
@@ -91,26 +91,25 @@ const styles = {
     gap: 20,
   },
   logo: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 12,
-    letterSpacing: 4,
-    textTransform: "uppercase",
+    fontFamily: "inherit",
+    fontSize: 16,
+    fontWeight: 600,
     display: "flex",
     alignItems: "center",
     gap: 8,
-    color: "#f0f0e8",
+    color: "var(--rq-text)",
   },
   logoMark: {
     fontSize: 16,
-    color: "#00e5a0",
+    color: "var(--rq-accent)",
   },
   stepNav: {
     display: "flex",
     alignItems: "center",
     gap: 10,
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
-    color: "#888",
+    fontFamily: "inherit",
+    fontSize: 12,
+    color: "var(--rq-text-2)",
   },
   stepItem: (state) => ({
     display: "flex",
@@ -129,16 +128,15 @@ const styles = {
     width: 20,
     height: 20,
     borderRadius: "50%",
-    border: `1px solid ${isActive ? "#00e5a0" : "#444"}`,
-    color: isActive ? "#0a0a14" : "#f0f0e8",
-    background: isActive ? "#00e5a0" : "transparent",
+    border: `1px solid ${isActive ? "var(--rq-accent)" : "var(--rq-border-strong)"}`,
+    color: isActive ? "var(--rq-bg)" : "var(--rq-text)",
+    background: isActive ? "var(--rq-accent)" : "transparent",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     fontSize: 11,
   }),
   stepLabel: {
-    textTransform: "uppercase",
   },
   stepArrow: {
     fontSize: 10,
@@ -146,11 +144,11 @@ const styles = {
   },
   mainCard: {
     background:
-      "radial-gradient(circle at top left, #151528 0, #05050b 52%, #05050b 100%)",
+      "var(--rq-surface)",
     borderRadius: 20,
-    border: "1px solid #1e1e30",
+    border: "1px solid var(--rq-border)",
     padding: 24,
-    boxShadow: "0 24px 80px rgba(0,0,0,0.7)",
+    boxShadow: "0 1px 2px rgba(31, 42, 46, 0.04), 0 8px 24px rgba(31, 42, 46, 0.05)",
   },
   stepSection: {
     animation: "fadeUp 0.6s ease-out forwards",
@@ -161,62 +159,60 @@ const styles = {
     marginBottom: 32,
   },
   uploadTitle: {
-    fontFamily: "'DM Mono', monospace",
+    fontFamily: "inherit",
     fontSize: 12,
-    letterSpacing: 3,
-    color: "#00e5a0",
+    color: "var(--rq-accent)",
     marginBottom: 8,
-    textTransform: "uppercase",
   },
   uploadHeadline: {
-    fontFamily: "'Playfair Display', serif",
+    fontFamily: "inherit",
     fontSize: 28,
     fontWeight: 700,
-    color: "#f0f0e8",
+    color: "var(--rq-text)",
     marginBottom: 8,
     lineHeight: 1.3,
   },
   uploadHeadlineAccent: {
-    color: "#00e5a0",
+    color: "var(--rq-accent)",
   },
   uploadSubtext: {
     fontSize: 14,
-    color: "#888",
+    color: "var(--rq-text-2)",
     maxWidth: 480,
     margin: "0 auto",
     lineHeight: 1.5,
   },
   dropZone: {
-    border: "2px dashed #333",
+    border: "2px dashed var(--rq-border)",
     borderRadius: 16,
     padding: "48px 24px",
     textAlign: "center",
-    background: "rgba(30,30,48,0.4)",
+    background: "color-mix(in srgb, var(--rq-border) 40%, transparent)",
     cursor: "pointer",
     transition: "border-color 0.2s, background 0.2s",
   },
   dropZoneHover: {
-    borderColor: "rgba(0,229,160,0.5)",
-    background: "rgba(0,229,160,0.06)",
+    borderColor: "color-mix(in srgb, var(--rq-accent) 50%, transparent)",
+    background: "color-mix(in srgb, var(--rq-accent) 6%, transparent)",
   },
   dropZoneIcon: {
     fontSize: 36,
     marginBottom: 12,
-    color: "#666",
+    color: "var(--rq-text-3)",
   },
   dropZoneLabel: {
     fontSize: 15,
-    color: "#f0f0e8",
+    color: "var(--rq-text)",
     marginBottom: 4,
   },
   dropZoneBrowse: {
     fontSize: 13,
-    color: "#00e5a0",
+    color: "var(--rq-accent)",
     cursor: "pointer",
   },
   dropZoneTypes: {
     fontSize: 11,
-    color: "#666",
+    color: "var(--rq-text-3)",
     marginTop: 8,
   },
   featureGrid: {
@@ -229,27 +225,27 @@ const styles = {
     marginRight: "auto",
   },
   featureCard: {
-    background: "rgba(15,15,31,0.8)",
-    border: "1px solid #1e1e30",
+    background: "color-mix(in srgb, var(--rq-surface) 80%, transparent)",
+    border: "1px solid var(--rq-border)",
     borderRadius: 12,
     padding: 16,
   },
   featureCardTitle: {
     fontSize: 12,
     fontWeight: 600,
-    color: "#f0f0e8",
+    color: "var(--rq-text)",
     marginBottom: 4,
   },
   featureCardDesc: {
     fontSize: 11,
-    color: "#888",
+    color: "var(--rq-text-2)",
     lineHeight: 1.4,
   },
   parsingCard: {
     maxWidth: 420,
     margin: "0 auto",
-    background: "rgba(15,15,31,0.9)",
-    border: "1px solid #1e1e30",
+    background: "color-mix(in srgb, var(--rq-surface) 90%, transparent)",
+    border: "1px solid var(--rq-border)",
     borderRadius: 14,
     padding: 24,
   },
@@ -261,20 +257,20 @@ const styles = {
   },
   parsingFileIcon: {
     fontSize: 24,
-    color: "#666",
+    color: "var(--rq-text-3)",
   },
   parsingFileName: {
     fontSize: 14,
-    color: "#f0f0e8",
+    color: "var(--rq-text)",
     fontWeight: 500,
   },
   parsingFileSize: {
     fontSize: 12,
-    color: "#666",
+    color: "var(--rq-text-3)",
   },
   parsingStatusLine: {
     fontSize: 13,
-    color: "#aaa",
+    color: "var(--rq-text-2)",
     marginBottom: 16,
   },
   parsingList: {
@@ -287,28 +283,27 @@ const styles = {
     alignItems: "center",
     gap: 10,
     fontSize: 13,
-    color: "#888",
+    color: "var(--rq-text-2)",
     marginBottom: 10,
   },
   parsingBulletDone: {
-    color: "#00e5a0",
+    color: "var(--rq-accent)",
   },
   parsingBulletPending: {
-    color: "#f5c842",
+    color: "var(--rq-warn)",
   },
   sectionHeader: {
     marginBottom: 18,
   },
   sectionTitle: {
-    fontFamily: "'Playfair Display', serif",
+    fontFamily: "inherit",
     fontSize: 26,
-    fontWeight: 700,
-    letterSpacing: 0.4,
+    fontWeight: 600,
   },
   sectionSubtitle: {
     marginTop: 4,
     fontSize: 13,
-    color: "#888",
+    color: "var(--rq-text-2)",
   },
   twoColumn: {
     display: "flex",
@@ -326,55 +321,52 @@ const styles = {
     flexShrink: 0,
   },
   primaryButton: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 12,
-    borderRadius: 999,
-    padding: "10px 18px",
-    border: "1px solid rgba(0,229,160,0.4)",
-    background:
-      "linear-gradient(135deg, rgba(0,229,160,0.22), rgba(0,229,160,0.05))",
-    color: "#f0f0e8",
+    fontFamily: "inherit",
+    fontSize: 14,
+    fontWeight: 500,
+    borderRadius: 8,
+    padding: "9px 16px",
+    border: "1px solid var(--rq-accent)",
+    background: "var(--rq-accent)",
+    color: "#FFFFFF",
     cursor: "pointer",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     gap: 6,
-    letterSpacing: 1,
-    textTransform: "uppercase",
   },
   ghostButton: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
-    borderRadius: 999,
-    padding: "8px 14px",
-    border: "1px solid #333",
-    background: "transparent",
-    color: "#888",
+    fontFamily: "inherit",
+    fontSize: 13,
+    fontWeight: 500,
+    borderRadius: 8,
+    padding: "7px 12px",
+    border: "1px solid var(--rq-border-strong)",
+    background: "var(--rq-surface)",
+    color: "var(--rq-text)",
     cursor: "pointer",
     display: "inline-flex",
     alignItems: "center",
     gap: 6,
-    textTransform: "uppercase",
-    letterSpacing: 0.6,
   },
   dangerButton: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
+    fontFamily: "inherit",
+    fontSize: 12,
     borderRadius: 999,
     padding: "6px 10px",
-    border: "1px solid rgba(255,95,95,0.7)",
-    background: "rgba(255,95,95,0.06)",
-    color: "#ff5f5f",
+    border: "1px solid color-mix(in srgb, var(--rq-danger) 70%, transparent)",
+    background: "color-mix(in srgb, var(--rq-danger) 6%, transparent)",
+    color: "var(--rq-danger)",
     cursor: "pointer",
   },
   successButton: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
+    fontFamily: "inherit",
+    fontSize: 12,
     borderRadius: 999,
     padding: "6px 10px",
-    border: "1px solid rgba(0,229,160,0.7)",
-    background: "rgba(0,229,160,0.06)",
-    color: "#00e5a0",
+    border: "1px solid color-mix(in srgb, var(--rq-accent) 70%, transparent)",
+    background: "color-mix(in srgb, var(--rq-accent) 6%, transparent)",
+    color: "var(--rq-accent)",
     cursor: "pointer",
   },
   disabledButton: {
@@ -383,9 +375,9 @@ const styles = {
   },
   linkedInPanel: {
     background:
-      "linear-gradient(135deg, rgba(15,15,31,0.95), rgba(10,10,20,0.98))",
+      "var(--rq-surface)",
     borderRadius: 16,
-    border: "1px solid #1e1e30",
+    border: "1px solid var(--rq-border)",
     padding: 18,
     marginBottom: 20,
   },
@@ -397,11 +389,9 @@ const styles = {
     marginBottom: 10,
   },
   panelLabel: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: 1.4,
-    color: "#888",
+    fontFamily: "inherit",
+    fontSize: 12,
+    color: "var(--rq-text-2)",
     display: "flex",
     alignItems: "center",
     gap: 8,
@@ -410,36 +400,37 @@ const styles = {
     fontSize: 10,
     padding: "4px 8px",
     borderRadius: 999,
-    border: "1px solid #333",
-    color: "#888",
+    border: "1px solid var(--rq-border)",
+    color: "var(--rq-text-2)",
   },
   textArea: {
     width: "100%",
     minHeight: 120,
     resize: "vertical",
-    background: "#0f0f1f",
+    boxSizing: "border-box",
+    background: "var(--rq-surface)",
     borderRadius: 10,
-    border: "1px solid #1e1e30",
+    border: "1px solid var(--rq-border)",
     padding: 12,
-    fontFamily: "'DM Sans', system-ui, sans-serif",
+    fontFamily: "'Inter', system-ui, sans-serif",
     fontSize: 13,
-    color: "#f0f0e8",
+    color: "var(--rq-text)",
     outline: "none",
   },
   input: {
-    background: "#0f0f1f",
+    background: "var(--rq-surface)",
     borderRadius: 8,
-    border: "1px solid #1e1e30",
+    border: "1px solid var(--rq-border)",
     padding: "8px 12px",
-    fontFamily: "'DM Sans', system-ui, sans-serif",
+    fontFamily: "'Inter', system-ui, sans-serif",
     fontSize: 13,
-    color: "#f0f0e8",
+    color: "var(--rq-text)",
     outline: "none",
   },
   smallHelpText: {
     marginTop: 6,
     fontSize: 11,
-    color: "#666",
+    color: "var(--rq-text-3)",
   },
   linkedInActions: {
     marginTop: 10,
@@ -448,9 +439,9 @@ const styles = {
     gap: 10,
   },
   monoStatus: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
-    color: "#888",
+    fontFamily: "inherit",
+    fontSize: 12,
+    color: "var(--rq-text-2)",
   },
   jobGrid: {
     display: "grid",
@@ -461,28 +452,26 @@ const styles = {
   jobCard: (hovered) => ({
     position: "relative",
     background:
-      "radial-gradient(circle at top left, rgba(35,35,70,0.7), rgba(7,7,16,0.98))",
+      "var(--rq-surface)",
     borderRadius: 16,
-    border: hovered ? "1px solid #f0f0e8" : "1px solid #1e1e30",
+    border: hovered ? "1px solid var(--rq-accent)" : "1px solid var(--rq-border)",
     padding: 16,
     cursor: "pointer",
     transform: hovered ? "translateY(-3px)" : "translateY(0)",
     transition:
       "transform 0.18s ease-out, border-color 0.18s ease-out, box-shadow 0.18s ease-out",
     boxShadow: hovered
-      ? "0 18px 50px rgba(0,0,0,0.7)"
-      : "0 12px 32px rgba(0,0,0,0.5)",
+      ? "0 6px 20px rgba(31, 42, 46, 0.08)"
+      : "0 1px 2px rgba(31, 42, 46, 0.04)",
   }),
   jobCompany: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
-    letterSpacing: 2,
-    textTransform: "uppercase",
-    color: "#888",
+    fontFamily: "inherit",
+    fontSize: 12,
+    color: "var(--rq-text-2)",
     marginBottom: 4,
   },
   jobTitle: {
-    fontFamily: "'DM Sans', system-ui, sans-serif",
+    fontFamily: "'Inter', system-ui, sans-serif",
     fontSize: 18,
     fontWeight: 600,
     marginBottom: 6,
@@ -496,41 +485,40 @@ const styles = {
   },
   jobLocation: {
     fontSize: 12,
-    color: "#888",
+    color: "var(--rq-text-2)",
   },
   jobSalary: {
-    fontFamily: "'DM Mono', monospace",
+    fontFamily: "inherit",
     fontSize: 12,
-    color: "#00e5a0",
+    color: "var(--rq-accent)",
   },
   badgePill: (badge) => {
-    let bg = "rgba(0,229,160,0.08)";
-    let color = "#00e5a0";
+    let bg = "color-mix(in srgb, var(--rq-accent) 8%, transparent)";
+    let color = "var(--rq-accent)";
     if (badge === "Hot") {
-      bg = "rgba(255,95,95,0.12)";
-      color = "#ff5f5f";
+      bg = "color-mix(in srgb, var(--rq-danger) 12%, transparent)";
+      color = "var(--rq-danger)";
     } else if (badge === "Urgent") {
-      bg = "rgba(245,200,66,0.12)";
-      color = "#f5c842";
+      bg = "color-mix(in srgb, var(--rq-warn) 12%, transparent)";
+      color = "var(--rq-warn)";
     } else if (badge === "New" || badge === "Remote" || badge === "Just in") {
-      bg = "rgba(0,229,160,0.12)";
-      color = "#00e5a0";
+      bg = "color-mix(in srgb, var(--rq-accent) 12%, transparent)";
+      color = "var(--rq-accent)";
     }
     return {
-      fontFamily: "'DM Mono', monospace",
+      fontFamily: "inherit",
       fontSize: 10,
       padding: "4px 8px",
       borderRadius: 999,
       border: `1px solid ${color}`,
       background: bg,
       color,
-      textTransform: "uppercase",
     };
   },
   matchPill: (score) => {
     const tier = getScoreTier(score);
     return {
-      fontFamily: "'DM Mono', monospace",
+      fontFamily: "inherit",
       fontSize: 11,
       fontWeight: 700,
       padding: "4px 9px",
@@ -541,19 +529,18 @@ const styles = {
     };
   },
   sourcePill: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 10,
+    fontFamily: "inherit",
+    fontSize: 12,
     padding: "3px 7px",
     borderRadius: 999,
-    border: "1px solid rgba(65,132,228,0.7)",
-    background: "rgba(65,132,228,0.16)",
-    color: "#9bbcf6",
-    textTransform: "uppercase",
+    border: "1px solid color-mix(in srgb, var(--rq-info) 70%, transparent)",
+    background: "color-mix(in srgb, var(--rq-info) 16%, transparent)",
+    color: "var(--rq-info)",
   },
   jobPreview: {
     marginTop: 6,
     fontSize: 12,
-    color: "#aaa",
+    color: "var(--rq-text-2)",
     lineHeight: 1.5,
   },
   cardFooterRow: {
@@ -564,13 +551,13 @@ const styles = {
     gap: 8,
   },
   analyzeCta: (visible) => ({
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
+    fontFamily: "inherit",
+    fontSize: 12,
     padding: "7px 12px",
     borderRadius: 999,
-    border: "1px solid rgba(240,240,232,0.5)",
-    background: "rgba(240,240,232,0.06)",
-    color: "#f0f0e8",
+    border: "1px solid color-mix(in srgb, var(--rq-text) 50%, transparent)",
+    background: "color-mix(in srgb, var(--rq-text) 6%, transparent)",
+    color: "var(--rq-text)",
     opacity: visible ? 1 : 0,
     transform: visible ? "translateY(0)" : "translateY(6px)",
     transition: "opacity 0.16s ease, transform 0.16s ease",
@@ -579,7 +566,7 @@ const styles = {
   jobModalOverlay: {
     position: "fixed",
     inset: 0,
-    background: "rgba(5,5,12,0.82)",
+    background: "color-mix(in srgb, var(--rq-scrim) 82%, transparent)",
     backdropFilter: "blur(4px)",
     display: "flex",
     alignItems: "flex-start",
@@ -593,11 +580,11 @@ const styles = {
     width: "100%",
     maxWidth: 720,
     background:
-      "radial-gradient(circle at top left, rgba(35,35,70,0.9), rgba(7,7,16,0.99))",
-    border: "1px solid #2a2a44",
+      "var(--rq-surface)",
+    border: "1px solid var(--rq-border)",
     borderRadius: 20,
     padding: "32px 32px 28px",
-    boxShadow: "0 30px 80px rgba(0,0,0,0.7)",
+    boxShadow: "0 16px 48px rgba(31, 42, 46, 0.14)",
   },
   jobModalClose: {
     position: "absolute",
@@ -606,22 +593,22 @@ const styles = {
     width: 30,
     height: 30,
     borderRadius: "50%",
-    border: "1px solid #333",
-    background: "rgba(255,255,255,0.04)",
-    color: "#aaa",
+    border: "1px solid var(--rq-border)",
+    background: "color-mix(in srgb, var(--rq-text) 4%, transparent)",
+    color: "var(--rq-text-2)",
     cursor: "pointer",
     fontSize: 13,
     lineHeight: 1,
   },
   jobModalDivider: {
     height: 1,
-    background: "#1e1e30",
+    background: "var(--rq-border)",
     margin: "16px 0",
   },
   jobModalJd: {
     fontSize: 13.5,
     lineHeight: 1.7,
-    color: "#ccc",
+    color: "var(--rq-text-2)",
     whiteSpace: "pre-wrap",
   },
   jobSummaryGrid: {
@@ -631,25 +618,23 @@ const styles = {
   },
   jobSummaryItem: {},
   jobSummaryLabel: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 10,
-    textTransform: "uppercase",
-    letterSpacing: 1.2,
-    color: "#888",
+    fontFamily: "inherit",
+    fontSize: 12,
+    color: "var(--rq-text-2)",
     marginBottom: 4,
   },
   jobSummaryValue: {
     fontSize: 14,
-    color: "#f0f0e8",
+    color: "var(--rq-text)",
   },
   skillChip: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
+    fontFamily: "inherit",
+    fontSize: 12,
     padding: "5px 10px",
     borderRadius: 999,
-    border: "1px solid #333",
-    background: "rgba(255,255,255,0.04)",
-    color: "#ddd",
+    border: "1px solid var(--rq-border)",
+    background: "color-mix(in srgb, var(--rq-text) 4%, transparent)",
+    color: "var(--rq-text-2)",
   },
   jobModalActions: {
     marginTop: 24,
@@ -672,23 +657,22 @@ const styles = {
     gap: 10,
   },
   backText: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
-    color: "#888",
-    textTransform: "uppercase",
-    letterSpacing: 1.3,
+    fontFamily: "inherit",
+    fontSize: 12,
+    color: "var(--rq-text-2)",
   },
   analyzeTitle: {
     fontSize: 14,
-    color: "#aaa",
+    color: "var(--rq-text-2)",
   },
   smallBackButton: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
-    borderRadius: 999,
-    border: "1px solid #333",
-    background: "transparent",
-    color: "#888",
+    fontFamily: "inherit",
+    fontSize: 13,
+    fontWeight: 500,
+    borderRadius: 8,
+    border: "1px solid var(--rq-border-strong)",
+    background: "var(--rq-surface)",
+    color: "var(--rq-text-2)",
     padding: "6px 12px",
     cursor: "pointer",
     display: "inline-flex",
@@ -696,9 +680,9 @@ const styles = {
     gap: 6,
   },
   sideCard: {
-    background: "#0f0f1f",
+    background: "var(--rq-surface)",
     borderRadius: 14,
-    border: "1px solid #1e1e30",
+    border: "1px solid var(--rq-border)",
     padding: 14,
     marginBottom: 14,
   },
@@ -707,34 +691,34 @@ const styles = {
     height: 34,
     borderRadius: "50%",
     background:
-      "radial-gradient(circle at 30% 0, #00e5a0, rgba(0,229,160,0.1))",
+      "var(--rq-accent)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontFamily: "'Playfair Display', serif",
+    fontFamily: "inherit",
     fontWeight: 700,
     fontSize: 16,
-    color: "#0a0a14",
+    color: "var(--rq-bg)",
   },
   resumeName: {
-    fontFamily: "'Playfair Display', serif",
+    fontFamily: "inherit",
     fontSize: 17,
     fontWeight: 700,
   },
   resumeTitle: {
     fontSize: 12,
-    color: "#888",
+    color: "var(--rq-text-2)",
   },
   jdScrollBox: {
     marginTop: 6,
     maxHeight: 200,
     overflow: "auto",
     borderRadius: 10,
-    border: "1px solid #1e1e30",
-    background: "#070712",
+    border: "1px solid var(--rq-border)",
+    background: "var(--rq-surface)",
     padding: 10,
     fontSize: 11,
-    color: "#666",
+    color: "var(--rq-text-3)",
     lineHeight: 1.5,
     whiteSpace: "pre-wrap",
   },
@@ -745,9 +729,9 @@ const styles = {
     alignItems: "center",
   },
   scoreCard: {
-    background: "#0f0f1f",
+    background: "var(--rq-surface)",
     borderRadius: 16,
-    border: "1px solid #1e1e30",
+    border: "1px solid var(--rq-border)",
     padding: 18,
     marginBottom: 18,
   },
@@ -762,7 +746,7 @@ const styles = {
     minWidth: 0,
   },
   scoreLabel: (color) => ({
-    fontFamily: "'Playfair Display', serif",
+    fontFamily: "inherit",
     fontSize: 24,
     fontWeight: 600,
     color,
@@ -770,7 +754,7 @@ const styles = {
   }),
   scoreSummary: {
     fontSize: 13,
-    color: "#888",
+    color: "var(--rq-text-2)",
     marginBottom: 10,
   },
   breakdownGrid: {
@@ -780,43 +764,39 @@ const styles = {
     marginBottom: 8,
   },
   breakdownItemLabel: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
-    color: "#888",
-    textTransform: "uppercase",
-    letterSpacing: 1,
+    fontFamily: "inherit",
+    fontSize: 12,
+    color: "var(--rq-text-2)",
     marginBottom: 4,
   },
   breakdownBarOuter: {
     width: "100%",
     height: 6,
     borderRadius: 999,
-    background: "#141428",
+    background: "var(--rq-surface)",
     overflow: "hidden",
   },
   breakdownBarInner: (color, pct) => ({
     width: `${pct}%`,
     height: "100%",
     borderRadius: 999,
-    background: `linear-gradient(90deg, ${color}, rgba(0,229,160,0.1))`,
+    background: color,
   }),
   breakdownScore: {
     marginTop: 3,
     fontSize: 11,
-    color: "#aaa",
+    color: "var(--rq-text-2)",
   },
   keyGapsTitle: {
     marginTop: 6,
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: 1.2,
-    color: "#f5c842",
+    fontFamily: "inherit",
+    fontSize: 12,
+    color: "var(--rq-warn)",
   },
   keyGapsList: {
     marginTop: 4,
     fontSize: 12,
-    color: "#f5c842",
+    color: "var(--rq-warn)",
     paddingLeft: 14,
   },
   suggestionsHeaderRow: {
@@ -834,9 +814,9 @@ const styles = {
   },
   suggestionCard: (state) => {
     const base = {
-      background: "#0f0f1f",
+      background: "var(--rq-surface)",
       borderRadius: 14,
-      border: "1px solid #1e1e30",
+      border: "1px solid var(--rq-border)",
       padding: 14,
       transition:
         "border-color 0.16s ease, background-color 0.16s ease, opacity 0.16s ease",
@@ -844,8 +824,8 @@ const styles = {
     if (state === "approved") {
       return {
         ...base,
-        border: "1px solid rgba(0,229,160,0.35)",
-        background: "rgba(0,229,160,0.03)",
+        border: "1px solid color-mix(in srgb, var(--rq-accent) 35%, transparent)",
+        background: "color-mix(in srgb, var(--rq-accent) 3%, transparent)",
         opacity: 1,
       };
     }
@@ -865,22 +845,20 @@ const styles = {
     marginBottom: 8,
   },
   sectionPill: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 10,
+    fontFamily: "inherit",
+    fontSize: 12,
     padding: "4px 8px",
     borderRadius: 999,
-    border: "1px solid #333",
-    color: "#aaa",
-    textTransform: "uppercase",
+    border: "1px solid var(--rq-border)",
+    color: "var(--rq-text-2)",
   },
   typePill: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 10,
+    fontFamily: "inherit",
+    fontSize: 12,
     padding: "4px 8px",
     borderRadius: 999,
-    border: "1px solid rgba(0,229,160,0.5)",
-    color: "#00e5a0",
-    textTransform: "uppercase",
+    border: "1px solid color-mix(in srgb, var(--rq-accent) 50%, transparent)",
+    color: "var(--rq-accent)",
   },
   suggestionTitle: {
     fontSize: 14,
@@ -888,34 +866,32 @@ const styles = {
     marginBottom: 6,
   },
   diffBlock: {
-    background: "#080810",
+    background: "var(--rq-surface)",
     borderRadius: 10,
-    border: "1px solid #191926",
+    border: "1px solid var(--rq-surface)",
     padding: 10,
     fontSize: 12,
     lineHeight: 1.5,
-    color: "#ccc",
+    color: "var(--rq-text-2)",
   },
   diffLabel: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 10,
-    textTransform: "uppercase",
-    letterSpacing: 1.1,
-    color: "#888",
+    fontFamily: "inherit",
+    fontSize: 12,
+    color: "var(--rq-text-2)",
     marginBottom: 2,
   },
   diffBefore: {
-    color: "#ff5f5f",
+    color: "var(--rq-danger)",
     textDecoration: "line-through",
   },
   diffAfter: {
-    color: "#00e5a0",
+    color: "var(--rq-accent)",
   },
   whyLine: {
     marginTop: 6,
     fontStyle: "italic",
     fontSize: 11,
-    color: "#666",
+    color: "var(--rq-text-3)",
   },
   suggestionsFooterRow: {
     marginTop: 10,
@@ -923,9 +899,9 @@ const styles = {
     alignItems: "center",
     justifyContent: "space-between",
     gap: 12,
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
-    color: "#888",
+    fontFamily: "inherit",
+    fontSize: 12,
+    color: "var(--rq-text-2)",
   },
   previewLayout: {
     display: "flex",
@@ -943,37 +919,32 @@ const styles = {
     marginBottom: 8,
   },
   previewLabel: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: 1.1,
-    color: "#888",
+    fontFamily: "inherit",
+    fontSize: 12,
+    color: "var(--rq-text-2)",
   },
   previewAfterLabel: {
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 11,
-    textTransform: "uppercase",
-    letterSpacing: 1.1,
-    color: "#00e5a0",
+    fontFamily: "inherit",
+    fontSize: 12,
+    color: "var(--rq-accent)",
     display: "flex",
     alignItems: "center",
     gap: 6,
   },
   resetButton: {
     marginTop: 18,
-    fontFamily: "'DM Mono', monospace",
-    fontSize: 12,
-    borderRadius: 999,
-    padding: "10px 18px",
-    border: "1px solid rgba(0,229,160,0.4)",
-    background: "#00e5a0",
-    color: "#050510",
+    fontFamily: "inherit",
+    fontSize: 14,
+    fontWeight: 500,
+    borderRadius: 8,
+    padding: "9px 16px",
+    border: "1px solid var(--rq-accent)",
+    background: "var(--rq-accent)",
+    color: "var(--rq-surface)",
     cursor: "pointer",
     display: "inline-flex",
     alignItems: "center",
     gap: 6,
-    letterSpacing: 1,
-    textTransform: "uppercase",
   },
   resumePaper: {
     background: "#ffffff",
@@ -1113,12 +1084,12 @@ function getStepOrder(step) {
 
 function getScoreTier(score) {
   if (score >= 75) {
-    return { color: "#00e5a0", label: "Strong Match" };
+    return { color: "var(--rq-accent)", label: "Strong Match" };
   }
   if (score >= 55) {
-    return { color: "#f5c842", label: "Moderate Match" };
+    return { color: "var(--rq-warn)", label: "Moderate Match" };
   }
-  return { color: "#ff5f5f", label: "Needs Alignment" };
+  return { color: "var(--rq-danger)", label: "Needs Alignment" };
 }
 
 const MATCH_STOPWORDS = new Set([
@@ -2390,43 +2361,43 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept }) {
   const awaitingDecision = last?.role === "assistant" && last.edits?.some((e) => e.status === "pending");
 
   return (
-    <div style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, background: "rgba(255,255,255,0.02)", display: "flex", flexDirection: "column", height: "min(640px, calc(100vh - 120px))", minHeight: 420 }}>
-      <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(255,255,255,0.06)", fontSize: 12, color: "#8b8ba7" }}>
-        <span style={{ color: "#00e5a0", fontWeight: 600 }}>Tailoring assistant</span> · Every edit is checked: it keeps your specifics and adds nothing you haven't confirmed.
+    <div style={{ border: "1px solid color-mix(in srgb, var(--rq-text) 8%, transparent)", borderRadius: 14, background: "color-mix(in srgb, var(--rq-text) 2%, transparent)", display: "flex", flexDirection: "column", height: "min(640px, calc(100vh - 120px))", minHeight: 420 }}>
+      <div style={{ padding: "12px 16px", borderBottom: "1px solid color-mix(in srgb, var(--rq-text) 6%, transparent)", fontSize: 12, color: "var(--rq-text-2)" }}>
+        <span style={{ color: "var(--rq-accent)", fontWeight: 600 }}>Tailoring assistant</span> · Every edit is checked: it keeps your specifics and adds nothing you haven't confirmed.
       </div>
-      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14, maskImage: "linear-gradient(to bottom, transparent 0, #000 32px)", WebkitMaskImage: "linear-gradient(to bottom, transparent 0, #000 32px)" }}>
+      <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14, maskImage: "linear-gradient(to bottom, transparent 0, var(--rq-text) 32px)", WebkitMaskImage: "linear-gradient(to bottom, transparent 0, var(--rq-text) 32px)" }}>
         {chat.messages.map((m, mi) =>
           m.role === "user" ? (
             m.isDecision ? (
-              <div key={mi} style={{ alignSelf: "center", fontSize: 11, color: "#6b6b85", fontFamily: "'DM Mono', monospace" }}>{m.text}</div>
+              <div key={mi} style={{ alignSelf: "center", fontSize: 11, color: "var(--rq-text-3)", fontFamily: "inherit" }}>{m.text}</div>
             ) : (
-              <div key={mi} style={{ alignSelf: "flex-end", maxWidth: "80%", background: "rgba(0,229,160,0.12)", border: "1px solid rgba(0,229,160,0.25)", borderRadius: "12px 12px 2px 12px", padding: "8px 12px", fontSize: 13, color: "#e6e6f0", whiteSpace: "pre-wrap" }}>
+              <div key={mi} style={{ alignSelf: "flex-end", maxWidth: "80%", background: "color-mix(in srgb, var(--rq-accent) 12%, transparent)", border: "1px solid color-mix(in srgb, var(--rq-accent) 25%, transparent)", borderRadius: "12px 12px 2px 12px", padding: "8px 12px", fontSize: 13, color: "var(--rq-text)", whiteSpace: "pre-wrap" }}>
                 {m.text}
               </div>
             )
           ) : (
             <div key={mi} style={{ alignSelf: "flex-start", maxWidth: "92%", display: "flex", flexDirection: "column", gap: 10 }}>
-              <div style={{ background: "rgba(255,255,255,0.05)", borderRadius: "12px 12px 12px 2px", padding: "10px 14px", fontSize: 13, lineHeight: 1.55, color: "#e6e6f0", whiteSpace: "pre-wrap" }}>
+              <div style={{ background: "color-mix(in srgb, var(--rq-text) 5%, transparent)", borderRadius: "12px 12px 12px 2px", padding: "10px 14px", fontSize: 13, lineHeight: 1.55, color: "var(--rq-text)", whiteSpace: "pre-wrap" }}>
                 {m.text}
               </div>
               {(m.edits || []).map((e) => (
-                <div key={e.id} style={{ border: `1px solid ${e.status === "accepted" ? "rgba(0,229,160,0.45)" : e.status === "rejected" ? "rgba(255,95,95,0.3)" : "rgba(255,255,255,0.12)"}`, borderRadius: 10, padding: 12, background: "rgba(0,0,0,0.25)", opacity: e.status === "rejected" ? 0.55 : 1 }}>
+                <div key={e.id} style={{ border: `1px solid ${e.status === "accepted" ? "color-mix(in srgb, var(--rq-accent) 45%, transparent)" : e.status === "rejected" ? "color-mix(in srgb, var(--rq-danger) 30%, transparent)" : "color-mix(in srgb, var(--rq-text) 12%, transparent)"}`, borderRadius: 10, padding: 12, background: "rgba(31, 42, 46, 0.04)", opacity: e.status === "rejected" ? 0.55 : 1 }}>
                   <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8, flexWrap: "wrap" }}>
                     <div style={styles.sectionPill}>{e.section}{e.section === "Experience" && resume.experience?.[e.experienceIndex] ? ` · ${resume.experience[e.experienceIndex].company}` : ""}</div>
                     <div style={styles.typePill}>{e.type}</div>
                     {e.status !== "pending" && (
-                      <span style={{ fontSize: 11, color: e.status === "accepted" ? "#00e5a0" : "#ff5f5f", fontFamily: "'DM Mono', monospace" }}>
+                      <span style={{ fontSize: 11, color: e.status === "accepted" ? "var(--rq-accent)" : "var(--rq-danger)", fontFamily: "inherit" }}>
                         {e.status === "accepted" ? "✓ Applied" : "✕ Rejected"}
                       </span>
                     )}
                   </div>
                   {e.jdRequirement && (
-                    <div style={{ fontSize: 11, color: "#8b8ba7", marginBottom: 8 }}>
-                      Targets: <span style={{ color: "#c9c9dc" }}>{e.jdRequirement}</span>
+                    <div style={{ fontSize: 11, color: "var(--rq-text-2)", marginBottom: 8 }}>
+                      Targets: <span style={{ color: "var(--rq-text)" }}>{e.jdRequirement}</span>
                     </div>
                   )}
                   {e.original && (
-                    <div style={{ fontSize: 12.5, color: "#ff8f8f", textDecoration: e.type === "Removal" ? "line-through" : "none", background: "rgba(255,95,95,0.06)", borderRadius: 6, padding: "6px 8px", marginBottom: 6 }}>
+                    <div style={{ fontSize: 12.5, color: "var(--rq-danger)", textDecoration: e.type === "Removal" ? "line-through" : "none", background: "color-mix(in srgb, var(--rq-danger) 6%, transparent)", borderRadius: 6, padding: "6px 8px", marginBottom: 6 }}>
                       {e.original}
                     </div>
                   )}
@@ -2438,7 +2409,7 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept }) {
                         onChange={(v) => updateProposed(mi, e.id, v)}
                       />
                     ) : (
-                      <div style={{ fontSize: 12.5, color: "#c9c9dc", background: "rgba(0,229,160,0.06)", borderRadius: 6, padding: "6px 8px", whiteSpace: "pre-wrap" }}>
+                      <div style={{ fontSize: 12.5, color: "var(--rq-text)", background: "color-mix(in srgb, var(--rq-accent) 6%, transparent)", borderRadius: 6, padding: "6px 8px", whiteSpace: "pre-wrap" }}>
                         <DiffText original={e.original} text={e.proposed} />
                       </div>
                     )
@@ -2455,9 +2426,9 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept }) {
             </div>
           )
         )}
-        {loading && <div style={{ alignSelf: "flex-start", fontSize: 12, color: "#8b8ba7", fontFamily: "'DM Mono', monospace" }}>Assistant is thinking…</div>}
+        {loading && <div style={{ alignSelf: "flex-start", fontSize: 12, color: "var(--rq-text-2)", fontFamily: "inherit" }}>Assistant is thinking…</div>}
         {error && (
-          <div style={{ alignSelf: "stretch", fontSize: 12, color: "#ff8f8f", background: "rgba(255,95,95,0.08)", borderRadius: 8, padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <div style={{ alignSelf: "stretch", fontSize: 12, color: "var(--rq-danger)", background: "color-mix(in srgb, var(--rq-danger) 8%, transparent)", borderRadius: 8, padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
             <span>{error}</span>
             <button type="button" style={styles.ghostButton} onClick={() => sendTurn(chat)}>Retry</button>
           </div>
@@ -2470,7 +2441,7 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept }) {
           ))}
         </div>
       )}
-      <div style={{ display: "flex", gap: 8, padding: 12, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+      <div style={{ display: "flex", gap: 8, padding: 12, borderTop: "1px solid color-mix(in srgb, var(--rq-text) 6%, transparent)" }}>
         <input
           type="text"
           value={input}
@@ -2512,7 +2483,7 @@ function diffAddedWords(original, text) {
   return tokens.map((t, k) => ({ text: t, added: added.has(k) }));
 }
 
-const addedWordStyle = { color: "#00e5a0", background: "rgba(0,229,160,0.16)", borderRadius: 3 };
+const addedWordStyle = { color: "var(--rq-accent)", background: "color-mix(in srgb, var(--rq-accent) 16%, transparent)", borderRadius: 3 };
 
 function DiffText({ original, text }) {
   if (!original) return <span style={addedWordStyle}>{text}</span>;
@@ -2523,10 +2494,10 @@ function DiffText({ original, text }) {
 // A highlighted copy of the text sits behind a transparent textarea with identical metrics.
 function DiffTextarea({ original, value, onChange }) {
   const backdropRef = useRef(null);
-  const metrics = { padding: 8, border: "1px solid transparent", fontSize: 12.5, lineHeight: 1.5, fontFamily: "inherit", whiteSpace: "pre-wrap", overflowWrap: "break-word", boxSizing: "border-box", width: "100%", margin: 0, letterSpacing: "normal" };
+  const metrics = { padding: 8, border: "1px solid transparent", fontSize: 12.5, lineHeight: 1.5, fontFamily: "inherit", whiteSpace: "pre-wrap", overflowWrap: "break-word", boxSizing: "border-box", width: "100%", margin: 0, };
   return (
-    <div style={{ position: "relative", borderRadius: 6, background: "rgba(0,229,160,0.06)" }}>
-      <div ref={backdropRef} aria-hidden style={{ ...metrics, position: "absolute", inset: 0, overflow: "hidden", color: "#c9c9dc", pointerEvents: "none" }}>
+    <div style={{ position: "relative", borderRadius: 6, background: "color-mix(in srgb, var(--rq-accent) 6%, transparent)" }}>
+      <div ref={backdropRef} aria-hidden style={{ ...metrics, position: "absolute", inset: 0, overflow: "hidden", color: "var(--rq-text)", pointerEvents: "none" }}>
         <DiffText original={original} text={value} />
         {value.endsWith("\n") ? " " : null}
       </div>
@@ -2535,7 +2506,7 @@ function DiffTextarea({ original, value, onChange }) {
         onChange={(ev) => onChange(ev.target.value)}
         onScroll={(ev) => { if (backdropRef.current) backdropRef.current.scrollTop = ev.target.scrollTop; }}
         rows={4}
-        style={{ ...metrics, display: "block", position: "relative", borderRadius: 6, border: "1px solid rgba(0,229,160,0.4)", background: "transparent", color: "transparent", caretColor: "#fff", resize: "vertical" }}
+        style={{ ...metrics, display: "block", position: "relative", borderRadius: 6, border: "1px solid color-mix(in srgb, var(--rq-accent) 40%, transparent)", background: "transparent", color: "transparent", caretColor: "var(--rq-text)", resize: "vertical" }}
       />
     </div>
   );
@@ -3272,8 +3243,8 @@ export default function ResumeIQ() {
       <svg width={140} height={140}>
         <defs>
           <linearGradient id="scoreGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#00e5a0" />
-            <stop offset="100%" stopColor="#0ad0ff" />
+            <stop offset="0%" stopColor="var(--rq-accent)" />
+            <stop offset="100%" stopColor="var(--rq-accent)" />
           </linearGradient>
         </defs>
         <circle
@@ -3281,7 +3252,7 @@ export default function ResumeIQ() {
           cy={center}
           r={radius}
           fill="none"
-          stroke="#1a1a2e"
+          stroke="var(--rq-surface)"
           strokeWidth={strokeWidth}
         />
         <circle
@@ -3289,7 +3260,7 @@ export default function ResumeIQ() {
           cy={center}
           r={radius}
           fill="none"
-          stroke={tier.color === "#00e5a0" ? "url(#scoreGradient)" : tier.color}
+          stroke={tier.color === "var(--rq-accent)" ? "url(#scoreGradient)" : tier.color}
           strokeWidth={strokeWidth}
           strokeLinecap="round"
           strokeDasharray={circumference}
@@ -3300,8 +3271,8 @@ export default function ResumeIQ() {
           x={center}
           y={center - 4}
           textAnchor="middle"
-          fill="#f0f0e8"
-          fontFamily="'Playfair Display', serif"
+          fill="var(--rq-text)"
+          fontFamily="inherit"
           fontWeight="700"
           fontSize="32"
         >
@@ -3311,8 +3282,8 @@ export default function ResumeIQ() {
           x={center}
           y={center + 18}
           textAnchor="middle"
-          fill="#aaa"
-          fontFamily="'DM Mono', monospace"
+          fill="var(--rq-text-2)"
+          fontFamily="inherit"
           fontSize="11"
         >
           /100
@@ -3327,7 +3298,24 @@ export default function ResumeIQ() {
     <div style={styles.appRoot}>
       <div style={styles.appInner}>
         <style>{`
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=DM+Mono:wght@400;500&family=DM+Sans:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+/* Sage & Paper palette. Playfair Display and DM Sans are only used on the resume page itself. */
+:root {
+  color-scheme: light;
+  --rq-bg: #F7F6F2;
+  --rq-surface: #FFFFFF;
+  --rq-border: #E6E3DC;
+  --rq-border-strong: #D3CFC5;
+  --rq-text: #1F2A2E;
+  --rq-text-2: #5F6B6E;
+  --rq-text-3: #8A9396;
+  --rq-accent: #3F7D6E;
+  --rq-warn: #B7862F;
+  --rq-danger: #B5534A;
+  --rq-info: #3B6EA8;
+  --rq-scrim: #1F2A2E;
+}
 
 @keyframes fadeUp {
   0% { opacity: 0; transform: translateY(12px); }
@@ -3335,10 +3323,10 @@ export default function ResumeIQ() {
 }
 
 body {
-  background: #0a0a14;
-  color: #f0f0e8;
+  background: var(--rq-bg);
+  color: var(--rq-text);
   margin: 0;
-  font-family: 'DM Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 .rq-editable {
@@ -3347,11 +3335,11 @@ body {
   transition: background 0.12s ease;
 }
 .rq-editable:hover {
-  background: rgba(0, 132, 209, 0.08);
+  background: color-mix(in srgb, var(--rq-info) 8%, transparent);
 }
 .rq-editable:focus {
-  background: rgba(0, 132, 209, 0.1);
-  box-shadow: 0 0 0 2px rgba(0, 132, 209, 0.4);
+  background: color-mix(in srgb, var(--rq-info) 10%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--rq-info) 40%, transparent);
   outline: none;
 }
 .rq-editable-row {
@@ -3362,8 +3350,8 @@ body {
   transition: opacity 0.12s ease;
   cursor: pointer;
   border: none;
-  background: rgba(220, 60, 60, 0.12);
-  color: #d33;
+  background: color-mix(in srgb, var(--rq-danger) 12%, transparent);
+  color: var(--rq-danger);
   border-radius: 50%;
   width: 18px;
   height: 18px;
@@ -3376,16 +3364,16 @@ body {
 }
 .rq-add-btn {
   cursor: pointer;
-  border: 1px dashed #a8c8e0;
+  border: 1px dashed var(--rq-border-strong);
   background: transparent;
-  color: #4a7ba6;
+  color: var(--rq-info);
   border-radius: 6px;
   font-size: 11px;
   padding: 3px 10px;
   margin-top: 4px;
 }
 .rq-add-btn:hover {
-  background: rgba(0, 132, 209, 0.08);
+  background: color-mix(in srgb, var(--rq-info) 8%, transparent);
 }
         `}</style>
 
@@ -3393,7 +3381,7 @@ body {
           <div style={styles.headerRow}>
             <div style={styles.logo}>
               <span style={styles.logoMark}>◈</span>
-              <span>RESUMEIQ</span>
+              <span>ResumeIQ</span>
             </div>
             <nav style={styles.stepNav}>
               {[
@@ -3435,7 +3423,7 @@ body {
           {step === "upload" && (
             <section style={styles.stepSection}>
               <div style={styles.uploadHero}>
-                <div style={styles.uploadTitle}>AI-POWERED RESUME INTELLIGENCE</div>
+                <div style={styles.uploadTitle}>Resume intelligence for your job search</div>
                 <h1 style={styles.uploadHeadline}>
                   Find Jobs That <span style={styles.uploadHeadlineAccent}>Actually Fit You</span>
                 </h1>
@@ -3444,7 +3432,7 @@ body {
                 </p>
               </div>
               {parsingError && (
-                <div style={{ marginBottom: 16, padding: 12, background: "rgba(255,95,95,0.15)", borderRadius: 8, fontSize: 13, color: "#ff8a8a" }}>
+                <div style={{ marginBottom: 16, padding: 12, background: "color-mix(in srgb, var(--rq-danger) 15%, transparent)", borderRadius: 8, fontSize: 13, color: "var(--rq-danger)" }}>
                   {parsingError}
                 </div>
               )}
@@ -3497,7 +3485,7 @@ body {
                   <div style={styles.featureCardDesc}>Approve AI suggestions one by one</div>
                 </div>
               </div>
-              <p style={{ textAlign: "center", marginTop: 24, fontSize: 12, color: "#666" }}>
+              <p style={{ textAlign: "center", marginTop: 24, fontSize: 12, color: "var(--rq-text-3)" }}>
                 <button
                   type="button"
                   style={{ ...styles.ghostButton, fontSize: 12 }}
@@ -3556,7 +3544,7 @@ body {
                     Jobs matched to your profile. Pick one to analyze fit and get tailored suggestions.
                   </p>
                 </div>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#888" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "var(--rq-text-2)" }}>
                   Sort by
                   <select
                     value={jobSortBy}
@@ -3570,12 +3558,12 @@ body {
                 </label>
               </div>
               {parsingError && (
-                <div style={{ marginBottom: 16, padding: 10, background: "rgba(245,200,66,0.1)", borderRadius: 8, fontSize: 12, color: "#f5c842" }}>
+                <div style={{ marginBottom: 16, padding: 10, background: "color-mix(in srgb, var(--rq-warn) 10%, transparent)", borderRadius: 8, fontSize: 12, color: "var(--rq-warn)" }}>
                   {parsingError}. You can add roles manually below.
                 </div>
               )}
               {linkedInSearching && jobFeedStatus && (
-                <div style={{ marginBottom: 16, padding: 10, background: "rgba(0,229,160,0.08)", borderRadius: 8, fontSize: 12, color: "#00e5a0", display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ marginBottom: 16, padding: 10, background: "color-mix(in srgb, var(--rq-accent) 8%, transparent)", borderRadius: 8, fontSize: 12, color: "var(--rq-accent)", display: "flex", alignItems: "center", gap: 8 }}>
                   <span style={styles.monoStatus}>●</span>
                   {jobFeedStatus.savedCount > 0
                     ? `Showing ${jobFeedStatus.savedCount} recent role${jobFeedStatus.savedCount === 1 ? "" : "s"} for “${jobFeedStatus.keywords}”. Looking for fresh listings on LinkedIn — new ones will appear here as they arrive.`
@@ -3583,7 +3571,7 @@ body {
                 </div>
               )}
               {!linkedInSearching && jobFeedStatus && jobFeedStatus.freshCount != null && (
-                <div style={{ marginBottom: 16, fontSize: 12, color: "#8b8ba7" }}>
+                <div style={{ marginBottom: 16, fontSize: 12, color: "var(--rq-text-2)" }}>
                   {jobFeedStatus.freshCount > 0
                     ? `Up to date · ${jobFeedStatus.freshCount} new listing${jobFeedStatus.freshCount === 1 ? "" : "s"} from LinkedIn, marked “Just in”.`
                     : "Up to date · no new listings since the last search."}
@@ -3613,16 +3601,16 @@ body {
                     disabled={linkedInSearchIndiaOnly}
                     style={{ ...styles.input, width: 140, opacity: linkedInSearchIndiaOnly ? 0.8 : 1 }}
                   />
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#888", cursor: "pointer" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--rq-text-2)", cursor: "pointer" }}>
                     <input
                       type="checkbox"
                       checked={linkedInSearchIndiaOnly}
                       onChange={(e) => setLinkedInSearchIndiaOnly(e.target.checked)}
-                      style={{ accentColor: "#00e5a0" }}
+                      style={{ accentColor: "var(--rq-accent)" }}
                     />
                     India only
                   </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "#888" }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--rq-text-2)" }}>
                     <input
                       type="number"
                       min={0}
@@ -3643,7 +3631,7 @@ body {
                     <option value={100}>100</option>
                     <option value={150}>150</option>
                   </select>
-                  <span style={{ fontSize: 12, color: "#666" }}>jobs</span>
+                  <span style={{ fontSize: 12, color: "var(--rq-text-3)" }}>jobs</span>
                   <button
                     type="button"
                     style={{
@@ -3658,7 +3646,7 @@ body {
                 </div>
                 {suggestedRoles.length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 12 }}>
-                    <span style={{ fontSize: 11, color: "#666" }}>Based on your whole profile, try:</span>
+                    <span style={{ fontSize: 11, color: "var(--rq-text-3)" }}>Based on your whole profile, try:</span>
                     {suggestedRoles.map((role) => {
                       const active = role === linkedInSearchKeywords;
                       return (
@@ -3668,9 +3656,9 @@ body {
                           style={{
                             ...styles.smallPill,
                             cursor: "pointer",
-                            background: active ? "rgba(0,229,160,0.14)" : "transparent",
-                            color: active ? "#00e5a0" : "#888",
-                            borderColor: active ? "#00e5a0" : "#333",
+                            background: active ? "color-mix(in srgb, var(--rq-accent) 14%, transparent)" : "transparent",
+                            color: active ? "var(--rq-accent)" : "var(--rq-text-2)",
+                            borderColor: active ? "var(--rq-accent)" : "var(--rq-border)",
                           }}
                           onClick={() => {
                             setLinkedInSearchKeywords(role);
@@ -3684,7 +3672,7 @@ body {
                   </div>
                 )}
                 {linkedInSearchError && (
-                  <div style={{ marginBottom: 8, fontSize: 12, color: "#ff5f5f" }}>{linkedInSearchError}</div>
+                  <div style={{ marginBottom: 8, fontSize: 12, color: "var(--rq-danger)" }}>{linkedInSearchError}</div>
                 )}
               </div>
 
@@ -3727,21 +3715,21 @@ body {
               </div>
 
               {belowLevelJobIds.size > 0 && (
-                <div style={{ marginBottom: 12, fontSize: 12, color: "#8b8ba7", display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ marginBottom: 12, fontSize: 12, color: "var(--rq-text-2)", display: "flex", alignItems: "center", gap: 8 }}>
                   {showBelowLevelJobs
                     ? `Showing ${belowLevelJobIds.size} role${belowLevelJobIds.size === 1 ? "" : "s"} that ask for less experience than your ${yearsNum} years.`
                     : `Hid ${belowLevelJobIds.size} role${belowLevelJobIds.size === 1 ? "" : "s"} that ask for less experience than your ${yearsNum} years.`}
                   <button
                     type="button"
                     onClick={() => setShowBelowLevelJobs((v) => !v)}
-                    style={{ background: "none", border: "none", color: "#00e5a0", cursor: "pointer", fontSize: 12, padding: 0 }}
+                    style={{ background: "none", border: "none", color: "var(--rq-accent)", cursor: "pointer", fontSize: 12, padding: 0 }}
                   >
                     {showBelowLevelJobs ? "Hide them" : "Show them"}
                   </button>
                 </div>
               )}
               {sortedJobs.length === 0 && !linkedInSearching && (
-                <div style={{ padding: 24, textAlign: "center", fontSize: 13, color: "#8b8ba7", border: "1px dashed rgba(255,255,255,0.12)", borderRadius: 12, marginBottom: 16 }}>
+                <div style={{ padding: 24, textAlign: "center", fontSize: 13, color: "var(--rq-text-2)", border: "1px dashed color-mix(in srgb, var(--rq-text) 12%, transparent)", borderRadius: 12, marginBottom: 16 }}>
                   No jobs yet. Search LinkedIn above to find roles that match your resume.
                 </div>
               )}
@@ -3767,7 +3755,7 @@ body {
                         }}
                       >
                         <div style={styles.jobCompany}>
-                          {job.company.toUpperCase()}
+                          {job.company}
                         </div>
                         <button
                           type="button"
@@ -3813,7 +3801,7 @@ body {
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          style={{ fontSize: 11, color: "#9bbcf6", marginTop: 6, display: "inline-block" }}
+                          style={{ fontSize: 11, color: "var(--rq-info)", marginTop: 6, display: "inline-block" }}
                         >
                           View full JD on LinkedIn →
                         </a>
@@ -3828,7 +3816,7 @@ body {
                         <span
                           style={{
                             fontSize: 11,
-                            color: "#666",
+                            color: "var(--rq-text-3)",
                           }}
                         >
                           Click anywhere to open
@@ -3854,7 +3842,7 @@ body {
                 >
                   ✕
                 </button>
-                <div style={styles.jobCompany}>{expandedJob.company.toUpperCase()}</div>
+                <div style={styles.jobCompany}>{expandedJob.company}</div>
                 <div style={{ ...styles.jobTitle, fontSize: 24, marginBottom: 10 }}>
                   {expandedJob.role}
                 </div>
@@ -3864,7 +3852,7 @@ body {
                       {jobMatchScores.get(expandedJob.id).score}% Match
                     </div>
                   )}
-                  <div style={styles.badgePill(expandedJob.badge)}>{expandedJob.badge}</div>
+                  {expandedJob.badge && <div style={styles.badgePill(expandedJob.badge)}>{expandedJob.badge}</div>}
                   {expandedJob.source === "linkedin" && (
                     <div style={styles.sourcePill}>LinkedIn</div>
                   )}
@@ -3874,7 +3862,7 @@ body {
                     href={expandedJob.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    style={{ fontSize: 12, color: "#9bbcf6", display: "inline-block", marginTop: 4 }}
+                    style={{ fontSize: 12, color: "var(--rq-info)", display: "inline-block", marginTop: 4 }}
                   >
                     View full posting on LinkedIn →
                   </a>
@@ -4028,8 +4016,8 @@ body {
                               );
                               const color =
                                 item.key === "impact"
-                                  ? "#f5c842"
-                                  : "#00e5a0";
+                                  ? "var(--rq-warn)"
+                                  : "var(--rq-accent)";
                               return (
                                 <div key={item.key}>
                                   <div style={styles.breakdownItemLabel}>
@@ -4093,8 +4081,8 @@ body {
                     setApprovedIds((prev) => new Set(prev).add(edit.id));
                   }}
                 />
-                      <details style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "10px 14px", background: "rgba(255,255,255,0.02)" }}>
-                        <summary style={{ cursor: "pointer", fontSize: 12, color: "#8b8ba7" }}>Job description</summary>
+                      <details style={{ border: "1px solid color-mix(in srgb, var(--rq-text) 8%, transparent)", borderRadius: 12, padding: "10px 14px", background: "color-mix(in srgb, var(--rq-text) 2%, transparent)" }}>
+                        <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--rq-text-2)" }}>Job description</summary>
                         <div style={{ ...styles.jdScrollBox, marginTop: 10 }}>{selectedJob.jd || "No job description available."}</div>
                       </details>
                     </aside>
@@ -4124,14 +4112,14 @@ body {
           )}
 
           {step === "preview" && editorWorkspace && (
-            <div style={{ position: "fixed", top: workspaceTop, left: 0, right: 0, bottom: 0, zIndex: 15, display: "flex", flexDirection: "column", background: "#0a0a14" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 20px", borderBottom: "1px solid #1e1e30" }}>
+            <div style={{ position: "fixed", top: workspaceTop, left: 0, right: 0, bottom: 0, zIndex: 15, display: "flex", flexDirection: "column", background: "var(--rq-bg)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 20px", borderBottom: "1px solid var(--rq-border)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
                   <button type="button" style={styles.smallBackButton} onClick={() => setStep("suggestions")}>
                     ← Back to Suggestions
                   </button>
                   {approvedIds.size > 0 && (
-                    <span style={{ fontSize: 12, color: "#8b8ba7", whiteSpace: "nowrap" }}>
+                    <span style={{ fontSize: 12, color: "var(--rq-text-2)", whiteSpace: "nowrap" }}>
                       {approvedIds.size} approved change{approvedIds.size > 1 ? "s" : ""} applied
                     </span>
                   )}
@@ -4153,10 +4141,10 @@ body {
                   key={rxEditor.builderUrl}
                   src={rxEditor.builderUrl}
                   title="Resume editor"
-                  style={{ flex: 1, width: "100%", border: "none", display: "block", background: "#0a0a14" }}
+                  style={{ flex: 1, width: "100%", border: "none", display: "block", background: "var(--rq-bg)" }}
                 />
               ) : (
-                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#8b8ba7", fontSize: 13 }}>
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--rq-text-2)", fontSize: 13 }}>
                   Loading the resume editor…
                 </div>
               )}
@@ -4189,7 +4177,7 @@ body {
                 <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     {rxEditor && (
-                      <a href={rxEditor.builderUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#4a7ba6", fontSize: 12 }}>
+                      <a href={rxEditor.builderUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--rq-info)", fontSize: 12 }}>
                         Open in new tab ↗
                       </a>
                     )}
@@ -4207,23 +4195,23 @@ body {
                   </div>
                 </div>
                 {openingInBuilder && !rxEditor && (
-                  <div style={{ height: 320, display: "flex", alignItems: "center", justifyContent: "center", color: "#8b8ba7", fontSize: 13, border: "1px dashed rgba(255,255,255,0.12)", borderRadius: 8 }}>
+                  <div style={{ height: 320, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--rq-text-2)", fontSize: 13, border: "1px dashed color-mix(in srgb, var(--rq-text) 12%, transparent)", borderRadius: 8 }}>
                     Loading the resume editor…
                   </div>
                 )}
                 {rxEditor && !rxEditor.embeddable && (
-                  <p style={{ fontSize: 13, color: "#8b8ba7" }}>
+                  <p style={{ fontSize: 13, color: "var(--rq-text-2)" }}>
                     This Reactive Resume instance (rxresu.me) can't be shown inside ResumeIQ. Set RXRESUME_URL to a self-hosted copy, or{" "}
-                    <a href={rxEditor.builderUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#4a7ba6" }}>open it in a new tab ↗</a>.
+                    <a href={rxEditor.builderUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--rq-info)" }}>open it in a new tab ↗</a>.
                   </p>
                 )}
                 {openInBuilderError && (
-                  <p style={{ color: "#d33", fontSize: 13 }}>{openInBuilderError}</p>
+                  <p style={{ color: "var(--rq-danger)", fontSize: 13 }}>{openInBuilderError}</p>
                 )}
               </div>
 
-              <details open={showClassicPreview} style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                <summary style={{ cursor: "pointer", fontSize: 13, color: "#8b8ba7" }}>Classic editor &amp; PDF formatting</summary>
+              <details open={showClassicPreview} style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid color-mix(in srgb, var(--rq-text) 8%, transparent)" }}>
+                <summary style={{ cursor: "pointer", fontSize: 13, color: "var(--rq-text-2)" }}>Classic editor &amp; PDF formatting</summary>
                 <div style={{ maxWidth: 640, margin: "16px auto 0" }}>
                   <ResumeDocument
                     resume={getFinalResume()}
@@ -4235,7 +4223,7 @@ body {
                 <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 15 }}>
                   PDF formatting
                 </div>
-                <p style={{ margin: "0 0 14px", color: "#555", fontSize: 13 }}>
+                <p style={{ margin: "0 0 14px", color: "var(--rq-text-2)", fontSize: 13 }}>
                   Adjust layout and font sizes below. The preview shows how the downloaded PDF will look.
                 </p>
                 <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
@@ -4269,7 +4257,7 @@ body {
                             const v = parseFloat(e.target.value);
                             if (!Number.isNaN(v)) setPdfFormat((f) => ({ ...f, [key]: v }));
                           }}
-                          style={{ width: 64, padding: "4px 6px", borderRadius: 4, border: "1px solid #ccc" }}
+                          style={{ width: 64, padding: "4px 6px", borderRadius: 4, border: "1px solid var(--rq-border)" }}
                         />
                       </label>
                     ))}
@@ -4286,7 +4274,7 @@ body {
                         <select
                           value={pdfFormat[key] || "helvetica"}
                           onChange={(e) => setPdfFormat((f) => ({ ...f, [key]: e.target.value }))}
-                          style={{ padding: "4px 6px", borderRadius: 4, border: "1px solid #ccc", minWidth: 100 }}
+                          style={{ padding: "4px 6px", borderRadius: 4, border: "1px solid var(--rq-border)", minWidth: 100 }}
                         >
                           {PDF_FONT_OPTIONS.map((o) => (
                             <option key={o.value} value={o.value}>{o.label}</option>
@@ -4302,13 +4290,13 @@ body {
                       <select
                         value={pdfFormat.singlePage ? "single" : "multi"}
                         onChange={(e) => setPdfFormat((f) => ({ ...f, singlePage: e.target.value === "single" }))}
-                        style={{ padding: "4px 6px", borderRadius: 4, border: "1px solid #ccc", minWidth: 140 }}
+                        style={{ padding: "4px 6px", borderRadius: 4, border: "1px solid var(--rq-border)", minWidth: 140 }}
                       >
                         <option value="multi">Multiple pages (page break)</option>
                         <option value="single">Single page (scale to fit)</option>
                       </select>
                     </label>
-                    <p style={{ margin: "4px 0 0", fontSize: 11, color: "#666" }}>
+                    <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--rq-text-3)" }}>
                       Single page scales content to fit on one page.
                     </p>
                     <div style={{ marginTop: 14, marginBottom: 8, fontWeight: 600, fontSize: 12 }}>
@@ -4320,14 +4308,14 @@ body {
                         type="color"
                         value={typeof pdfFormat.fontColor === "string" && pdfFormat.fontColor.startsWith("#") ? pdfFormat.fontColor : "#000000"}
                         onChange={(e) => setPdfFormat((f) => ({ ...f, fontColor: e.target.value }))}
-                        style={{ width: 36, height: 28, padding: 0, border: "1px solid #ccc", borderRadius: 4 }}
+                        style={{ width: 36, height: 28, padding: 0, border: "1px solid var(--rq-border)", borderRadius: 4 }}
                       />
                       <input
                         type="text"
                         value={pdfFormat.fontColor || "#000000"}
                         onChange={(e) => setPdfFormat((f) => ({ ...f, fontColor: e.target.value }))}
-                        placeholder="#000000"
-                        style={{ width: 80, padding: "4px 6px", borderRadius: 4, border: "1px solid #ccc", fontSize: 12 }}
+                        placeholder="var(--rq-text)"
+                        style={{ width: 80, padding: "4px 6px", borderRadius: 4, border: "1px solid var(--rq-border)", fontSize: 12 }}
                       />
                     </label>
                     <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginTop: 6 }}>
@@ -4336,14 +4324,14 @@ body {
                         type="color"
                         value={typeof pdfFormat.backgroundColor === "string" && pdfFormat.backgroundColor.startsWith("#") ? pdfFormat.backgroundColor : "#ffffff"}
                         onChange={(e) => setPdfFormat((f) => ({ ...f, backgroundColor: e.target.value }))}
-                        style={{ width: 36, height: 28, padding: 0, border: "1px solid #ccc", borderRadius: 4 }}
+                        style={{ width: 36, height: 28, padding: 0, border: "1px solid var(--rq-border)", borderRadius: 4 }}
                       />
                       <input
                         type="text"
                         value={pdfFormat.backgroundColor || "#ffffff"}
                         onChange={(e) => setPdfFormat((f) => ({ ...f, backgroundColor: e.target.value }))}
                         placeholder="#ffffff"
-                        style={{ width: 80, padding: "4px 6px", borderRadius: 4, border: "1px solid #ccc", fontSize: 12 }}
+                        style={{ width: 80, padding: "4px 6px", borderRadius: 4, border: "1px solid var(--rq-border)", fontSize: 12 }}
                       />
                     </label>
                     <div style={{ marginTop: 14, marginBottom: 8, fontWeight: 600, fontSize: 12 }}>
@@ -4366,14 +4354,14 @@ body {
                             ? pdfFormat.dividerColor
                             : "#c8d0da"}
                           onChange={(e) => setPdfFormat((f) => ({ ...f, dividerColor: e.target.value }))}
-                          style={{ width: 36, height: 28, padding: 0, border: "1px solid #ccc", borderRadius: 4 }}
+                          style={{ width: 36, height: 28, padding: 0, border: "1px solid var(--rq-border)", borderRadius: 4 }}
                         />
                         <input
                           type="text"
                           value={pdfFormat.dividerColor || "#c8d0da"}
                           onChange={(e) => setPdfFormat((f) => ({ ...f, dividerColor: e.target.value }))}
                           placeholder="#c8d0da"
-                          style={{ width: 80, padding: "4px 6px", borderRadius: 4, border: "1px solid #ccc", fontSize: 12 }}
+                          style={{ width: 80, padding: "4px 6px", borderRadius: 4, border: "1px solid var(--rq-border)", fontSize: 12 }}
                         />
                       </label>
                     )}
@@ -4388,13 +4376,13 @@ body {
                       />
                       <span>Put Skills in header (use space next to photo)</span>
                     </label>
-                    <p style={{ margin: "4px 0 0", fontSize: 11, color: "#666" }}>
+                    <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--rq-text-3)" }}>
                       Shows Skills in the right column below contact, so the main body has more room.
                     </p>
                     <div style={{ marginTop: 14, marginBottom: 8, fontWeight: 600, fontSize: 12 }}>
                       Section order
                     </div>
-                    <p style={{ margin: "0 0 6px", fontSize: 12, color: "#555" }}>
+                    <p style={{ margin: "0 0 6px", fontSize: 12, color: "var(--rq-text-2)" }}>
                       Order of sections below the header (Skills in header uses the space next to photo instead).
                     </p>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -4449,8 +4437,8 @@ body {
                   type="button"
                   style={{
                     ...styles.primaryButton,
-                    background: "rgba(0,229,160,0.15)",
-                    border: "1px solid rgba(0,229,160,0.5)",
+                    background: "color-mix(in srgb, var(--rq-accent) 15%, transparent)",
+                    border: "1px solid color-mix(in srgb, var(--rq-accent) 50%, transparent)",
                   }}
                   onClick={async () => {
                     const data = updatedResume || resume;
