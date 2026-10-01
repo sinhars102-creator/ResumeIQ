@@ -1592,24 +1592,6 @@ const PDF_FONT_OPTIONS = [
   { value: "courier", label: "Courier" },
 ];
 
-const RX_TEMPLATE_OPTIONS = [
-  { id: "azurill", label: "Azurill", tags: ["Creative", "Tech", "Two-column", "Visual flair"] },
-  { id: "bronzor", label: "Bronzor", tags: ["Clean", "Consulting", "Corporate", "Professional"] },
-  { id: "chikorita", label: "Chikorita", tags: ["Client-facing", "HR", "Marketing", "Soft accent"] },
-  { id: "ditgar", label: "Ditgar", tags: ["Dark sidebar", "Data science", "Developer", "Modern"] },
-  { id: "ditto", label: "Ditto", tags: ["ATS friendly", "Minimal", "Text-dense", "Traditional"] },
-  { id: "gengar", label: "Gengar" },
-  { id: "glalie", label: "Glalie" },
-  { id: "kakuna", label: "Kakuna" },
-  { id: "lapras", label: "Lapras" },
-  { id: "leafish", label: "Leafish" },
-  { id: "meowth", label: "Meowth" },
-  { id: "onyx", label: "Onyx" },
-  { id: "pikachu", label: "Pikachu" },
-  { id: "rhyhorn", label: "Rhyhorn" },
-  { id: "scizor", label: "Scizor" },
-];
-
 const DEFAULT_PDF_FORMAT = {
   marginMm: 14,
   lineH: 4.2,
@@ -2770,11 +2752,8 @@ export default function ResumeIQ() {
   const [assistantChat, setAssistantChat] = useState({ messages: [], decisions: [] });
   const [openingInBuilder, setOpeningInBuilder] = useState(false);
   const [openInBuilderError, setOpenInBuilderError] = useState(null);
-  const [selectedTemplate, setSelectedTemplate] = useState(null);
-  const [templatePdfUrl, setTemplatePdfUrl] = useState(null);
-  const [renderingTemplate, setRenderingTemplate] = useState(false);
-  const [templateRenderError, setTemplateRenderError] = useState(null);
-  const templatePdfUrlRef = useRef(null);
+  // Reactive Resume builder embedded in the Updated Resume step: { builderUrl, embeddable }.
+  const [rxEditor, setRxEditor] = useState(null);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -3215,6 +3194,8 @@ export default function ResumeIQ() {
     }),
   };
 
+  // Imports the current resume into Reactive Resume and shows its builder inline.
+  // Each call creates a fresh copy, so it also serves as "send my latest edits".
   const handleOpenInReactiveResume = async () => {
     setOpeningInBuilder(true);
     setOpenInBuilderError(null);
@@ -3229,7 +3210,9 @@ export default function ResumeIQ() {
       if (!response.ok || !data.builderUrl) {
         throw new Error(data?.details || data?.error || `Failed to open in Reactive Resume (${response.status})`);
       }
-      window.open(data.builderUrl, "_blank", "noopener,noreferrer");
+      // rxresu.me refuses to be framed; only a self-hosted instance can be embedded.
+      if (data.embeddable) setRxEditor({ builderUrl: data.builderUrl });
+      else window.open(data.builderUrl, "_blank", "noopener,noreferrer");
     } catch (e) {
       console.error("Open in Reactive Resume failed:", e);
       setOpenInBuilderError(e.message || "Failed to open in Reactive Resume.");
@@ -3237,40 +3220,6 @@ export default function ResumeIQ() {
       setOpeningInBuilder(false);
     }
   };
-
-  const handleSelectTemplate = async (templateId) => {
-    setSelectedTemplate(templateId);
-    setRenderingTemplate(true);
-    setTemplateRenderError(null);
-    try {
-      const base = (import.meta.env.VITE_API_URL || "http://localhost:3001").replace(/\/$/, "");
-      const response = await fetch(`${base}/api/rxresume/render-pdf`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ resumeData: getFinalResume(), template: templateId }),
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data?.details || data?.error || `Failed to render template (${response.status})`);
-      }
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      if (templatePdfUrlRef.current) URL.revokeObjectURL(templatePdfUrlRef.current);
-      templatePdfUrlRef.current = url;
-      setTemplatePdfUrl(url);
-    } catch (e) {
-      console.error("Template render failed:", e);
-      setTemplateRenderError(e.message || "Failed to render template.");
-    } finally {
-      setRenderingTemplate(false);
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      if (templatePdfUrlRef.current) URL.revokeObjectURL(templatePdfUrlRef.current);
-    };
-  }, []);
 
   const currentStepOrder = getStepOrder(step);
 
@@ -4171,54 +4120,32 @@ body {
               </div>
 
               <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid rgba(0,0,0,0.08)" }}>
-                <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 15 }}>Preview in a designed template</div>
-                <p style={{ margin: "0 0 12px", color: "#555", fontSize: 13 }}>
-                  Rendered live by Reactive Resume's template engine — pick one to preview as a PDF, right here.
-                </p>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-                  {RX_TEMPLATE_OPTIONS.map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => handleSelectTemplate(t.id)}
-                      disabled={renderingTemplate}
-                      title={t.tags ? t.tags.join(" · ") : undefined}
-                      style={{
-                        ...styles.ghostButton,
-                        fontSize: 12,
-                        ...(selectedTemplate === t.id
-                          ? { background: "#0084d1", color: "#fff", borderColor: "#0084d1" }
-                          : {}),
-                      }}
-                    >
-                      {t.label}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
+                  <div>
+                    <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 15 }}>Design &amp; edit</div>
+                    <p style={{ margin: 0, color: "#555", fontSize: 13 }}>
+                      Pick a template, restyle and fine-tune your resume, then export the PDF — all in the editor below.
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    {rxEditor && (
+                      <a href={rxEditor.builderUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#4a7ba6", fontSize: 12 }}>
+                        Open in new tab ↗
+                      </a>
+                    )}
+                    <button type="button" onClick={handleOpenInReactiveResume} disabled={openingInBuilder} style={styles.primaryButton}>
+                      {openingInBuilder ? "Loading editor…" : rxEditor ? "Reload with latest edits" : "Open editor"}
                     </button>
-                  ))}
+                  </div>
                 </div>
-
-                {renderingTemplate && (
-                  <p style={{ fontSize: 13, color: "#555" }}>Rendering {selectedTemplate}…</p>
-                )}
-                {templateRenderError && (
-                  <p style={{ color: "#d33", fontSize: 13 }}>{templateRenderError}</p>
-                )}
-                {templatePdfUrl && !renderingTemplate && (
+                {rxEditor && (
                   <iframe
-                    src={templatePdfUrl}
-                    title="Template preview"
-                    style={{ width: "100%", height: 800, border: "1px solid #ddd", borderRadius: 8 }}
+                    key={rxEditor.builderUrl}
+                    src={rxEditor.builderUrl}
+                    title="Resume editor"
+                    style={{ width: "100%", height: "85vh", minHeight: 640, border: "1px solid #ddd", borderRadius: 8, background: "#fff" }}
                   />
                 )}
-
-                <p style={{ marginTop: 12, fontSize: 12 }}>
-                  <a
-                    href="#"
-                    onClick={(e) => { e.preventDefault(); handleOpenInReactiveResume(); }}
-                    style={{ color: "#4a7ba6" }}
-                  >
-                    {openingInBuilder ? "Opening…" : "Prefer full drag-and-drop editing? Open in Reactive Resume →"}
-                  </a>
-                </p>
                 {openInBuilderError && (
                   <p style={{ color: "#d33", fontSize: 13 }}>{openInBuilderError}</p>
                 )}

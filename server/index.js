@@ -19,7 +19,7 @@ const serverEnv = resolve(__dirname, ".env");
 const cwdEnv = resolve(process.cwd(), ".env");
 
 const ENV_KEYS = [
-  "RAPIDAPI_KEY", "APIFY_TOKEN", "APIFY_API_TOKEN", "RXRESUME_API_KEY",
+  "RAPIDAPI_KEY", "APIFY_TOKEN", "APIFY_API_TOKEN", "RXRESUME_API_KEY", "RXRESUME_URL",
   "GROQ_API_KEY", "GROQ_MODEL", "ANTHROPIC_API_KEY", "VITE_ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "LLM_PROVIDER",
 ];
 
@@ -503,7 +503,10 @@ app.get("/api/linkedin-jobs", async (req, res) => {
  * APIFY_TOKEN above): it can read/write the whole Reactive Resume account,
  * not just make one inference call.
  */
-const RX_BASE = "https://rxresu.me/api/openapi";
+// Reactive Resume instance: the hosted rxresu.me by default, or a self-hosted
+// copy (e.g. http://localhost:3000) whose builder can be embedded in ResumeIQ.
+const RX_APP_URL = (process.env.RXRESUME_URL || "https://rxresu.me").replace(/\/$/, "");
+const RX_BASE = `${RX_APP_URL}/api/openapi`;
 
 async function rxFetch(path, options = {}) {
   const key = getRxResumeKey();
@@ -890,7 +893,7 @@ app.post("/api/rxresume/open-in-builder", async (req, res) => {
   }
   try {
     const { resumeId } = await importIntoRxResume(resumeData);
-    return res.json({ resumeId, builderUrl: `https://rxresu.me/builder/${resumeId}` });
+    return res.json({ resumeId, builderUrl: `${RX_APP_URL}/builder/${resumeId}`, embeddable: RX_APP_URL !== "https://rxresu.me" });
   } catch (err) {
     console.error("Reactive Resume open-in-builder error:", err);
     return res.status(502).json({ error: "Failed to open resume in Reactive Resume", details: err.message });
