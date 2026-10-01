@@ -4,12 +4,37 @@
  *
  * Provider: LLM_PROVIDER=groq|anthropic, else Groq when GROQ_API_KEY is set,
  * else Anthropic. Models: GROQ_MODEL / ANTHROPIC_MODEL override the defaults.
+ *
+ * When the primary provider is rate limited, the call falls back to the other one (if
+ * configured); Groq's free tier caps tokens per model per day, so Groq also steps through
+ * GROQ_FALLBACK_MODELS (comma-separated).
  */
 
+import Anthropic from "@anthropic-ai/sdk";
+
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
-const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
-const DEFAULT_ANTHROPIC_MODEL = "claude-sonnet-4-6";
+const DEFAULT_ANTHROPIC_MODEL = "claude-opus-5-5";
+// Opus 5.5 always thinks; effort sets how much (its default is "medium" – kept explicit).
+const DEFAULT_ANTHROPIC_EFFORT = "medium";
+const DEFAULT_GROQ_FALLBACK_MODELS = ["llama-3.3-70b-versatile", "openai/gpt-oss-20b"];
+
+/** Errors whose message is safe and useful to show users (everything else is logged, not returned). */
+export class LLMUserError extends Error {
+  constructor(message, { status = 502, cause } = {}) {
+    super(message, { cause });
+    this.status = status;
+  }
+}
+
+class RateLimitedError extends Error {}
+
+function groqModels() {
+  const fallbacks = process.env.GROQ_FALLBACK_MODELS
+    ? process.env.GROQ_FALLBACK_MODELS.split(",").map((m) => m.trim()).filter(Boolean)
+    : DEFAULT_GROQ_FALLBACK_MODELS;
+  return [...new Set([process.env.GROQ_MODEL || DEFAULT_GROQ_MODEL, ...fallbacks])];
+}
 
 function anthropicKey() {
   // VITE_ANTHROPIC_API_KEY is the old browser-side name; still honoured so existing .env files work.
@@ -32,20 +57,22 @@ export function llmModel() {
 }
 
 const TRUNCATED_MESSAGE = "Response was cut off by the token limit before it finished. Try again, or shorten the input.";
+const DECLINED_MESSAGE = "The AI couldn't help with that request. Try rephrasing it, or remove anything unusual from the input.";
+const BUSY_MESSAGE = "ResumeIQ has reached its AI usage limit for the moment. Please try again in a few minutes.";
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const MAX_RATE_LIMIT_WAIT_MS = 20000;
 
-async function callGroq({ system, user, maxTokens, json }, attempt = 0) {
+async function callGroq({ system, user, maxTokens, json }, model, attempt = 0) {
   const response = await fetch(GROQ_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
     body: JSON.stringify({
-      model: llmModel(),
+      model,
       temperature: 0.2,
       // gpt-oss reasons before answering and those tokens share this budget, so leave headroom.
       max_completion_tokens: maxTokens + 2048,
-      ...(/gpt-oss/.test(llmModel()) ? { reasoning_effort: "low" } : {}),
+      ...(/gpt-oss/.test(model) ? { reasoning_effort: "low" } : {}),
       ...(json ? { response_format: { type: "json_object" } } : {}),
       messages: [
         { role: "system", content: system },
@@ -59,51 +86,69 @@ async function callGroq({ system, user, maxTokens, json }, attempt = 0) {
     const seconds = Number((data?.error?.message || "").match(/try again in ([\d.]+)s/)?.[1]) || Number(response.headers.get("retry-after")) || 5;
     const waitMs = Math.ceil(seconds * 1000) + 250;
     if (waitMs <= MAX_RATE_LIMIT_WAIT_MS) {
-      console.log(`[llm] Groq rate limit – retrying in ${(waitMs / 1000).toFixed(1)}s`);
+      console.log(`[llm] Groq rate limit on ${model} – retrying in ${(waitMs / 1000).toFixed(1)}s`);
       await sleep(waitMs);
-      return callGroq({ system, user, maxTokens, json }, attempt + 1);
+      return callGroq({ system, user, maxTokens, json }, model, attempt + 1);
     }
+  }
+  if (response.status === 429) {
+    // Daily (or long) limit on this model – the caller moves on to the next model.
+    throw new RateLimitedError(data?.error?.message || `Groq rate limit on ${model}`);
   }
   if (!response.ok) {
     throw new Error(data?.error?.message || `Groq API error ${response.status}`);
   }
   const choice = data.choices?.[0];
-  if (choice?.finish_reason === "length") throw new Error(TRUNCATED_MESSAGE);
+  if (choice?.finish_reason === "length") throw new LLMUserError(TRUNCATED_MESSAGE);
   return choice?.message?.content || "";
 }
 
-async function callAnthropic({ system, user, maxTokens }) {
-  const response = await fetch(ANTHROPIC_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-api-key": anthropicKey(),
-      "anthropic-version": "2023-06-01",
-    },
-    body: JSON.stringify({
-      model: llmModel(),
-      max_tokens: maxTokens,
-      temperature: 0.2,
+let anthropicClient;
+
+async function callAnthropic({ system, user, maxTokens }, model) {
+  anthropicClient ??= new Anthropic({ apiKey: anthropicKey() });
+  let response;
+  try {
+    response = await anthropicClient.beta.messages.create({
+      model,
+      // Thinking shares this budget with the answer, so leave plenty of headroom above the reply size.
+      max_tokens: Math.max(16000, maxTokens + 8000),
+      output_config: { effort: process.env.ANTHROPIC_EFFORT || DEFAULT_ANTHROPIC_EFFORT },
+      // If a safety classifier declines, the API re-runs the request on a suitable fallback model.
+      betas: ["server-side-fallback-2026-07-01"],
+      fallbacks: "default",
       system,
       messages: [{ role: "user", content: user }],
-    }),
-  });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok || data?.type === "error") {
-    throw new Error(data?.error?.message || data?.message || `Anthropic API error ${response.status}`);
+    });
+  } catch (err) {
+    if (err instanceof Anthropic.RateLimitError) throw new RateLimitedError(err.message);
+    throw err;
   }
-  if (data?.stop_reason === "max_tokens") throw new Error(TRUNCATED_MESSAGE);
-  return (data?.content || [])
+  if (response.stop_reason === "refusal") throw new LLMUserError(DECLINED_MESSAGE, { status: 422 });
+  if (response.stop_reason === "max_tokens") throw new LLMUserError(TRUNCATED_MESSAGE);
+  return response.content
     .filter((block) => block.type === "text")
     .map((block) => block.text)
     .join("\n");
 }
 
-/** Run one prompt on the configured provider and return the text reply. */
+/** Run one prompt, falling back across models/providers when one is rate limited. */
 export async function callLLM({ system, user, maxTokens = 1500, json = false }) {
   const provider = llmProvider();
   if (!provider) throw new Error("No LLM provider configured. Set GROQ_API_KEY or ANTHROPIC_API_KEY in .env.");
-  return provider === "groq"
-    ? callGroq({ system, user, maxTokens, json })
-    : callAnthropic({ system, user, maxTokens });
+  const prompt = { system, user, maxTokens, json };
+  const groq = process.env.GROQ_API_KEY ? groqModels().map((m) => () => callGroq(prompt, m)) : [];
+  const anthropic = anthropicKey() ? [() => callAnthropic(prompt, process.env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL)] : [];
+  const attempts = provider === "anthropic" ? [...anthropic, ...groq] : [...groq, ...anthropic];
+  let lastLimit;
+  for (const attempt of attempts) {
+    try {
+      return await attempt();
+    } catch (err) {
+      if (!(err instanceof RateLimitedError)) throw err;
+      console.warn(`[llm] ${err.message.slice(0, 160)} – trying next model`);
+      lastLimit = err;
+    }
+  }
+  throw new LLMUserError(BUSY_MESSAGE, { status: 429, cause: lastLimit });
 }

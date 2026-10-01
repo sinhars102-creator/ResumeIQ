@@ -10,7 +10,14 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import * as cheerio from "cheerio";
 import { saveJobs, findJobs, repositorySize } from "./jobRepository.js";
-import { callLLM, llmProvider, llmModel } from "./llm.js";
+import { callLLM, llmProvider, llmModel, LLMUserError } from "./llm.js";
+
+/** Provider errors can leak account details (e.g. Groq org ids); only our own messages reach users. */
+function sendLLMError(res, err, tag) {
+  console.error(`[${tag}] error:`, err.message, err.cause?.message || "");
+  if (err instanceof LLMUserError) return res.status(err.status).json({ error: err.message });
+  return res.status(502).json({ error: "The AI service had a problem handling that request. Please try again." });
+}
 import { runAssistantTurn } from "./assistant.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -20,7 +27,7 @@ const cwdEnv = resolve(process.cwd(), ".env");
 
 const ENV_KEYS = [
   "RAPIDAPI_KEY", "APIFY_TOKEN", "APIFY_API_TOKEN", "RXRESUME_API_KEY", "RXRESUME_URL",
-  "GROQ_API_KEY", "GROQ_MODEL", "ANTHROPIC_API_KEY", "VITE_ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "LLM_PROVIDER",
+  "GROQ_API_KEY", "GROQ_MODEL", "ANTHROPIC_API_KEY", "VITE_ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_EFFORT", "GROQ_FALLBACK_MODELS", "LLM_PROVIDER",
 ];
 
 function loadEnvFile(filePath) {
@@ -376,8 +383,7 @@ app.post("/api/llm", async (req, res) => {
     });
     res.json({ text, provider: llmProvider(), model: llmModel() });
   } catch (err) {
-    console.error(`[llm] ${llmProvider()} error:`, err.message);
-    res.status(502).json({ error: err.message });
+    sendLLMError(res, err, `llm:${llmProvider()}`);
   }
 });
 
@@ -407,8 +413,7 @@ app.post("/api/assistant", async (req, res) => {
     });
     res.json(turn);
   } catch (err) {
-    console.error("[assistant] error:", err.message);
-    res.status(502).json({ error: err.message });
+    sendLLMError(res, err, "assistant");
   }
 });
 
