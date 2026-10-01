@@ -201,6 +201,9 @@ const getAuthConfig = () => {
 		advanced: {
 			database: { generateId },
 			useSecureCookies: authBaseUrl.startsWith("https://"),
+			...(env.EMBED_CROSS_SITE && {
+				defaultCookieAttributes: { sameSite: "none", secure: true, partitioned: true },
+			}),
 			ipAddress: { ipAddressHeaders: TRUSTED_IP_HEADERS },
 		},
 

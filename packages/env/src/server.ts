@@ -33,6 +33,9 @@ export const env = createEnv({
 			.trim()
 			.transform((value) => value || undefined)
 			.optional(),
+		// Set when the embedder is a different site (e.g. two *.vercel.app hosts): auth cookies become
+		// SameSite=None; Secure; Partitioned so the session works inside the embedder's iframe.
+		EMBED_CROSS_SITE: z.stringbool().default(false),
 
 		// Database
 		DATABASE_URL: z.url({ protocol: /postgres(ql)?/ }),
