@@ -4,6 +4,7 @@ import { jsPDF } from "jspdf";
 
 // PDF.js worker: bundle via Vite so production gets a valid asset URL (fixes "load failed" on Vercel)
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { track, bucket } from "./analytics.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 
@@ -1257,6 +1258,7 @@ async function callLLM(system, user, maxTokens) {
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
+    track("ai_error", { step: "llm", status: response.status });
     throw new Error(data?.error || `AI request failed (${response.status})`);
   }
   return data.text || "";
@@ -2482,7 +2484,13 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `Assistant request failed (${response.status})`);
-      const edits = (data.edits || []).map((e) => ({ ...e, id: `a${Date.now()}-${++assistantEditSeq}`, status: "pending" }));
+      const edits = (data.edits || []).map((e) => ({ ...e, originalProposed: e.proposed, id: `a${Date.now()}-${++assistantEditSeq}`, status: "pending" }));
+      track("assistant_reply", {
+        edits: edits.length,
+        placeholders: edits.some((e) => /\[[^\]]+\]/.test(e.proposed || "")),
+        done: !!data.done,
+        question_number: edits.length ? null : ((nextChat.gapQuestions || {})[nextChat.currentGapId] || 0) + 1,
+      });
       setChat((c) => ({
         ...c,
         messages: [...c.messages, { role: "assistant", text: data.message, edits, quickReplies: data.quickReplies || [], done: !!data.done }],
@@ -2497,6 +2505,7 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
       if (data.done) setReopened(false);
     } catch (e) {
       setError(e.message || "The assistant is unavailable right now.");
+      track("ai_error", { step: "assistant", busy: /limit|busy/i.test(e.message || "") });
     } finally {
       setLoading(false);
     }
@@ -2516,6 +2525,7 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
       if (!response.ok || !data.gaps?.length) throw new Error(data.error || "No gaps returned");
       // Wording gaps are pre-selected: those are the ones rewording can actually close.
       setChat((c) => ({ ...c, gaps: data.gaps, selectedGapIds: data.gaps.filter((g) => g.kind === "wording").map((g) => g.id) }));
+      track("gaps_listed", { total: data.gaps.length, wording: data.gaps.filter((g) => g.kind === "wording").length, real: data.gaps.filter((g) => g.kind === "real").length });
       setLoading(false);
     } catch {
       // Fall back to the open-ended conversation.
@@ -2547,6 +2557,7 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
     // A later round (after "Work on more gaps") needs a user turn so the assistant switches focus.
     const messages = chat.messages.length ? [...chat.messages, { role: "user", text: `Let's work on: ${titles.join("; ")}.` }] : chat.messages;
     const nextChat = { ...chat, messages, focusGapIds: ids, currentGapId: ids[0] };
+    track("gaps_chosen", { chosen: ids.length, of: (chat.gaps || []).length, real: (chat.gaps || []).filter((g) => ids.includes(g.id) && g.kind === "real").length, round: chat.messages.length ? "more" : "first" });
     setChat(nextChat);
     setReopened(false);
     sendTurn(nextChat);
@@ -2555,6 +2566,7 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
   // Skipping is handled here, not left to the model: mark the current gap covered and move on (or finish).
   const skipCurrentGap = () => {
     if (loading) return;
+    track("gap_skipped");
     const ids = chat.focusGapIds || [];
     const current = chat.currentGapId || ids.find((id) => !(chat.coveredGapIds || []).includes(id));
     const coveredGapIds = [...new Set([...(chat.coveredGapIds || []), ...(current ? [current] : [])])];
@@ -2614,6 +2626,7 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
     const edit = message.edits.find((e) => e.id === editId);
     if (!edit || edit.status !== "pending") return;
     if (decision === "accepted") onAccept(edit);
+    track("edit_decided", { decision, section: edit.section, type: edit.type, edited: edit.proposed !== edit.originalProposed });
     const edits = message.edits.map((e) => (e.id === editId ? { ...e, status: decision } : e));
     const messages = chat.messages.map((m, i) => (i === messageIndex ? { ...m, edits } : m));
     const decisions = [...chat.decisions, { decision, section: edit.section, original: edit.original, proposed: edit.proposed }];
@@ -2746,7 +2759,7 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
                 <button type="button" style={styles.ghostButton} onClick={pickMoreGaps}>Work on more gaps</button>
               )}
               {onContinue && (
-                <button type="button" style={styles.primaryButton} onClick={onContinue}>{continueLabel || "Continue →"}</button>
+                <button type="button" style={styles.primaryButton} onClick={() => { track("tailoring_finished", { accepted_edits: acceptedCount, gaps_covered: covered.size }); onContinue(); }}>{continueLabel || "Continue →"}</button>
               )}
             </div>
           </div>
@@ -3324,6 +3337,7 @@ export default function ResumeIQ() {
       };
       setJobs((prev) => [newJob, ...prev]);
       setLinkedInText("");
+      track("job_description_pasted");
     } catch (e) {
       console.error("Error extracting job:", e);
     } finally {
@@ -3380,6 +3394,8 @@ export default function ResumeIQ() {
     setLinkedInSearchError(null);
     setLinkedInSearching(true);
     setJobFeedStatus({ keywords, savedCount: null, linkedInFound: 0, linkedInTotal: null, freshCount: null, startedAt: Date.now() });
+    const searchStarted = Date.now();
+    track("job_search_started", { india_only: linkedInSearchIndiaOnly, limit: linkedInSearchLimit, has_years: levels.length > 0 });
     const updateFeed = (patch) => setJobFeedStatus((s) => (s && s.keywords === keywords ? { ...s, ...patch } : s));
 
     fetch(`${base}/api/jobs/saved?${params}`)
@@ -3432,12 +3448,19 @@ export default function ResumeIQ() {
         if (!isCurrent()) return;
         if (!res.ok) {
           setLinkedInSearchError(data.details || data.error || `Search failed (${res.status})`);
+          track("job_search_failed", { status: res.status });
           return;
         }
         jobsFound = data.jobs || [];
       }
       const freshCount = mergeJobs(jobsFound, { markFresh: true });
       updateFeed({ freshCount, linkedInTotal: jobsFound.length, linkedInFound: jobsFound.length });
+      track("job_search_completed", {
+        linkedin_found: jobsFound.length,
+        new_roles: freshCount,
+        live_progress: !!liveJobs,
+        seconds: Math.round((Date.now() - searchStarted) / 1000),
+      });
     } catch (e) {
       if (isCurrent()) setLinkedInSearchError(e.message || "Search failed");
     } finally {
@@ -3518,6 +3541,9 @@ export default function ResumeIQ() {
     setLinkedInSearching(false);
     setShowBelowLevelJobs(false);
 
+    const uploadStarted = Date.now();
+    const fileType = (file.name.split(".").pop() || "unknown").toLowerCase();
+    track("resume_uploaded", { file_type: fileType, size_kb: Math.round((file.size || 0) / 1024) });
     try {
       const text = await readFileToText(file);
       setParsingStatus((s) => ({ ...s, extractText: true }));
@@ -3528,6 +3554,19 @@ export default function ResumeIQ() {
         isPdf ? extractPdfPhoto(file) : Promise.resolve(null),
       ]);
       if (photoUrl) extracted.photoUrl = photoUrl;
+      const computedExperience = experienceFromRoles(extracted);
+      track("resume_parsed", {
+        file_type: fileType,
+        parse_seconds: Math.round((Date.now() - uploadStarted) / 1000),
+        roles: (extracted.experience || []).length,
+        skills: (extracted.skills || []).length,
+        certifications: (extracted.certifications || []).length,
+        achievements: (extracted.achievements || []).length,
+        has_photo: !!photoUrl,
+        years_bucket: bucket(getCandidateYears(extracted), [2, 5, 8, 12, 20]),
+        experience_mismatch: !!experienceCorrection(extracted),
+        role_gaps: computedExperience?.gaps.length || 0,
+      });
       setResume(extracted);
       setResumeText(text);
       setParsingStatus((s) => ({ ...s, parseStructure: true }));
@@ -3550,6 +3589,10 @@ export default function ResumeIQ() {
     } catch (err) {
       console.error("Upload/parse error:", err);
       const msg = err.message || "Something went wrong";
+      track("resume_parse_failed", {
+        file_type: fileType,
+        reason: /fetch failed|network/i.test(msg) ? "network" : /limit|busy|429/i.test(msg) ? "ai_limit" : /pdf/i.test(msg) ? "pdf_read" : "other",
+      });
       const isNetwork = /fetch failed|failed to fetch|network error|connection refused/i.test(msg);
       const isApiKey = /missing|not configured|api key|invalid.*key|anthropic|quota|401|429/i.test(msg);
       setParsingError(
@@ -3594,6 +3637,7 @@ export default function ResumeIQ() {
     try {
       // Reuse this job's earlier analysis (this session or a saved one) so the score doesn't shift between visits.
       const cacheKey = scoreCacheKey(resumeHash, matchYears, job);
+      const reused = !!(analyzedScores.get(job.id) || readCachedScore(cacheKey));
       const scoreData = analyzedScores.get(job.id) || readCachedScore(cacheKey) || (await scoreResume(job, resume, matchYears));
       setScore(scoreData.score);
       setScoreBreakdown(scoreData);
@@ -3601,6 +3645,13 @@ export default function ResumeIQ() {
         setAnalyzedScores((prev) => new Map(prev).set(job.id, scoreData));
         writeCachedScore(cacheKey, scoreData);
       }
+      track("fit_analyzed", {
+        score: scoreData.score,
+        label: scoreData.label,
+        reused,
+        estimate: computeLocalMatchScore(resume, job, matchYears)?.score ?? null,
+        source: job.source || "pasted",
+      });
     } catch (e) {
       console.error("Scoring error:", e);
     } finally {
@@ -3639,6 +3690,7 @@ export default function ResumeIQ() {
   };
 
   const handleApplyChanges = async () => {
+    track("continue_to_preview", { accepted_edits: approvedIds.size });
     setApplyingChanges(true);
     try {
       const approved = suggestions.filter((s) => approvedIds.has(s.id));
@@ -3749,6 +3801,7 @@ export default function ResumeIQ() {
     }
     if (editorRequestedRef.current) return;
     editorRequestedRef.current = true;
+    track("preview_opened");
     handleOpenInReactiveResume();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
@@ -4057,6 +4110,7 @@ body {
                   type="button"
                   style={{ ...styles.ghostButton, fontSize: 12 }}
                   onClick={() => {
+                    track("sample_resume_used");
                     setResume(SAMPLE_RESUME);
                     setStep("select");
                   }}
@@ -4706,7 +4760,7 @@ body {
                         </div>
                       )}
                       <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
-                        <button type="button" style={styles.ghostButton} onClick={() => setDismissedYearsCorrection(true)}>Dismiss</button>
+                        <button type="button" style={styles.ghostButton} onClick={() => { track("experience_check", { action: "dismissed", diff_years: Math.floor(computed.years) - correction.stated }); setDismissedYearsCorrection(true); }}>Dismiss</button>
                         <button
                           type="button"
                           style={styles.primaryButton}
@@ -4714,6 +4768,7 @@ body {
                             const edit = { id: `years-${Date.now()}`, section: "Summary", type: "Rewrite", original: correction.original, proposed: correction.proposed, jdRequirement: "Total experience" };
                             setSuggestions((prev) => [...prev, { ...edit, title: "Experience correction" }]);
                             setApprovedIds((prev) => new Set(prev).add(edit.id));
+                            track("experience_check", { action: "applied", diff_years: Math.floor(computed.years) - correction.stated });
                           }}
                         >
                           Update to “{correction.proposed}”
@@ -4800,6 +4855,7 @@ body {
                 <iframe
                   key={rxEditor.builderUrl}
                   src={rxEditor.builderUrl}
+                  onLoad={() => track("editor_loaded")}
                   title="Resume editor"
                   style={{ flex: 1, width: "100%", border: "none", display: "block", background: "var(--rq-bg)" }}
                 />
@@ -5105,6 +5161,7 @@ body {
                     color: "var(--rq-accent)",
                   }}
                   onClick={async () => {
+                    track("classic_pdf_downloaded");
                     const data = updatedResume || resume;
                     const photoUrl = data?.photoUrl || null;
                     let photoDataUrl = photoUrl && photoUrl.startsWith("data:") ? photoUrl : null;
