@@ -12,8 +12,10 @@ import { getBuilderLayout } from "./-store/sidebar";
 
 export const Route = createFileRoute("/builder/$resumeId")({
 	component: RouteComponent,
-	beforeLoad: ({ context }) => {
-		if (!context.session) throw redirect({ to: "/auth/login", replace: true });
+	beforeLoad: ({ context, location }) => {
+		// Come back to this resume after signing in (e.g. inside ResumeIQ's embedded editor), not the dashboard.
+		if (!context.session)
+			throw redirect({ to: "/auth/login", search: { callbackURL: location.pathname }, replace: true });
 		return { session: context.session };
 	},
 	loader: async ({ params, context }) => {
