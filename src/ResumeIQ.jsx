@@ -1322,16 +1322,98 @@ function heuristicExtractYears(jd) {
 }
 
 /** Total years of experience: the parser's figure, else the span from the earliest role's start year to today. */
+const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11 };
+
+/**
+ * A role period ("Aug 2018 – Oct 2019", "Jan 2024 – Present", "03/2021 - 12/2021", "2019 – 2021") as an
+ * inclusive range of month indexes (year * 12 + month), or null if it has no recognisable dates.
+ * A year without a month starts in January / ends in December.
+ */
+function parsePeriod(period, now = new Date()) {
+  const text = String(period || "").toLowerCase();
+  const points = [];
+  const re = /(?:(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s*,?\s*|(\d{1,2})\s*[/.-]\s*)?((?:19|20)\d{2})|\b(present|current|now|till date|to date|ongoing)\b/g;
+  let m;
+  while ((m = re.exec(text)) && points.length < 2) {
+    if (m[4]) points.push({ index: now.getFullYear() * 12 + now.getMonth(), monthKnown: true });
+    else {
+      const month = m[1] ? MONTHS[m[1].slice(0, m[1] === "sept" ? 4 : 3)] : m[2] ? Number(m[2]) - 1 : null;
+      points.push({ year: Number(m[3]), month: month != null && month >= 0 && month <= 11 ? month : null });
+    }
+  }
+  if (!points.length) return null;
+  const toIndex = (p, isEnd) => (p.index != null ? p.index : p.year * 12 + (p.month != null ? p.month : isEnd ? 11 : 0));
+  const start = toIndex(points[0], false);
+  const end = points[1] ? toIndex(points[1], true) : toIndex(points[0], true);
+  return end >= start ? { start, end: Math.min(end, now.getFullYear() * 12 + now.getMonth()) } : null;
+}
+
+/**
+ * Total experience from the roles' dates: months worked (overlapping roles counted once) / 12, plus
+ * the gaps between roles. This is what the resume's history adds up to, whatever its summary claims.
+ */
+function experienceFromRoles(resume, now = new Date()) {
+  const ranges = (resume?.experience || [])
+    .map((e) => parsePeriod(e.period, now))
+    .filter(Boolean)
+    .sort((a, b) => a.start - b.start);
+  if (!ranges.length) return null;
+  const merged = [];
+  for (const r of ranges) {
+    const last = merged[merged.length - 1];
+    if (last && r.start <= last.end + 1) last.end = Math.max(last.end, r.end);
+    else merged.push({ ...r });
+  }
+  const months = merged.reduce((sum, r) => sum + (r.end - r.start + 1), 0);
+  const gaps = [];
+  for (let i = 1; i < merged.length; i++) {
+    const gapMonths = merged[i].start - merged[i - 1].end - 1;
+    if (gapMonths > 3) gaps.push({ from: merged[i - 1].end + 1, to: merged[i].start - 1, months: gapMonths });
+  }
+  return { months, years: Math.round((months / 12) * 10) / 10, start: merged[0].start, gaps };
+}
+
+/** "Nov 2019" for a month index. */
+function formatMonthIndex(index) {
+  const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return `${names[index % 12]} ${Math.floor(index / 12)}`;
+}
+
+/** "6 years 6 months" */
+function formatDuration(months) {
+  const y = Math.floor(months / 12);
+  const m = months % 12;
+  return [y && `${y} year${y === 1 ? "" : "s"}`, m && `${m} month${m === 1 ? "" : "s"}`].filter(Boolean).join(" ") || "0 months";
+}
+
+/** Years of experience: from the roles' dates when they can be read, else the figure the resume states. */
 function getCandidateYears(resume) {
   if (!resume) return null;
+  const fromRoles = experienceFromRoles(resume);
+  if (fromRoles && fromRoles.months > 0) return fromRoles.years;
   const stated = Number(resume.yearsOfExperience);
-  if (Number.isFinite(stated) && stated > 0) return Math.round(stated);
-  const startYears = (resume.experience || [])
-    .map((e) => (String(e.period || "").match(/(19|20)\d{2}/) || [])[0])
-    .filter(Boolean)
-    .map(Number);
-  if (!startYears.length) return null;
-  return Math.max(0, new Date().getFullYear() - Math.min(...startYears));
+  return Number.isFinite(stated) && stated > 0 ? Math.round(stated) : null;
+}
+
+/**
+ * When the resume's own "N+ years" claim disagrees with its role dates by a year or more,
+ * a correction to suggest: the exact phrase in the summary and what it should say.
+ */
+function experienceCorrection(resume) {
+  const computed = experienceFromRoles(resume);
+  const summary = resume?.summary || "";
+  const match = summary.match(/(\d{1,2})\s*\+?\s*(?:years|yrs)/i);
+  if (!computed || !match) return null;
+  const stated = Number(match[1]);
+  const whole = Math.floor(computed.years);
+  if (!whole || Math.abs(whole - stated) < 1) return null;
+  const phrase = match[0];
+  return {
+    stated,
+    computed,
+    original: phrase,
+    proposed: phrase.replace(match[1], String(whole)).replace(/\s*\+?\s*(years|yrs)/i, (m, unit) => `+ ${unit}`),
+  };
 }
 
 /** LinkedIn experience-level codes (f_E) to search for a given number of years. */
@@ -1481,7 +1563,8 @@ function resumeForAI(resume) {
   if (!resume) return resume;
   // eslint-disable-next-line no-unused-vars
   const { photoUrl, ...rest } = resume;
-  return rest;
+  const computed = experienceFromRoles(resume);
+  return computed ? { ...rest, totalExperience: `${computed.years} years (${computed.months} months across listed roles)` } : rest;
 }
 
 async function scoreResume(job, resumeData, candidateYears = getCandidateYears(resumeData)) {
@@ -3180,6 +3263,7 @@ export default function ResumeIQ() {
 
   // A job's AI score (from Analyze My Fit) replaces its quick keyword estimate everywhere it's shown.
   const [analyzedScores, setAnalyzedScores] = useState(() => new Map());
+  const [dismissedYearsCorrection, setDismissedYearsCorrection] = useState(false);
   // Years used by both the estimate and the AI score: the "yrs exp" box, else what the resume implies.
   const matchYears = Number(candidateYears) || getCandidateYears(resume || SAMPLE_RESUME);
   const resumeHash = useMemo(() => hashString(JSON.stringify(resumeForAI(resume || SAMPLE_RESUME))), [resume]);
@@ -3429,6 +3513,7 @@ export default function ResumeIQ() {
     jobsRef.current = [];
     setJobs([]);
     setAnalyzedScores(new Map());
+    setDismissedYearsCorrection(false);
     setJobFeedStatus(null);
     setLinkedInSearching(false);
     setShowBelowLevelJobs(false);
@@ -4603,6 +4688,40 @@ body {
                       />
                     </div>
                     <aside style={{ width: 460, maxWidth: "100%", flexShrink: 0, position: "sticky", top: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+                {(() => {
+                  // The resume's "N+ years" claim vs what its role dates add up to.
+                  const correction = experienceCorrection(workingResume);
+                  if (!correction || dismissedYearsCorrection) return null;
+                  const { computed } = correction;
+                  return (
+                    <div style={{ border: "1px solid color-mix(in srgb, var(--rq-warn) 40%, transparent)", background: "color-mix(in srgb, var(--rq-warn) 6%, transparent)", borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13.5, color: "var(--rq-text)" }}>Experience check</div>
+                      <div style={{ fontSize: 13, lineHeight: 1.55, color: "var(--rq-text)" }}>
+                        Your resume says <b>“{correction.original}”</b>, but your roles add up to{" "}
+                        <b>{formatDuration(computed.months)}</b> ({computed.months} months since {formatMonthIndex(computed.start)}, overlaps counted once).
+                      </div>
+                      {computed.gaps.length > 0 && (
+                        <div style={{ fontSize: 12, color: "var(--rq-text-2)", lineHeight: 1.5 }}>
+                          No role is listed for {computed.gaps.map((g) => `${formatMonthIndex(g.from)} – ${formatMonthIndex(g.to)} (${g.months} mo)`).join(" and ")}. If you were working then, add those roles and your total will go up.
+                        </div>
+                      )}
+                      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap" }}>
+                        <button type="button" style={styles.ghostButton} onClick={() => setDismissedYearsCorrection(true)}>Dismiss</button>
+                        <button
+                          type="button"
+                          style={styles.primaryButton}
+                          onClick={() => {
+                            const edit = { id: `years-${Date.now()}`, section: "Summary", type: "Rewrite", original: correction.original, proposed: correction.proposed, jdRequirement: "Total experience" };
+                            setSuggestions((prev) => [...prev, { ...edit, title: "Experience correction" }]);
+                            setApprovedIds((prev) => new Set(prev).add(edit.id));
+                          }}
+                        >
+                          Update to “{correction.proposed}”
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <TailoringAssistant
                   key={selectedJob.id}
                   job={selectedJob}

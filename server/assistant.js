@@ -135,6 +135,7 @@ function formatResume(resume) {
   const parts = [
     `Name: ${resume.name || ""}`,
     `Headline: ${resume.title || ""}`,
+    ...(resume.totalExperience ? [`TOTAL EXPERIENCE (calculated from the role dates – trust this over any "N+ years" claim in the summary): ${resume.totalExperience}`] : []),
     `SUMMARY:\n${resume.summary || "(none)"}`,
     "EXPERIENCE:",
     ...(resume.experience || []).map((exp, i) =>
