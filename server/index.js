@@ -433,6 +433,97 @@ app.get("/api/jobs/saved", (req, res) => {
   res.json({ jobs, repositorySize: repositorySize() });
 });
 
+/**
+ * Live LinkedIn search in three calls, so the UI can show real progress:
+ * start an Apify run, poll how many roles it has collected, then fetch the results.
+ * GET /api/linkedin-jobs (run-and-wait, with fallbacks) remains the fallback path.
+ */
+const VALIG_ACTOR = "valig~linkedin-jobs-scraper";
+const APIFY_ID = /^[A-Za-z0-9]{8,32}$/;
+
+function parseExperienceLevels(value) {
+  return String(value || "")
+    .split(",")
+    .map((x) => x.trim())
+    .filter((x) => /^[1-6]$/.test(x));
+}
+
+async function apifyJson(path, token, options = {}) {
+  const response = await fetch(`https://api.apify.com/v2${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(options.headers || {}) },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.error?.message || `Apify ${response.status}`);
+  return data;
+}
+
+app.post("/api/linkedin-jobs/start", async (req, res) => {
+  const token = getApifyToken();
+  if (!token) return res.status(400).json({ error: "Live search not configured", fallback: true });
+  const { keywords, location, limit, experienceLevel } = req.body || {};
+  const levels = parseExperienceLevels(experienceLevel);
+  try {
+    const { data } = await apifyJson(`/acts/${VALIG_ACTOR}/runs?timeout=180`, token, {
+      method: "POST",
+      body: JSON.stringify({
+        keywords: String(keywords || "").trim() || "Product Manager",
+        location: String(location || "").trim() || "India",
+        limit: Math.min(Number(limit) || 50, 100),
+        ...(levels.length ? { urlParam: [{ key: "f_E", value: levels.join(",") }] } : {}),
+      }),
+    });
+    return res.json({ runId: data.id, datasetId: data.defaultDatasetId });
+  } catch (err) {
+    console.warn("[linkedin-jobs] start failed:", err.message);
+    return res.status(502).json({ error: "Could not start live search", fallback: true });
+  }
+});
+
+app.get("/api/linkedin-jobs/progress", async (req, res) => {
+  const token = getApifyToken();
+  const { runId, datasetId } = req.query;
+  if (!token || !APIFY_ID.test(runId || "") || !APIFY_ID.test(datasetId || "")) {
+    return res.status(400).json({ error: "runId and datasetId are required" });
+  }
+  try {
+    // The dataset's itemCount lags; the items endpoint's pagination total is exact.
+    const [run, items] = await Promise.all([
+      apifyJson(`/actor-runs/${runId}`, token),
+      fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?limit=0&clean=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }),
+    ]);
+    const found = Number(items.headers.get("x-apify-pagination-total")) || 0;
+    return res.json({ status: run.data?.status, found });
+  } catch (err) {
+    return res.status(502).json({ error: "Could not read search progress" });
+  }
+});
+
+app.get("/api/linkedin-jobs/results", async (req, res) => {
+  const token = getApifyToken();
+  const { datasetId, location } = req.query;
+  if (!token || !APIFY_ID.test(datasetId || "")) return res.status(400).json({ error: "datasetId is required" });
+  try {
+    const response = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?format=json&clean=true`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const items = await response.json().catch(() => []);
+    if (!response.ok || !Array.isArray(items)) throw new Error(`Apify ${response.status}`);
+    const jobs = items.map((raw, i) => normalizeJob(raw, i));
+    const { added, total } = saveJobs(jobs, {
+      location: String(location || "").trim() || "India",
+      levels: parseExperienceLevels(req.query.experienceLevel),
+    });
+    console.log(`[jobs-repo] live search – ${jobs.length} roles, ${added} new, ${total} in repository`);
+    return res.json({ jobs });
+  } catch (err) {
+    console.warn("[linkedin-jobs] results failed:", err.message);
+    return res.status(502).json({ error: "Could not load search results" });
+  }
+});
+
 app.get("/api/linkedin-jobs", async (req, res) => {
   const apifyToken = getApifyToken();
   const rapidKey = getRapidApiKey();

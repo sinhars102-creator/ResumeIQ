@@ -1142,19 +1142,23 @@ function computeLocalMatchScore(resume, job) {
   const jdFreq = new Map();
   jdTokens.forEach((t) => jdFreq.set(t, (jdFreq.get(t) || 0) + 1));
 
+  // Terms the JD repeats are its real requirements; one-off words are mostly boilerplate.
+  const repeated = [...jdFreq.entries()].filter(([, count]) => count >= 2);
+  const signalTerms = repeated.length >= 8 ? repeated : [...jdFreq.entries()];
   let matchedWeight = 0;
   let totalWeight = 0;
-  jdFreq.forEach((count, term) => {
+  signalTerms.forEach(([term, count]) => {
     const weight = Math.min(count, 4);
     totalWeight += weight;
     if (resumeSet.has(term)) matchedWeight += weight;
   });
   const keywordScore = totalWeight ? matchedWeight / totalWeight : 0;
 
+  // How many of the role's skills the candidate has – not what share of a long skills list the JD names.
   const skills = resume.skills || [];
   const jdLower = jdText.toLowerCase();
   const matchedSkills = skills.filter((s) => s && jdLower.includes(s.toLowerCase()));
-  const skillScore = skills.length ? matchedSkills.length / skills.length : keywordScore;
+  const skillScore = skills.length ? Math.min(1, matchedSkills.length / Math.min(skills.length, 8)) : keywordScore;
 
   const titleTokens = new Set(tokenizeForMatch(resume.title || ""));
   const roleTokens = tokenizeForMatch(job.role || "");
@@ -2778,14 +2782,25 @@ export default function ResumeIQ() {
     };
   }, [expandedJob]);
 
+  const [searchClock, setSearchClock] = useState(0);
+  useEffect(() => {
+    if (!linkedInSearching) return;
+    const id = setInterval(() => setSearchClock(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [linkedInSearching]);
+
+  // A job's AI score (from Analyze My Fit) replaces its quick keyword estimate everywhere it's shown.
+  const [analyzedScores, setAnalyzedScores] = useState(() => new Map());
   const jobMatchScores = useMemo(() => {
     const resumeForMatch = resume || SAMPLE_RESUME;
     const map = new Map();
     jobs.forEach((job) => {
-      map.set(job.id, computeLocalMatchScore(resumeForMatch, job));
+      const analyzed = analyzedScores.get(job.id);
+      const estimate = computeLocalMatchScore(resumeForMatch, job);
+      map.set(job.id, analyzed ? { ...estimate, score: analyzed.score, analyzed: true } : estimate && { ...estimate, analyzed: false });
     });
     return map;
-  }, [jobs, resume]);
+  }, [jobs, resume, analyzedScores]);
 
   const [jobSortBy, setJobSortBy] = useState("match");
 
@@ -2888,28 +2903,65 @@ export default function ResumeIQ() {
 
     setLinkedInSearchError(null);
     setLinkedInSearching(true);
-    setJobFeedStatus({ keywords, savedCount: 0, freshCount: null });
+    setJobFeedStatus({ keywords, savedCount: null, linkedInFound: 0, linkedInTotal: null, freshCount: null, startedAt: Date.now() });
+    const updateFeed = (patch) => setJobFeedStatus((s) => (s && s.keywords === keywords ? { ...s, ...patch } : s));
 
     fetch(`${base}/api/jobs/saved?${params}`)
       .then((res) => (res.ok ? res.json() : { jobs: [] }))
       .then((data) => {
         if (!isCurrent()) return;
-        const savedCount = mergeJobs(data.jobs || []);
-        setJobFeedStatus((s) => (s && s.keywords === keywords ? { ...s, savedCount } : s));
+        updateFeed({ savedCount: mergeJobs(data.jobs || []) });
       })
-      .catch(() => {});
+      .catch(() => updateFeed({ savedCount: 0 }));
 
     try {
       params.set("limit", String(linkedInSearchLimit));
-      const res = await fetch(`${base}/api/linkedin-jobs?${params}`);
-      const data = await res.json().catch(() => ({}));
-      if (!isCurrent()) return;
-      if (!res.ok) {
-        setLinkedInSearchError(data.details || data.error || `Search failed (${res.status})`);
-        return;
+      // Live search: start an Apify run and poll its real item count so the wait shows progress.
+      let liveJobs = null;
+      const started = await fetch(`${base}/api/linkedin-jobs/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keywords, location, limit: linkedInSearchLimit, experienceLevel: levels.join(",") }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+      if (started?.runId && started?.datasetId) {
+        const run = new URLSearchParams({ runId: started.runId, datasetId: started.datasetId });
+        let status = "RUNNING";
+        while (isCurrent() && ["READY", "RUNNING"].includes(status)) {
+          await new Promise((r) => setTimeout(r, 3000));
+          const progress = await fetch(`${base}/api/linkedin-jobs/progress?${run}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null);
+          if (!progress) continue;
+          status = progress.status;
+          if (isCurrent()) updateFeed({ linkedInFound: progress.found || 0 });
+        }
+        if (!isCurrent()) return;
+        if (status === "SUCCEEDED") {
+          const results = new URLSearchParams({ datasetId: started.datasetId, location, experienceLevel: levels.join(",") });
+          const data = await fetch(`${base}/api/linkedin-jobs/results?${results}`)
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null);
+          if (data?.jobs?.length) liveJobs = data.jobs;
+        }
       }
-      const freshCount = mergeJobs(data.jobs || [], { markFresh: true });
-      setJobFeedStatus((s) => (s && s.keywords === keywords ? { ...s, freshCount } : s));
+      if (!isCurrent()) return;
+
+      let jobsFound = liveJobs;
+      if (!jobsFound) {
+        // Fallback: the single run-and-wait call (also tries RapidAPI and the guest API).
+        const res = await fetch(`${base}/api/linkedin-jobs?${params}`);
+        const data = await res.json().catch(() => ({}));
+        if (!isCurrent()) return;
+        if (!res.ok) {
+          setLinkedInSearchError(data.details || data.error || `Search failed (${res.status})`);
+          return;
+        }
+        jobsFound = data.jobs || [];
+      }
+      const freshCount = mergeJobs(jobsFound, { markFresh: true });
+      updateFeed({ freshCount, linkedInTotal: jobsFound.length, linkedInFound: jobsFound.length });
     } catch (e) {
       if (isCurrent()) setLinkedInSearchError(e.message || "Search failed");
     } finally {
@@ -2984,6 +3036,7 @@ export default function ResumeIQ() {
     lastSearchKeyRef.current = "";
     jobsRef.current = [];
     setJobs([]);
+    setAnalyzedScores(new Map());
     setJobFeedStatus(null);
     setLinkedInSearching(false);
     setShowBelowLevelJobs(false);
@@ -3062,9 +3115,11 @@ export default function ResumeIQ() {
     setLoading(true);
     setLoadingMsg("Scoring your resume against this job…");
     try {
-      const scoreData = await scoreResume(job, resume);
+      // Reuse this job's earlier analysis so the score doesn't shift between visits.
+      const scoreData = analyzedScores.get(job.id) || (await scoreResume(job, resume));
       setScore(scoreData.score);
       setScoreBreakdown(scoreData);
+      setAnalyzedScores((prev) => new Map(prev).set(job.id, scoreData));
     } catch (e) {
       console.error("Scoring error:", e);
     } finally {
@@ -3079,6 +3134,7 @@ export default function ResumeIQ() {
     lastSearchKeyRef.current = "";
     setLinkedInSearching(false);
     setJobs([]);
+    setAnalyzedScores(new Map());
     setSelectedJob(null);
     setResume(null);
     setScore(null);
@@ -3335,6 +3391,11 @@ export default function ResumeIQ() {
   --rq-scrim: #1F2A2E;
 }
 
+@keyframes rqPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
 @keyframes fadeUp {
   0% { opacity: 0; transform: translateY(12px); }
   100% { opacity: 1; transform: translateY(0); }
@@ -3581,21 +3642,64 @@ body {
                   {parsingError}. You can add roles manually below.
                 </div>
               )}
-              {linkedInSearching && jobFeedStatus && (
-                <div style={{ marginBottom: 16, padding: 10, background: "color-mix(in srgb, var(--rq-accent) 8%, transparent)", borderRadius: 8, fontSize: 12, color: "var(--rq-accent)", display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={styles.monoStatus}>●</span>
-                  {jobFeedStatus.savedCount > 0
-                    ? `Showing ${jobFeedStatus.savedCount} recent role${jobFeedStatus.savedCount === 1 ? "" : "s"} for “${jobFeedStatus.keywords}”. Looking for fresh listings on LinkedIn — new ones will appear here as they arrive.`
-                    : `Looking for fresh “${jobFeedStatus.keywords}” listings on LinkedIn — this can take a couple of minutes. New roles will appear here as they arrive.`}
-                </div>
-              )}
-              {!linkedInSearching && jobFeedStatus && jobFeedStatus.freshCount != null && (
-                <div style={{ marginBottom: 16, fontSize: 12, color: "var(--rq-text-2)" }}>
-                  {jobFeedStatus.freshCount > 0
-                    ? `Up to date · ${jobFeedStatus.freshCount} new listing${jobFeedStatus.freshCount === 1 ? "" : "s"} from LinkedIn, marked “Just in”.`
-                    : "Up to date · no new listings since the last search."}
-                </div>
-              )}
+              {jobFeedStatus && (linkedInSearching || jobFeedStatus.freshCount != null) && (() => {
+                const f = jobFeedStatus;
+                const elapsed = Math.max(0, Math.round(((searchClock || Date.now()) - f.startedAt) / 1000));
+                const clock = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
+                const done = !linkedInSearching;
+                const rows = [
+                  {
+                    label: "Saved roles from earlier searches",
+                    state: f.savedCount == null ? "active" : "done",
+                    detail: f.savedCount == null ? "Checking…" : f.savedCount > 0 ? `${f.savedCount} matched instantly` : "None yet for this role",
+                  },
+                  {
+                    label: "LinkedIn · live listings",
+                    state: done ? "done" : "active",
+                    detail: done
+                      ? `${f.linkedInTotal ?? 0} found${f.freshCount ? ` · ${f.freshCount} new, marked “Just in”` : " · nothing new since your last search"}`
+                      : f.linkedInFound > 0
+                        ? `${f.linkedInFound} role${f.linkedInFound === 1 ? "" : "s"} found so far…`
+                        : "Searching…",
+                  },
+                  {
+                    label: "Matching against your profile",
+                    state: done ? "done" : jobs.length ? "active" : "waiting",
+                    detail: jobs.length
+                      ? `${jobs.length - belowLevelJobIds.size} role${jobs.length - belowLevelJobIds.size === 1 ? "" : "s"} scored${belowLevelJobIds.size ? ` · ${belowLevelJobIds.size} below your level hidden` : ""}`
+                      : "Waiting for roles",
+                  },
+                ];
+                const dot = (state) => ({
+                  width: 18, height: 18, borderRadius: 999, flex: "0 0 auto", display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 11,
+                  ...(state === "done"
+                    ? { background: "var(--rq-accent)", color: "#FFFFFF" }
+                    : state === "active"
+                      ? { border: "2px solid var(--rq-accent)", animation: "rqPulse 1.2s ease-in-out infinite" }
+                      : { border: "2px solid var(--rq-border-strong)" }),
+                });
+                return (
+                  <div style={{ marginBottom: 16, padding: "14px 16px", border: "1px solid var(--rq-border)", borderRadius: 12, background: "var(--rq-surface)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>
+                        {done ? `Search complete for “${f.keywords}”` : `Finding “${f.keywords}” roles for you`}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--rq-text-2)" }}>
+                        {done ? `took ${clock}` : `${clock} elapsed · usually 1–3 min`}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      {rows.map((r) => (
+                        <div key={r.label} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13 }}>
+                          <span style={dot(r.state)}>{r.state === "done" ? "✓" : ""}</span>
+                          <span style={{ color: "var(--rq-text)", minWidth: 0 }}>{r.label}</span>
+                          <span style={{ marginLeft: "auto", color: r.state === "done" ? "var(--rq-accent)" : "var(--rq-text-2)", textAlign: "right" }}>{r.detail}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div style={styles.linkedInPanel}>
                 <div style={styles.panelLabelRow}>
@@ -3798,8 +3902,11 @@ body {
                       </div>
                       <div style={styles.jobMetaRow}>
                         {matchInfo && (
-                          <div style={styles.matchPill(matchInfo.score)}>
-                            {matchInfo.score}% Match
+                          <div
+                            style={styles.matchPill(matchInfo.score)}
+                            title={matchInfo.analyzed ? "Score from the full AI analysis" : "Quick keyword estimate – open the role and Analyze My Fit for the full score"}
+                          >
+                            {matchInfo.analyzed ? `${matchInfo.score}% Match ✓` : `~${matchInfo.score}% Match`}
                           </div>
                         )}
                         {job.badge && (
@@ -3867,8 +3974,13 @@ body {
                 </div>
                 <div style={{ ...styles.jobMetaRow, justifyContent: "flex-start", flexWrap: "wrap", gap: 8 }}>
                   {jobMatchScores.get(expandedJob.id) && (
-                    <div style={styles.matchPill(jobMatchScores.get(expandedJob.id).score)}>
-                      {jobMatchScores.get(expandedJob.id).score}% Match
+                    <div
+                      style={styles.matchPill(jobMatchScores.get(expandedJob.id).score)}
+                      title={jobMatchScores.get(expandedJob.id).analyzed ? "Score from the full AI analysis" : "Quick keyword estimate – Analyze My Fit for the full score"}
+                    >
+                      {jobMatchScores.get(expandedJob.id).analyzed
+                        ? `${jobMatchScores.get(expandedJob.id).score}% Match ✓`
+                        : `~${jobMatchScores.get(expandedJob.id).score}% Match (estimate)`}
                     </div>
                   )}
                   {expandedJob.badge && <div style={styles.badgePill(expandedJob.badge)}>{expandedJob.badge}</div>}
