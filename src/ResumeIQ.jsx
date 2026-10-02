@@ -1126,23 +1126,83 @@ function buildResumeCorpus(resume) {
 }
 
 /**
+ * AI scores are saved in the browser per (resume, years, job) so a job keeps the same score across
+ * visits and reloads. Bump the version when the scoring prompt changes.
+ */
+const SCORE_CACHE_PREFIX = "rq-score-v3:";
+
+function hashString(text) {
+  let h = 5381;
+  for (let i = 0; i < text.length; i++) h = ((h << 5) + h + text.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+function scoreCacheKey(resumeHash, years, job) {
+  return `${SCORE_CACHE_PREFIX}${resumeHash}:${years || 0}:${job.id}:${hashString(job.jd || "")}`;
+}
+
+function readCachedScore(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedScore(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Storage full or blocked: the score still shows, it just won't persist.
+  }
+}
+
+/**
+ * Experience points out of 25 from the candidate's years vs the JD's required range.
+ * Computed in code so the card estimate and the AI analysis agree, and it never varies between runs.
+ */
+function experienceFit(candidateYears, jd) {
+  const range = parseJdYearsRange(jd);
+  if (!candidateYears || !range) return null;
+  const { min, max } = range;
+  let points;
+  if (candidateYears >= min) points = max != null && candidateYears > max + 4 ? 20 : 25;
+  else points = Math.round((25 * candidateYears) / min);
+  const required = max != null ? `${min}–${max}` : `${min}+`;
+  return { points, candidateYears, required, short: candidateYears < min };
+}
+
+/**
  * Client-side keyword/skills overlap score — no API calls, so it can run
  * instantly across an entire job grid (up to 150 results) without hitting
  * Claude rate limits or cost. The detailed Claude-scored breakdown still
  * runs on-demand in scoreResume() once a specific job is opened.
  */
-function computeLocalMatchScore(resume, job) {
+/** Share of resume bullets that show a measurable result (numbers, %, currency, multipliers). */
+function impactPoints(resume) {
+  const bullets = (resume.experience || []).flatMap((e) => e.bullets || []).filter(Boolean);
+  if (!bullets.length) return 0;
+  const quantified = bullets.filter((b) => /\d|%|₹|\$|€|£/.test(b)).length;
+  // Half of the bullets quantified earns full marks.
+  return Math.round(25 * Math.min(1, quantified / bullets.length / 0.5));
+}
+
+/**
+ * The four 0–25 parts behind every match score. Keywords, impact and experience are computed here
+ * and shared by the quick estimate and the AI analysis; only "skills" differs between them.
+ */
+function scoreParts(resume, job, candidateYears = getCandidateYears(resume)) {
   if (!resume || !job) return null;
   const jdText = `${job.role || ""} ${job.jd || ""}`;
   const jdTokens = tokenizeForMatch(jdText);
   const resumeTokens = tokenizeForMatch(buildResumeCorpus(resume));
   if (!jdTokens.length || !resumeTokens.length) return null;
 
+  // Terms the JD repeats are its real requirements; one-off words are mostly boilerplate.
   const resumeSet = new Set(resumeTokens);
   const jdFreq = new Map();
   jdTokens.forEach((t) => jdFreq.set(t, (jdFreq.get(t) || 0) + 1));
-
-  // Terms the JD repeats are its real requirements; one-off words are mostly boilerplate.
   const repeated = [...jdFreq.entries()].filter(([, count]) => count >= 2);
   const signalTerms = repeated.length >= 8 ? repeated : [...jdFreq.entries()];
   let matchedWeight = 0;
@@ -1152,24 +1212,34 @@ function computeLocalMatchScore(resume, job) {
     totalWeight += weight;
     if (resumeSet.has(term)) matchedWeight += weight;
   });
-  const keywordScore = totalWeight ? matchedWeight / totalWeight : 0;
+  const keywordShare = totalWeight ? matchedWeight / totalWeight : 0;
 
-  // How many of the role's skills the candidate has – not what share of a long skills list the JD names.
+  // Estimate of skills: how many of the role's skills the candidate lists – not the share of a long list.
   const skills = resume.skills || [];
   const jdLower = jdText.toLowerCase();
   const matchedSkills = skills.filter((s) => s && jdLower.includes(s.toLowerCase()));
-  const skillScore = skills.length ? Math.min(1, matchedSkills.length / Math.min(skills.length, 8)) : keywordScore;
+  const skillShare = skills.length ? Math.min(1, matchedSkills.length / Math.min(skills.length, 8)) : keywordShare;
 
-  const titleTokens = new Set(tokenizeForMatch(resume.title || ""));
-  const roleTokens = tokenizeForMatch(job.role || "");
-  const titleOverlap = roleTokens.length
-    ? roleTokens.filter((t) => titleTokens.has(t)).length / roleTokens.length
-    : 0;
+  const fit = experienceFit(candidateYears, jdText);
+  return {
+    skills: Math.round(25 * skillShare),
+    experience: fit ? fit.points : 20,
+    impact: impactPoints(resume),
+    keywords: Math.round(25 * keywordShare),
+    matchedSkills,
+    fit,
+  };
+}
 
-  const combined = skillScore * 0.45 + keywordScore * 0.35 + titleOverlap * 0.2;
-  const score = Math.round(30 + combined * 66);
-
-  return { score: Math.max(5, Math.min(98, score)), matchedSkills };
+/**
+ * Instant estimate for the job grid (no API calls): the same four parts as the AI analysis,
+ * with skills estimated from the resume's skill list instead of the role's must-haves.
+ */
+function computeLocalMatchScore(resume, job, candidateYears = getCandidateYears(resume)) {
+  const parts = scoreParts(resume, job, candidateYears);
+  if (!parts) return null;
+  const score = parts.skills + parts.experience + parts.impact + parts.keywords;
+  return { score: Math.max(5, Math.min(98, score)), matchedSkills: parts.matchedSkills };
 }
 
 /**
@@ -1407,7 +1477,7 @@ function resumeForAI(resume) {
   return rest;
 }
 
-async function scoreResume(job, resumeData) {
+async function scoreResume(job, resumeData, candidateYears = getCandidateYears(resumeData)) {
   // Used for any field the model leaves out; on a failed call the step shows "Score unavailable" instead of made-up numbers.
   const fallback = {
     score: null,
@@ -1419,19 +1489,17 @@ async function scoreResume(job, resumeData) {
   try {
     const system =
       "You are a professional resume evaluator. Return ONLY valid JSON, no markdown.";
+    const parts = scoreParts(resumeData, job, candidateYears);
+    const fit = parts?.fit;
     const user = `You are evaluating how well a candidate's resume matches a specific job description.
+${fit ? `The candidate has ${fit.candidateYears} years of experience; the role asks for ${fit.required} years.\n` : ""}
+List the role's must-have skills, tools and certifications (6–10, from the JD's requirements, not nice-to-haves),
+and for each say whether the resume clearly shows it (stated skill, certification, or work described in a bullet).
 
 Return ONLY a JSON object with this shape:
 {
-  "score": 0-100,
-  "label": "Strong Match | Moderate Match | Needs Alignment",
   "summary": "2–3 sentence overview of fit.",
-  "breakdown": {
-    "skills": 0-25,
-    "experience": 0-25,
-    "impact": 0-25,
-    "keywords": 0-25
-  },
+  "mustHaveSkills": [{ "skill": "name", "candidateHas": true }],
   "keyGaps": ["gap 1", "gap 2", "gap 3"]
 }
 
@@ -1443,6 +1511,18 @@ ${JSON.stringify(resumeForAI(resumeData), null, 2)}`;
     const text = await callLLM(system, user, 1500);
     const cleaned = text.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(cleaned);
+    // Scores are computed here from the facts, so the same resume and job always give the same breakdown.
+    const mustHaves = Array.isArray(parsed.mustHaveSkills) ? parsed.mustHaveSkills.filter((m) => m && m.skill) : [];
+    if (parts) {
+      parsed.breakdown = {
+        skills: mustHaves.length ? Math.round((25 * mustHaves.filter((m) => m.candidateHas === true).length) / mustHaves.length) : parts.skills,
+        experience: parts.experience,
+        impact: parts.impact,
+        keywords: parts.keywords,
+      };
+      parsed.score = parsed.breakdown.skills + parsed.breakdown.experience + parsed.breakdown.impact + parsed.breakdown.keywords;
+      parsed.label = getScoreTier(parsed.score).label;
+    }
     return {
       score: typeof parsed.score === "number" ? parsed.score : fallback.score,
       label: parsed.label || fallback.label,
@@ -2791,16 +2871,19 @@ export default function ResumeIQ() {
 
   // A job's AI score (from Analyze My Fit) replaces its quick keyword estimate everywhere it's shown.
   const [analyzedScores, setAnalyzedScores] = useState(() => new Map());
+  // Years used by both the estimate and the AI score: the "yrs exp" box, else what the resume implies.
+  const matchYears = Number(candidateYears) || getCandidateYears(resume || SAMPLE_RESUME);
+  const resumeHash = useMemo(() => hashString(JSON.stringify(resumeForAI(resume || SAMPLE_RESUME))), [resume]);
   const jobMatchScores = useMemo(() => {
     const resumeForMatch = resume || SAMPLE_RESUME;
     const map = new Map();
     jobs.forEach((job) => {
-      const analyzed = analyzedScores.get(job.id);
-      const estimate = computeLocalMatchScore(resumeForMatch, job);
+      const analyzed = analyzedScores.get(job.id) || readCachedScore(scoreCacheKey(resumeHash, matchYears, job));
+      const estimate = computeLocalMatchScore(resumeForMatch, job, matchYears);
       map.set(job.id, analyzed ? { ...estimate, score: analyzed.score, analyzed: true } : estimate && { ...estimate, analyzed: false });
     });
     return map;
-  }, [jobs, resume, analyzedScores]);
+  }, [jobs, resume, analyzedScores, resumeHash, matchYears]);
 
   const [jobSortBy, setJobSortBy] = useState("match");
 
@@ -3115,11 +3198,15 @@ export default function ResumeIQ() {
     setLoading(true);
     setLoadingMsg("Scoring your resume against this job…");
     try {
-      // Reuse this job's earlier analysis so the score doesn't shift between visits.
-      const scoreData = analyzedScores.get(job.id) || (await scoreResume(job, resume));
+      // Reuse this job's earlier analysis (this session or a saved one) so the score doesn't shift between visits.
+      const cacheKey = scoreCacheKey(resumeHash, matchYears, job);
+      const scoreData = analyzedScores.get(job.id) || readCachedScore(cacheKey) || (await scoreResume(job, resume, matchYears));
       setScore(scoreData.score);
       setScoreBreakdown(scoreData);
-      setAnalyzedScores((prev) => new Map(prev).set(job.id, scoreData));
+      if (scoreData.score != null) {
+        setAnalyzedScores((prev) => new Map(prev).set(job.id, scoreData));
+        writeCachedScore(cacheKey, scoreData);
+      }
     } catch (e) {
       console.error("Scoring error:", e);
     } finally {

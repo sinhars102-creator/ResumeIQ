@@ -70,7 +70,9 @@ async function callGroq({ system, user, maxTokens, json }, model, attempt = 0) {
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
     body: JSON.stringify({
       model,
-      temperature: 0.2,
+      // JSON answers (scores, extraction, assistant turns) should repeat for the same input.
+      temperature: json ? 0 : 0.2,
+      ...(json ? { seed: 7 } : {}),
       // gpt-oss reasons before answering and those tokens share this budget, so leave headroom.
       max_completion_tokens: maxTokens + 2048,
       ...(/gpt-oss/.test(model) ? { reasoning_effort: "low" } : {}),
