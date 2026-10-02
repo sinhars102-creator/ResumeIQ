@@ -2455,10 +2455,52 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
     sendTurn(nextChat);
   };
 
+  // Skipping is handled here, not left to the model: mark the current gap covered and move on (or finish).
+  const skipCurrentGap = () => {
+    if (loading) return;
+    const ids = chat.focusGapIds || [];
+    const current = chat.currentGapId || ids.find((id) => !(chat.coveredGapIds || []).includes(id));
+    const coveredGapIds = [...new Set([...(chat.coveredGapIds || []), ...(current ? [current] : [])])];
+    const next = ids.find((id) => !coveredGapIds.includes(id));
+    const currentTitle = (chat.gaps || []).find((g) => g.id === current)?.title;
+    if (!next) {
+      const applied = (chat.decisions || []).filter((d) => d.decision === "accepted").length;
+      setChat({
+        ...chat,
+        coveredGapIds,
+        currentGapId: null,
+        messages: [
+          ...chat.messages,
+          { role: "user", text: currentTitle ? `Skip “${currentTitle}”.` : "Skip this gap.", isDecision: true },
+          {
+            role: "assistant",
+            text: applied
+              ? `That's all the gaps you chose. ${applied} edit${applied === 1 ? " is" : "s are"} applied to your resume.`
+              : "That's all the gaps you chose. No edits were applied, so your resume is unchanged.",
+            edits: [],
+            quickReplies: [],
+            done: true,
+          },
+        ],
+      });
+      setReopened(false);
+      return;
+    }
+    const nextTitle = (chat.gaps || []).find((g) => g.id === next)?.title;
+    const nextChat = {
+      ...chat,
+      coveredGapIds,
+      currentGapId: next,
+      messages: [...chat.messages, { role: "user", text: `Skip that gap. Let's work on: ${nextTitle}.` }],
+    };
+    setChat(nextChat);
+    sendTurn(nextChat);
+  };
+
   const pickMoreGaps = () =>
     setChat((c) => {
       const remaining = (c.gaps || []).filter((g) => !(c.coveredGapIds || []).includes(g.id)).map((g) => g.id);
-      return { ...c, focusGapIds: null, selectedGapIds: remaining };
+      return { ...c, focusGapIds: null, selectedGapIds: remaining, previousFocusGapIds: c.focusGapIds };
     });
 
   const sendUserText = (text) => {
@@ -2549,6 +2591,11 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
               );
             })}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 4 }}>
+              {chat.previousFocusGapIds?.length > 0 && chat.messages.length > 0 && (
+                <button type="button" style={styles.ghostButton} onClick={() => setChat((c) => ({ ...c, focusGapIds: c.previousFocusGapIds }))}>
+                  ← Back to chat
+                </button>
+              )}
               {onContinue && (
                 <button type="button" style={styles.ghostButton} onClick={onContinue}>Skip – continue</button>
               )}
@@ -2591,7 +2638,10 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
         <span style={{ color: "var(--rq-accent)", fontWeight: 600 }}>Tailoring assistant</span> · Every edit is checked: it keeps your specifics and adds nothing you haven't confirmed.
       </div>
       {focusGaps.length > 0 && (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "10px 16px", borderBottom: "1px solid color-mix(in srgb, var(--rq-text) 6%, transparent)" }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", padding: "10px 16px", borderBottom: "1px solid color-mix(in srgb, var(--rq-text) 6%, transparent)" }}>
+          <button type="button" onClick={pickMoreGaps} disabled={loading} style={{ ...styles.ghostButton, fontSize: 11.5, padding: "3px 9px" }}>
+            ← Gap list
+          </button>
           {focusGaps.map((g, i) => {
             const isDone = covered.has(g.id);
             const isCurrent = !isDone && chat.currentGapId === g.id;
@@ -2672,13 +2722,23 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
           </div>
         )}
       </div>
-      {last?.role === "assistant" && !loading && !awaitingDecision && last.quickReplies?.length > 0 && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "0 16px 10px" }}>
-          {last.quickReplies.map((q) => (
-            <button key={q} type="button" onClick={() => sendUserText(q)} style={{ ...styles.ghostButton, fontSize: 12, padding: "5px 10px" }}>{q}</button>
-          ))}
-        </div>
-      )}
+      {last?.role === "assistant" && !loading && !awaitingDecision && (() => {
+        // Skip/next is a reliable control below; other suggestions from the model stay as quick replies.
+        const replies = (last.quickReplies || []).filter((q) => !(focusGaps.length && /\b(skip|next gap|move on)\b/i.test(q)));
+        if (!replies.length && !focusGaps.length) return null;
+        return (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "0 16px 10px" }}>
+            {replies.map((q) => (
+              <button key={q} type="button" onClick={() => sendUserText(q)} style={{ ...styles.ghostButton, fontSize: 12, padding: "5px 10px" }}>{q}</button>
+            ))}
+            {focusGaps.length > 0 && (
+              <button type="button" onClick={skipCurrentGap} style={{ ...styles.ghostButton, fontSize: 12, padding: "5px 10px" }}>
+                {focusGaps.filter((g) => !covered.has(g.id)).length > 1 ? "Skip this gap →" : "Skip this gap and finish"}
+              </button>
+            )}
+          </div>
+        );
+      })()}
       <div style={{ display: "flex", gap: 8, padding: 12, borderTop: "1px solid color-mix(in srgb, var(--rq-text) 6%, transparent)" }}>
         <input
           type="text"
@@ -3597,6 +3657,11 @@ export default function ResumeIQ() {
       <div style={styles.appInner}>
         <style>{`
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@700;900&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+/* Narrow windows: stack the resume and the tailoring assistant instead of squeezing the resume. */
+@media (max-width: 1000px) {
+  .rq-two-col > * { flex: 1 1 100% !important; width: 100% !important; position: static !important; }
+}
 
 /* Phones: wrap the header, compact the stepper, stack two-column layouts. */
 @media (max-width: 640px) {

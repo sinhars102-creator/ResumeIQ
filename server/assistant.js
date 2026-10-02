@@ -41,6 +41,7 @@ How you work:
 - Separate gaps wording can fix (the experience is there but undersold or uses different terms) from real gaps (years, certifications, domains the candidate lacks). Say plainly that real gaps can't be closed by rewording; don't try to paper over them.
 - Talk to the candidate directly ("you", "your"). Keep your message under 90 words. No pleasantries, no restating the resume back.
 - End every message with exactly one clear question or next step.
+- When the candidate answers, use the answer: turn it into an edit, or ask a different, narrower follow-up. Never repeat a question you already asked.
 
 Hard rules for every edit:
 1. "original" must be copied EXACTLY from the resume: the whole summary or one full sentence of it, one bullet, or for Skills one existing skill. For an Addition, original is "".
@@ -381,6 +382,24 @@ Return ONLY the JSON object.`;
       checked = reply.edits.map((edit) => ({ edit, problems: checkEdit(edit, context) }));
     } catch (e) {
       console.warn("[assistant] repair pass failed:", e.message);
+    }
+  }
+
+  // Repeat guard: smaller fallback models sometimes re-ask the question they just asked, ignoring the answer.
+  const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant");
+  if (lastAssistant && similarity(reply.message, lastAssistant.content) > 0.7) {
+    try {
+      reply = parseReply(
+        await callLLM({
+          system: SYSTEM_PROMPT,
+          user: `${user}\n\nYour draft reply repeated your previous question: "${reply.message}". Do not ask it again. Use the candidate's latest message: propose an edit from what they said, or ask one different, narrower question, or if the gap can't be helped, mark it covered and move to the next chosen gap (or set done to true if none remain). Return the full JSON object.`,
+          maxTokens: 1500,
+          json: true,
+        })
+      );
+      checked = reply.edits.map((edit) => ({ edit, problems: checkEdit(edit, context) }));
+    } catch (e) {
+      console.warn("[assistant] repeat retry failed:", e.message);
     }
   }
 
