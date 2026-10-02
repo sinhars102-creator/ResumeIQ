@@ -17,6 +17,12 @@ export function initAnalytics() {
     api_host: import.meta.env.VITE_POSTHOG_HOST || "https://us.i.posthog.com",
     person_profiles: "identified_only",
     autocapture: false,
+    // Project-level defaults can switch these on remotely; dead clicks and heatmaps record clicked
+    // element details, so they stay off in code.
+    capture_dead_clicks: false,
+    capture_heatmaps: false,
+    rageclick: false,
+    capture_exceptions: false,
     capture_pageview: true,
     capture_pageleave: true,
     disable_session_recording: true,
