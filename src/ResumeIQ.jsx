@@ -3277,6 +3277,7 @@ export default function ResumeIQ() {
   // A job's AI score (from Analyze My Fit) replaces its quick keyword estimate everywhere it's shown.
   const [analyzedScores, setAnalyzedScores] = useState(() => new Map());
   const [dismissedYearsCorrection, setDismissedYearsCorrection] = useState(false);
+  const [showMoreRoles, setShowMoreRoles] = useState(false);
   // Years used by both the estimate and the AI score: the "yrs exp" box, else what the resume implies.
   const matchYears = Number(candidateYears) || getCandidateYears(resume || SAMPLE_RESUME);
   const resumeHash = useMemo(() => hashString(JSON.stringify(resumeForAI(resume || SAMPLE_RESUME))), [resume]);
@@ -4834,6 +4835,17 @@ body {
                   )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  {selectedJob?.url && (
+                    <a
+                      href={selectedJob.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => track("job_posting_opened", { from: "preview", accepted_edits: approvedIds.size })}
+                      style={{ ...styles.primaryButton, textDecoration: "none" }}
+                    >
+                      View job posting ↗
+                    </a>
+                  )}
                   {/* Fallback for browsers that block the editor's sign-in inside a frame (e.g. Safari on iPhone). */}
                   {rxEditor?.builderUrl && (
                     <a href={rxEditor.builderUrl} target="_blank" rel="noopener noreferrer" style={{ ...styles.ghostButton, textDecoration: "none" }}>
@@ -4851,6 +4863,65 @@ body {
                   </button>
                 </div>
               </div>
+              {(() => {
+                // Other roles ranked by the quick estimate against the TAILORED resume (AI scores were for the original).
+                const tailored = getFinalResume();
+                const moreRoles = jobs
+                  .filter((j) => j.id !== selectedJob?.id && !belowLevelJobIds.has(j.id))
+                  .map((j) => ({ job: j, score: computeLocalMatchScore(tailored, j, matchYears)?.score ?? 0 }))
+                  .filter((r) => r.score >= 60)
+                  .sort((a, b) => b.score - a.score)
+                  .slice(0, 10);
+                if (!moreRoles.length) return null;
+                return (
+                  <div style={{ borderBottom: "1px solid var(--rq-border)", background: "var(--rq-bg)" }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!showMoreRoles) track("more_roles_opened", { shown: moreRoles.length });
+                        setShowMoreRoles((v) => !v);
+                      }}
+                      style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "8px 20px", background: "none", border: "none", cursor: "pointer", fontSize: 13, color: "var(--rq-text)", textAlign: "left" }}
+                    >
+                      <span style={{ color: "var(--rq-accent)", fontWeight: 600 }}>{moreRoles.length} more role{moreRoles.length === 1 ? "" : "s"}</span>
+                      <span style={{ color: "var(--rq-text-2)" }}>your tailored resume is a good fit for</span>
+                      <span style={{ marginLeft: "auto", color: "var(--rq-text-2)" }}>{showMoreRoles ? "Hide ▴" : "Show ▾"}</span>
+                    </button>
+                    {showMoreRoles && (
+                      <div style={{ display: "flex", gap: 12, overflowX: "auto", padding: "0 20px 12px", scrollSnapType: "x mandatory" }}>
+                        {moreRoles.map(({ job, score }) => (
+                          <div key={job.id} style={{ flex: "0 0 260px", scrollSnapAlign: "start", border: "1px solid var(--rq-border)", borderRadius: 12, background: "var(--rq-surface)", padding: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+                            <div style={{ fontSize: 12, color: "var(--rq-text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{job.company}</div>
+                            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--rq-text)", lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{job.role}</div>
+                            <div style={{ fontSize: 12, color: "var(--rq-text-2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{job.location}</div>
+                            <span style={{ ...styles.matchPill(score), alignSelf: "flex-start", whiteSpace: "nowrap" }} title="Quick estimate for your tailored resume">~{score}% Match</span>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: "auto", paddingTop: 4 }}>
+                              <span style={{ display: "flex", gap: 6, width: "100%", justifyContent: "flex-end", whiteSpace: "nowrap" }}>
+                                {job.url && (
+                                  <a href={job.url} target="_blank" rel="noopener noreferrer" onClick={() => track("job_posting_opened", { from: "more_roles" })} style={{ ...styles.ghostButton, fontSize: 12, padding: "4px 8px", textDecoration: "none" }}>
+                                    Posting ↗
+                                  </a>
+                                )}
+                                <button
+                                  type="button"
+                                  style={{ ...styles.ghostButton, fontSize: 12, padding: "4px 8px" }}
+                                  onClick={() => {
+                                    track("more_roles_tailor_clicked", { score });
+                                    setShowMoreRoles(false);
+                                    handleJobAnalyzeClick(job);
+                                  }}
+                                >
+                                  Tailor for this →
+                                </button>
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {rxEditor?.embeddable ? (
                 <iframe
                   key={rxEditor.builderUrl}
