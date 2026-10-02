@@ -1120,6 +1120,8 @@ function buildResumeCorpus(resume) {
     resume.title || "",
     resume.summary || "",
     (resume.skills || []).join(" "),
+    (resume.certifications || []).join(" "),
+    (resume.achievements || []).join(" "),
     ...(resume.experience || []).flatMap((e) => [e.role || "", ...(e.bullets || [])]),
   ];
   return parts.join(" \n ");
@@ -1431,6 +1433,8 @@ async function extractResumeFromText(pastedText) {
     { "degree": "degree name", "school": "school name", "year": "graduation year" }
   ],
   "skills": ["skill1", "skill2", ...],
+  "certifications": ["each certification exactly as written, e.g. Pega Certified Senior System Architect (CSSA)"] or [],
+  "achievements": ["each achievement or award exactly as written"] or [],
   "interests": ["interest1", "interest2"] or [],
   "languages": ["Language1", "Language2"] or [],
   "references": [{"name": "Ref Name", "title": "Their Title"}] or []
@@ -1439,7 +1443,8 @@ async function extractResumeFromText(pastedText) {
 Rules:
 - Include EVERY role. If a role has dates and bullets but no company or title (e.g. a continuation on the next page), still include it with company/role as "" – never drop its bullets.
 - Copy every bullet and the summary VERBATIM from the resume text (only remove bullet symbols and fix line breaks). Do not shorten, reword or merge them.
-- The text may list a sidebar (contact, skills, education) separately from the main column; assign each item to its correct section.
+- The text may list a sidebar (contact, skills, education, certifications, achievements) separately from the main column; assign each item to its correct section.
+- Certifications and achievements/awards are their own sections: list every one, verbatim, and never fold them into skills or the summary.
 
 Resume text:
 ${pastedText}`;
@@ -1459,6 +1464,8 @@ ${pastedText}`;
       experience: Array.isArray(parsed.experience) ? parsed.experience : [],
       education: Array.isArray(parsed.education) ? parsed.education : [],
       skills: Array.isArray(parsed.skills) ? parsed.skills : [],
+      certifications: Array.isArray(parsed.certifications) ? parsed.certifications.filter((c) => typeof c === "string" && c.trim()) : [],
+      achievements: Array.isArray(parsed.achievements) ? parsed.achievements.filter((a) => typeof a === "string" && a.trim()) : [],
       interests: Array.isArray(parsed.interests) ? parsed.interests : [],
       languages: Array.isArray(parsed.languages) ? parsed.languages : [],
       references: Array.isArray(parsed.references) ? parsed.references : [],
@@ -2941,6 +2948,26 @@ function ResumeDocument({ resume, highlights = [], dim = false, afterMode = fals
             </div>
           ))}
         </div>
+        {(resume.certifications || []).length > 0 && (
+          <>
+            <div style={styles.resumeSectionTitle}>Certifications</div>
+            <ul style={styles.resumeBullets}>
+              {resume.certifications.map((c, idx) => (
+                <li key={idx} style={styles.resumeBullet}>{c}</li>
+              ))}
+            </ul>
+          </>
+        )}
+        {(resume.achievements || []).length > 0 && (
+          <>
+            <div style={styles.resumeSectionTitle}>Achievements</div>
+            <ul style={styles.resumeBullets}>
+              {resume.achievements.map((a, idx) => (
+                <li key={idx} style={styles.resumeBullet}>{a}</li>
+              ))}
+            </ul>
+          </>
+        )}
       </div>
     );
   }
@@ -3015,6 +3042,26 @@ function ResumeDocument({ resume, highlights = [], dim = false, afterMode = fals
         ))}
         <button type="button" className="rq-add-btn" onClick={onEdit.addSkill}>+ Add skill</button>
       </div>
+      {(resume.certifications || []).length > 0 && (
+        <>
+          <div style={styles.resumeSectionTitle}>Certifications</div>
+          <ul style={styles.resumeBullets}>
+            {resume.certifications.map((c, idx) => (
+              <li key={idx} style={styles.resumeBullet}>{c}</li>
+            ))}
+          </ul>
+        </>
+      )}
+      {(resume.achievements || []).length > 0 && (
+        <>
+          <div style={styles.resumeSectionTitle}>Achievements</div>
+          <ul style={styles.resumeBullets}>
+            {resume.achievements.map((a, idx) => (
+              <li key={idx} style={styles.resumeBullet}>{a}</li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }

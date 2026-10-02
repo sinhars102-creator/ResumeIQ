@@ -142,6 +142,8 @@ function formatResume(resume) {
     ),
     `SKILLS: ${(resume.skills || []).join(" | ")}`,
     `EDUCATION: ${(resume.education || []).map((e) => `${e.degree}, ${e.school} ${e.year || ""}`).join("; ")}`,
+    `CERTIFICATIONS: ${(resume.certifications || []).join(" | ") || "(none listed)"}`,
+    `ACHIEVEMENTS: ${(resume.achievements || []).join(" | ") || "(none listed)"}`,
   ];
   return parts.join("\n");
 }

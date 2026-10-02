@@ -809,8 +809,14 @@ function mapToRxResumeData(resumeData, template = "azurill") {
         ...rxEmptySection("Interests"),
         items: rxList(resumeData.interests).map(rxText).filter(Boolean).map((i) => ({ id: crypto.randomUUID(), hidden: false, icon: "", iconColor: "", name: i, keywords: [] })),
       },
-      awards: rxEmptySection("Awards"),
-      certifications: rxEmptySection("Certifications"),
+      awards: {
+        ...rxEmptySection("Achievements"),
+        items: rxList(resumeData.achievements).map(rxText).filter(Boolean).map((title) => ({ id: crypto.randomUUID(), hidden: false, title, awarder: "", date: "", website: RX_EMPTY_WEBSITE, description: "" })),
+      },
+      certifications: {
+        ...rxEmptySection("Certifications"),
+        items: rxList(resumeData.certifications).map(rxText).filter(Boolean).map((title) => ({ id: crypto.randomUUID(), hidden: false, title, issuer: "", date: "", website: RX_EMPTY_WEBSITE, description: "" })),
+      },
       publications: rxEmptySection("Publications"),
       volunteer: rxEmptySection("Volunteer"),
       references: {
