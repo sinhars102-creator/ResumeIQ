@@ -406,7 +406,7 @@ app.post("/api/assistant/gaps", async (req, res) => {
 });
 
 app.post("/api/assistant", async (req, res) => {
-  const { resume, job, messages, decisions, focusGaps } = req.body || {};
+  const { resume, job, messages, decisions, focusGaps, questionsOnGap } = req.body || {};
   if (!resume || typeof resume !== "object" || !job?.jd) {
     return res.status(400).json({ error: "resume and job (with jd) are required" });
   }
@@ -426,6 +426,7 @@ app.post("/api/assistant", async (req, res) => {
         .filter((g) => g && typeof g.id === "string" && typeof g.title === "string")
         .slice(0, 6)
         .map((g) => ({ id: g.id.slice(0, 8), title: g.title.slice(0, 80), detail: String(g.detail || "").slice(0, 300), kind: g.kind === "real" ? "real" : "wording" })),
+      questionsOnGap: Math.max(0, Math.min(10, Number(questionsOnGap) || 0)),
     });
     res.json(turn);
   } catch (err) {

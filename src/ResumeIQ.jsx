@@ -2386,6 +2386,8 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
           messages: nextChat.messages.filter((m) => m.role !== "note").map((m) => ({ role: m.role, content: m.text })),
           decisions: nextChat.decisions,
           focusGaps: (nextChat.gaps || []).filter((g) => (nextChat.focusGapIds || []).includes(g.id)),
+          // Questions already asked on the current gap; past the limit the assistant must draft instead.
+          questionsOnGap: (nextChat.gapQuestions || {})[nextChat.currentGapId] || 0,
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -2395,7 +2397,12 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
         ...c,
         messages: [...c.messages, { role: "assistant", text: data.message, edits, quickReplies: data.quickReplies || [], done: !!data.done }],
         coveredGapIds: [...new Set([...(c.coveredGapIds || []), ...(data.coveredGapIds || [])])],
-        currentGapId: data.currentGapId || c.currentGapId,
+        // With chosen gaps, ResumeIQ decides which gap is current (skip/accept advance it), not the model.
+        currentGapId: c.focusGapIds?.length ? c.currentGapId : data.currentGapId || c.currentGapId,
+        gapQuestions:
+          c.focusGapIds?.length && c.currentGapId && !edits.length
+            ? { ...(c.gapQuestions || {}), [c.currentGapId]: ((c.gapQuestions || {})[c.currentGapId] || 0) + 1 }
+            : c.gapQuestions,
       }));
       if (data.done) setReopened(false);
     } catch (e) {
@@ -2526,6 +2533,32 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
       const accepted = edits.filter((e) => e.status === "accepted").length;
       const summary = accepted === edits.length ? "I accepted the edit." : accepted ? "I accepted some of the edits and rejected the rest." : "I rejected that edit.";
       nextChat = { ...nextChat, messages: [...nextChat.messages, { role: "user", text: summary, isDecision: true }] };
+      // With chosen gaps, an accepted edit resolves the current gap: go to the next one, or finish.
+      if (accepted && nextChat.focusGapIds?.length && nextChat.currentGapId) {
+        const coveredGapIds = [...new Set([...(nextChat.coveredGapIds || []), nextChat.currentGapId])];
+        const next = nextChat.focusGapIds.find((id) => !coveredGapIds.includes(id));
+        if (!next) {
+          const applied = nextChat.decisions.filter((d) => d.decision === "accepted").length;
+          setChat({
+            ...nextChat,
+            coveredGapIds,
+            currentGapId: null,
+            messages: [
+              ...nextChat.messages,
+              { role: "assistant", text: `That's all the gaps you chose. ${applied} edit${applied === 1 ? " is" : "s are"} applied to your resume.`, edits: [], quickReplies: [], done: true },
+            ],
+          });
+          setReopened(false);
+          return;
+        }
+        const nextTitle = (nextChat.gaps || []).find((g) => g.id === next)?.title;
+        nextChat = {
+          ...nextChat,
+          coveredGapIds,
+          currentGapId: next,
+          messages: [...nextChat.messages, { role: "user", text: `Next gap: ${nextTitle}.` }],
+        };
+      }
       setChat(nextChat);
       sendTurn(nextChat);
     } else {
@@ -2703,12 +2736,30 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
                     )
                   )}
                   {e.why && <div style={{ ...styles.whyLine, marginTop: 8 }}>💡 {e.why}</div>}
-                  {e.status === "pending" && (
-                    <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
-                      <button type="button" style={styles.dangerButton} disabled={loading} onClick={() => decide(mi, e.id, "rejected")}>✕ Reject</button>
-                      <button type="button" style={styles.successButton} disabled={loading} onClick={() => decide(mi, e.id, "accepted")}>✓ Accept</button>
-                    </div>
-                  )}
+                  {e.status === "pending" && (() => {
+                    const placeholders = (e.proposed || "").match(/\[[^\]]+\]/g) || [];
+                    return (
+                      <>
+                        {placeholders.length > 0 && (
+                          <div style={{ marginTop: 8, fontSize: 12, color: "var(--rq-warn)" }}>
+                            ✎ Fill in {placeholders.join(", ")} in the text above, then accept.
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: 8, marginTop: 10, justifyContent: "flex-end" }}>
+                          <button type="button" style={styles.dangerButton} disabled={loading} onClick={() => decide(mi, e.id, "rejected")}>✕ Reject</button>
+                          <button
+                            type="button"
+                            title={placeholders.length ? "Fill in the [bracketed] parts first" : undefined}
+                            style={{ ...styles.successButton, ...(placeholders.length ? styles.disabledButton : {}) }}
+                            disabled={loading || placeholders.length > 0}
+                            onClick={() => decide(mi, e.id, "accepted")}
+                          >
+                            ✓ Accept
+                          </button>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               ))}
             </div>
@@ -2724,7 +2775,8 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, 
       </div>
       {last?.role === "assistant" && !loading && !awaitingDecision && (() => {
         // Skip/next is a reliable control below; other suggestions from the model stay as quick replies.
-        const replies = (last.quickReplies || []).filter((q) => !(focusGaps.length && /\b(skip|next gap|move on)\b/i.test(q)));
+        const hadEdits = (last.edits || []).length > 0;
+        const replies = (last.quickReplies || []).filter((q) => !(focusGaps.length && (/\b(skip|next gap|move on)\b/i.test(q) || !hadEdits)));
         if (!replies.length && !focusGaps.length) return null;
         return (
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "0 16px 10px" }}>

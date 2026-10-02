@@ -37,7 +37,7 @@ const SYSTEM_PROMPT = `You are a resume tailoring assistant inside ResumeIQ. You
 How you work:
 - Be objective and specific. Every claim you make about fit cites concrete evidence: a JD requirement (quote its key words) and the resume line that does or doesn't meet it.
 - Work one gap at a time, highest impact first. Propose at most ${MAX_EDITS_PER_TURN} edits per turn; usually 1.
-- If the best edit needs a fact the resume doesn't contain (a number, scale, tool, outcome), ASK for it instead of guessing. Ask one precise question.
+- If the best edit needs a fact the resume doesn't contain (a number, scale, tool, outcome), ASK for it instead of guessing. Ask one precise question for the single most valuable fact – at most 2 questions per gap. After that, draft the edit with the facts you have and put anything still missing in [square-bracket placeholders] for the candidate to fill in.
 - Separate gaps wording can fix (the experience is there but undersold or uses different terms) from real gaps (years, certifications, domains the candidate lacks). Say plainly that real gaps can't be closed by rewording; don't try to paper over them.
 - Talk to the candidate directly ("you", "your"). Keep your message under 90 words. No pleasantries, no restating the resume back.
 - End every message with exactly one clear question or next step.
@@ -330,7 +330,10 @@ function formatFocusGaps(focusGaps) {
  * @param messages  [{ role: "user" | "assistant", content }] – the chat so far
  * @param decisions [{ decision: "accepted" | "rejected", section, original, proposed, reason? }]
  */
-export async function runAssistantTurn({ resume, job, messages = [], decisions = [], focusGaps = [] }) {
+const MAX_QUESTIONS_PER_GAP = 2;
+
+export async function runAssistantTurn({ resume, job, messages = [], decisions = [], focusGaps = [], questionsOnGap = 0 }) {
+  const mustDraft = focusGaps.length > 0 && questionsOnGap >= MAX_QUESTIONS_PER_GAP;
   const jd = String(job?.jd || "").slice(0, MAX_JD_CHARS);
   const candidateText = messages.filter((m) => m.role === "user").map((m) => m.content).join("\n");
   const opening = !messages.length;
@@ -358,7 +361,8 @@ ${opening
     : opening
       ? "Start the conversation: in 2–3 sentences give an objective fit diagnosis naming the top 2–3 gaps (JD requirement vs resume evidence), marking which are real gaps vs wording gaps. Then propose the single highest-impact edit for a wording gap that the resume already supports. Only if no edit is possible without a missing fact, ask one precise question for it instead."
       : "Reply to the candidate's latest message and continue with the next most important gap."}
-Return ONLY the JSON object.`;
+${mustDraft ? `QUESTION LIMIT REACHED for the current gap: you have already asked ${questionsOnGap} questions. Do NOT ask another question. Propose the edit now as a draft built from the resume and the candidate's answers; put every missing fact in a [square-bracket placeholder] (e.g. [X%], [number of tickets], [tool name]). In the message, say briefly that they can fill in the brackets.
+` : ""}Return ONLY the JSON object.`;
 
   let reply = parseReply(await callLLM({ system: SYSTEM_PROMPT, user, maxTokens: 1500, json: true }));
   const context = { resume, jd, candidateText, decisions };
@@ -382,6 +386,23 @@ Return ONLY the JSON object.`;
       checked = reply.edits.map((edit) => ({ edit, problems: checkEdit(edit, context) }));
     } catch (e) {
       console.warn("[assistant] repair pass failed:", e.message);
+    }
+  }
+
+  // Question limit: past it, a reply without an edit gets one strict retry.
+  if (mustDraft && !reply.edits.length) {
+    try {
+      reply = parseReply(
+        await callLLM({
+          system: SYSTEM_PROMPT,
+          user: `${user}\n\nYour reply asked another question but the limit is reached. Return the full JSON object again with exactly one edit for the current gap: a draft from the resume and the candidate's answers, with [placeholders] for anything missing. No question.`,
+          maxTokens: 1500,
+          json: true,
+        })
+      );
+      checked = reply.edits.map((edit) => ({ edit, problems: checkEdit(edit, context) }));
+    } catch (e) {
+      console.warn("[assistant] draft retry failed:", e.message);
     }
   }
 
