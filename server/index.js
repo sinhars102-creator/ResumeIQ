@@ -18,7 +18,7 @@ function sendLLMError(res, err, tag) {
   if (err instanceof LLMUserError) return res.status(err.status).json({ error: err.message });
   return res.status(502).json({ error: "The AI service had a problem handling that request. Please try again." });
 }
-import { runAssistantTurn } from "./assistant.js";
+import { runAssistantTurn, listGaps } from "./assistant.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootEnv = resolve(__dirname, "../.env");
@@ -393,8 +393,20 @@ app.post("/api/llm", async (req, res) => {
  */
 const ASSISTANT_MAX_MESSAGES = 40;
 
+app.post("/api/assistant/gaps", async (req, res) => {
+  const { resume, job } = req.body || {};
+  if (!resume || typeof resume !== "object" || !job?.jd) {
+    return res.status(400).json({ error: "resume and job (with jd) are required" });
+  }
+  try {
+    res.json(await listGaps({ resume, job }));
+  } catch (err) {
+    sendLLMError(res, err, "assistant-gaps");
+  }
+});
+
 app.post("/api/assistant", async (req, res) => {
-  const { resume, job, messages, decisions } = req.body || {};
+  const { resume, job, messages, decisions, focusGaps } = req.body || {};
   if (!resume || typeof resume !== "object" || !job?.jd) {
     return res.status(400).json({ error: "resume and job (with jd) are required" });
   }
@@ -410,6 +422,10 @@ app.post("/api/assistant", async (req, res) => {
       job,
       messages: chat,
       decisions: Array.isArray(decisions) ? decisions.slice(-40) : [],
+      focusGaps: (Array.isArray(focusGaps) ? focusGaps : [])
+        .filter((g) => g && typeof g.id === "string" && typeof g.title === "string")
+        .slice(0, 6)
+        .map((g) => ({ id: g.id.slice(0, 8), title: g.title.slice(0, 80), detail: String(g.detail || "").slice(0, 300), kind: g.kind === "real" ? "real" : "wording" })),
     });
     res.json(turn);
   } catch (err) {
@@ -710,12 +726,22 @@ function rxText(value) {
 }
 const rxList = (value) => (Array.isArray(value) ? value : []);
 
+/** Only image data URLs or http(s) links are passed on as the resume picture. */
+function rxPhotoUrl(photoUrl) {
+  if (typeof photoUrl !== "string") return "";
+  if (/^data:image\/(png|jpe?g|webp);base64,/i.test(photoUrl) && photoUrl.length < 1_500_000) return photoUrl;
+  if (/^https?:\/\//i.test(photoUrl)) return photoUrl;
+  return "";
+}
+
 /** Map ResumeIQ's resumeData shape into Reactive Resume's ResumeData schema. */
 function mapToRxResumeData(resumeData, template = "azurill") {
   const contact = rxText(resumeData.contact);
   const emailMatch = contact.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
   return {
-    picture: { hidden: true, url: "", size: 100, rotation: 0, aspectRatio: 1, borderRadius: 0, borderColor: "rgba(0, 0, 0, 0.5)", borderWidth: 0, shadowColor: "rgba(0, 0, 0, 0.5)", shadowWidth: 0 },
+    // Shown by default: carries over the photo found in the uploaded resume, and pictures added later in
+    // the editor appear without the user having to un-hide them. An empty url renders nothing.
+    picture: { hidden: false, url: rxPhotoUrl(resumeData.photoUrl), size: 100, rotation: 0, aspectRatio: 1, borderRadius: 0, borderColor: "rgba(0, 0, 0, 0.5)", borderWidth: 0, shadowColor: "rgba(0, 0, 0, 0.5)", shadowWidth: 0 },
     basics: {
       name: rxText(resumeData.name),
       headline: rxText(resumeData.title),

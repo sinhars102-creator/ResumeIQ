@@ -68,9 +68,11 @@ Respond with ONLY a JSON object:
     }
   ],
   "quickReplies": ["up to 3 short NEUTRAL actions, e.g. \"Next gap\", \"Make it shorter\", \"Skip this one\" – never a factual claim about the candidate"],
+  "currentGapId": "id of the chosen gap you are working on now (when the candidate chose gaps), else null",
+  "coveredGapIds": ["ids of chosen gaps already resolved: an edit for it was accepted or rejected, or the candidate skipped it or has nothing to add"],
   "done": false
 }
-Set "done": true only when the important gaps are covered; then summarise what changed in the message.`;
+Set "done": true only when the important gaps are covered (when the candidate chose gaps: when every chosen gap is resolved); then summarise what changed in the message.`;
 
 function normalize(text) {
   return String(text || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -271,8 +273,53 @@ function parseReply(text) {
     message: typeof parsed.message === "string" ? parsed.message.trim() : "",
     edits: Array.isArray(parsed.edits) ? parsed.edits.slice(0, MAX_EDITS_PER_TURN) : [],
     quickReplies: Array.isArray(parsed.quickReplies) ? parsed.quickReplies.filter((q) => typeof q === "string").slice(0, 3) : [],
+    currentGapId: typeof parsed.currentGapId === "string" ? parsed.currentGapId : null,
+    coveredGapIds: Array.isArray(parsed.coveredGapIds) ? parsed.coveredGapIds.filter((id) => typeof id === "string") : [],
     done: parsed.done === true,
   };
+}
+
+const GAPS_PROMPT = `You compare one candidate's resume with one job description and list the gaps worth working on.
+A gap is a JD requirement the resume doesn't clearly show. Mark each one:
+- "wording": the resume already shows the experience but undersells it or uses different terms – rewording can fix it.
+- "real": the candidate lacks it (years, certification, domain, tool) – rewording can't fix it, only new facts from the candidate can.
+Order by impact on this application, highest first. Quote the JD's own key words. Never list something the resume already shows clearly.
+
+Respond with ONLY a JSON object:
+{
+  "gaps": [
+    { "id": "g1", "title": "short label, max 8 words", "detail": "one sentence: what the JD asks vs what the resume shows", "kind": "wording" | "real" }
+  ]
+}
+List 3 to 6 gaps.`;
+
+/** List the gaps between this resume and job, so the candidate can choose which to work on. */
+export async function listGaps({ resume, job }) {
+  const jd = String(job?.jd || "").slice(0, MAX_JD_CHARS);
+  const user = `JOB: ${job?.role || ""} at ${job?.company || ""}
+JOB DESCRIPTION:
+${jd}
+
+CANDIDATE RESUME:
+${formatResume(resume)}
+
+Return ONLY the JSON object.`;
+  const cleaned = String(await callLLM({ system: GAPS_PROMPT, user, maxTokens: 1200, json: true })).replace(/```json|```/g, "").trim();
+  const parsed = JSON.parse(cleaned);
+  const gaps = (Array.isArray(parsed.gaps) ? parsed.gaps : [])
+    .filter((g) => g && typeof g.title === "string" && g.title.trim())
+    .slice(0, 6)
+    .map((g, i) => ({
+      id: `g${i + 1}`,
+      title: g.title.trim().slice(0, 80),
+      detail: String(g.detail || "").trim().slice(0, 300),
+      kind: g.kind === "real" ? "real" : "wording",
+    }));
+  return { gaps };
+}
+
+function formatFocusGaps(focusGaps) {
+  return focusGaps.map((g, i) => `${i + 1}. [${g.id}] ${g.title} (${g.kind} gap) – ${g.detail}`).join("\n");
 }
 
 /**
@@ -282,7 +329,7 @@ function parseReply(text) {
  * @param messages  [{ role: "user" | "assistant", content }] – the chat so far
  * @param decisions [{ decision: "accepted" | "rejected", section, original, proposed, reason? }]
  */
-export async function runAssistantTurn({ resume, job, messages = [], decisions = [] }) {
+export async function runAssistantTurn({ resume, job, messages = [], decisions = [], focusGaps = [] }) {
   const jd = String(job?.jd || "").slice(0, MAX_JD_CHARS);
   const candidateText = messages.filter((m) => m.role === "user").map((m) => m.content).join("\n");
   const opening = !messages.length;
@@ -300,9 +347,16 @@ ${formatDecisions(decisions)}
 CONVERSATION:
 ${formatConversation(messages)}
 
+${focusGaps.length
+    ? `GAPS THE CANDIDATE CHOSE TO WORK ON (work only on these, in this order):
+${formatFocusGaps(focusGaps)}
+
 ${opening
-    ? "Start the conversation: in 2–3 sentences give an objective fit diagnosis naming the top 2–3 gaps (JD requirement vs resume evidence), marking which are real gaps vs wording gaps. Then propose the single highest-impact edit for a wording gap that the resume already supports. Only if no edit is possible without a missing fact, ask one precise question for it instead."
-    : "Reply to the candidate's latest message and continue with the next most important gap."}
+        ? "Start with the first chosen gap: one short sentence on it, then propose an edit the resume already supports or ask one precise question for the missing fact. For a real gap, say plainly it can't be reworded and ask whether the candidate has experience the resume leaves out."
+        : "Reply to the candidate's latest message. Stay on the current chosen gap until it is resolved (edit accepted or rejected, or the candidate skips it or has nothing to add), then move to the next chosen gap. When every chosen gap is resolved, set done to true and summarise what changed in under 60 words."}`
+    : opening
+      ? "Start the conversation: in 2–3 sentences give an objective fit diagnosis naming the top 2–3 gaps (JD requirement vs resume evidence), marking which are real gaps vs wording gaps. Then propose the single highest-impact edit for a wording gap that the resume already supports. Only if no edit is possible without a missing fact, ask one precise question for it instead."
+      : "Reply to the candidate's latest message and continue with the next most important gap."}
 Return ONLY the JSON object.`;
 
   let reply = parseReply(await callLLM({ system: SYSTEM_PROMPT, user, maxTokens: 1500, json: true }));
@@ -353,5 +407,13 @@ Return ONLY the JSON object.`;
     message += "\n\n(I held back the edit I drafted because it didn't pass the accuracy checks – it would have changed or added facts your resume doesn't support. Tell me more about this point, or say \"next gap\".)";
   }
 
-  return { message, edits, quickReplies: reply.quickReplies, done: reply.done };
+  const focusIds = new Set(focusGaps.map((g) => g.id));
+  return {
+    message,
+    edits,
+    quickReplies: reply.quickReplies,
+    currentGapId: focusIds.has(reply.currentGapId) ? reply.currentGapId : null,
+    coveredGapIds: reply.coveredGapIds.filter((id) => focusIds.has(id)),
+    done: reply.done,
+  };
 }

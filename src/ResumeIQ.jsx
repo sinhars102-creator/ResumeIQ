@@ -2359,10 +2359,12 @@ let assistantEditSeq = 0;
  * for missing facts, and proposes one checked edit at a time (server/assistant.js).
  * Chat state lives in the parent so it survives moving to the preview and back.
  */
-function TailoringAssistant({ job, resume, chat, setChat, onAccept }) {
+function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, continueLabel }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  // After the chosen gaps are covered the chat collapses to a summary; "Reopen chat" expands it again.
+  const [reopened, setReopened] = useState(false);
   const scrollRef = useRef(null);
   const startedRef = useRef(false);
 
@@ -2383,6 +2385,7 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept }) {
           job: { role: job.role, company: job.company, jd: job.jd },
           messages: nextChat.messages.filter((m) => m.role !== "note").map((m) => ({ role: m.role, content: m.text })),
           decisions: nextChat.decisions,
+          focusGaps: (nextChat.gaps || []).filter((g) => (nextChat.focusGapIds || []).includes(g.id)),
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -2391,7 +2394,10 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept }) {
       setChat((c) => ({
         ...c,
         messages: [...c.messages, { role: "assistant", text: data.message, edits, quickReplies: data.quickReplies || [], done: !!data.done }],
+        coveredGapIds: [...new Set([...(c.coveredGapIds || []), ...(data.coveredGapIds || [])])],
+        currentGapId: data.currentGapId || c.currentGapId,
       }));
+      if (data.done) setReopened(false);
     } catch (e) {
       setError(e.message || "The assistant is unavailable right now.");
     } finally {
@@ -2399,12 +2405,61 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept }) {
     }
   };
 
+  const loadGaps = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const base = API_BASE.replace(/\/$/, "");
+      const response = await fetch(`${base}/api/assistant/gaps`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resume: resumeForAI(resume), job: { role: job.role, company: job.company, jd: job.jd } }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.gaps?.length) throw new Error(data.error || "No gaps returned");
+      // Wording gaps are pre-selected: those are the ones rewording can actually close.
+      setChat((c) => ({ ...c, gaps: data.gaps, selectedGapIds: data.gaps.filter((g) => g.kind === "wording").map((g) => g.id) }));
+      setLoading(false);
+    } catch {
+      // Fall back to the open-ended conversation.
+      const nextChat = { ...chat, focusGapIds: [] };
+      setChat(nextChat);
+      sendTurn(nextChat);
+    }
+  };
+
   useEffect(() => {
-    if (startedRef.current || chat.messages.length) return;
+    if (startedRef.current || chat.messages.length || chat.gaps) return;
     startedRef.current = true;
-    sendTurn(chat);
+    loadGaps();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const toggleGap = (id) =>
+    setChat((c) => {
+      const selected = new Set(c.selectedGapIds || []);
+      if (selected.has(id)) selected.delete(id);
+      else selected.add(id);
+      return { ...c, selectedGapIds: (c.gaps || []).map((g) => g.id).filter((g) => selected.has(g)) };
+    });
+
+  const startWithGaps = () => {
+    const ids = chat.selectedGapIds || [];
+    if (!ids.length || loading) return;
+    const titles = (chat.gaps || []).filter((g) => ids.includes(g.id)).map((g) => g.title);
+    // A later round (after "Work on more gaps") needs a user turn so the assistant switches focus.
+    const messages = chat.messages.length ? [...chat.messages, { role: "user", text: `Let's work on: ${titles.join("; ")}.` }] : chat.messages;
+    const nextChat = { ...chat, messages, focusGapIds: ids, currentGapId: ids[0] };
+    setChat(nextChat);
+    setReopened(false);
+    sendTurn(nextChat);
+  };
+
+  const pickMoreGaps = () =>
+    setChat((c) => {
+      const remaining = (c.gaps || []).filter((g) => !(c.coveredGapIds || []).includes(g.id)).map((g) => g.id);
+      return { ...c, focusGapIds: null, selectedGapIds: remaining };
+    });
 
   const sendUserText = (text) => {
     const trimmed = text.trim();
@@ -2447,12 +2502,107 @@ function TailoringAssistant({ job, resume, chat, setChat, onAccept }) {
 
   const last = chat.messages[chat.messages.length - 1];
   const awaitingDecision = last?.role === "assistant" && last.edits?.some((e) => e.status === "pending");
+  const picking = !!chat.gaps && !chat.focusGapIds;
+  const finished = !picking && !reopened && !loading && last?.role === "assistant" && last.done && !awaitingDecision;
+  const focusGaps = (chat.gaps || []).filter((g) => (chat.focusGapIds || []).includes(g.id));
+  const covered = new Set(chat.coveredGapIds || []);
+  const acceptedCount = (chat.decisions || []).filter((d) => d.decision === "accepted").length;
+  const uncoveredGaps = (chat.gaps || []).filter((g) => !covered.has(g.id));
+  const kindPill = (kind) => ({
+    fontSize: 11, padding: "2px 8px", borderRadius: 999, whiteSpace: "nowrap",
+    ...(kind === "real"
+      ? { color: "var(--rq-warn)", background: "color-mix(in srgb, var(--rq-warn) 10%, transparent)" }
+      : { color: "var(--rq-accent)", background: "color-mix(in srgb, var(--rq-accent) 10%, transparent)" }),
+  });
+
+  if (picking || finished || (loading && !chat.messages.length && !chat.focusGapIds)) {
+    return (
+      <div style={{ border: "1px solid var(--rq-border)", borderRadius: 14, background: "var(--rq-surface)", display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--rq-border)", fontSize: 12, color: "var(--rq-text-2)" }}>
+          <span style={{ color: "var(--rq-accent)", fontWeight: 600 }}>Tailoring assistant</span>
+          {picking ? " · Choose the gaps you want to work on" : finished ? " · Done" : " · Reviewing this role"}
+        </div>
+        {!picking && !finished && (
+          <div style={{ padding: 20, fontSize: 13, color: "var(--rq-text-2)" }}>Finding the gaps between your resume and this role…</div>
+        )}
+        {picking && (
+          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ fontSize: 13, color: "var(--rq-text-2)" }}>
+              <b style={{ color: "var(--rq-accent)" }}>Wording</b> gaps can be fixed by rewording what you already have.{" "}
+              <b style={{ color: "var(--rq-warn)" }}>Real</b> gaps need new facts from you.
+            </div>
+            {chat.gaps.map((g) => {
+              const on = (chat.selectedGapIds || []).includes(g.id);
+              const done = covered.has(g.id);
+              return (
+                <label key={g.id} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "10px 12px", borderRadius: 10, cursor: "pointer", border: `1px solid ${on ? "color-mix(in srgb, var(--rq-accent) 45%, transparent)" : "var(--rq-border)"}`, background: on ? "color-mix(in srgb, var(--rq-accent) 5%, transparent)" : "transparent" }}>
+                  <input type="checkbox" checked={on} onChange={() => toggleGap(g.id)} style={{ marginTop: 3, accentColor: "var(--rq-accent)" }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 600, fontSize: 13.5, color: "var(--rq-text)" }}>{g.title}</span>
+                      <span style={kindPill(g.kind)}>{g.kind === "real" ? "Real" : "Wording"}</span>
+                      {done && <span style={{ fontSize: 11, color: "var(--rq-accent)" }}>✓ Covered</span>}
+                    </div>
+                    {g.detail && <div style={{ fontSize: 12.5, color: "var(--rq-text-2)", marginTop: 3, lineHeight: 1.5 }}>{g.detail}</div>}
+                  </div>
+                </label>
+              );
+            })}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 4 }}>
+              {onContinue && (
+                <button type="button" style={styles.ghostButton} onClick={onContinue}>Skip – continue</button>
+              )}
+              <button
+                type="button"
+                onClick={startWithGaps}
+                disabled={!(chat.selectedGapIds || []).length || loading}
+                style={{ ...styles.primaryButton, ...(!(chat.selectedGapIds || []).length || loading ? styles.disabledButton : {}) }}
+              >
+                Work on {(chat.selectedGapIds || []).length || ""} gap{(chat.selectedGapIds || []).length === 1 ? "" : "s"} →
+              </button>
+            </div>
+          </div>
+        )}
+        {finished && (
+          <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ fontWeight: 600, fontSize: 14, color: "var(--rq-accent)" }}>
+              ✓ {focusGaps.length ? `Your ${focusGaps.length} chosen gap${focusGaps.length === 1 ? " is" : "s are"} covered` : "Key gaps covered"}
+              {acceptedCount ? ` · ${acceptedCount} edit${acceptedCount === 1 ? "" : "s"} applied` : ""}
+            </div>
+            {last?.text && <div style={{ fontSize: 13, lineHeight: 1.55, color: "var(--rq-text)", whiteSpace: "pre-wrap" }}>{last.text}</div>}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <button type="button" style={styles.ghostButton} onClick={() => setReopened(true)}>Reopen chat</button>
+              {uncoveredGaps.length > 0 && (
+                <button type="button" style={styles.ghostButton} onClick={pickMoreGaps}>Work on more gaps</button>
+              )}
+              {onContinue && (
+                <button type="button" style={styles.primaryButton} onClick={onContinue}>{continueLabel || "Continue →"}</button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={{ border: "1px solid color-mix(in srgb, var(--rq-text) 8%, transparent)", borderRadius: 14, background: "color-mix(in srgb, var(--rq-text) 2%, transparent)", display: "flex", flexDirection: "column", height: "min(640px, calc(100vh - 120px))", minHeight: 420 }}>
       <div style={{ padding: "12px 16px", borderBottom: "1px solid color-mix(in srgb, var(--rq-text) 6%, transparent)", fontSize: 12, color: "var(--rq-text-2)" }}>
         <span style={{ color: "var(--rq-accent)", fontWeight: 600 }}>Tailoring assistant</span> · Every edit is checked: it keeps your specifics and adds nothing you haven't confirmed.
       </div>
+      {focusGaps.length > 0 && (
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", padding: "10px 16px", borderBottom: "1px solid color-mix(in srgb, var(--rq-text) 6%, transparent)" }}>
+          {focusGaps.map((g, i) => {
+            const isDone = covered.has(g.id);
+            const isCurrent = !isDone && chat.currentGapId === g.id;
+            return (
+              <span key={g.id} title={g.detail} style={{ fontSize: 11.5, padding: "3px 9px", borderRadius: 999, border: `1px solid ${isCurrent ? "var(--rq-accent)" : "var(--rq-border)"}`, color: isDone ? "var(--rq-accent)" : isCurrent ? "var(--rq-text)" : "var(--rq-text-2)", background: isDone ? "color-mix(in srgb, var(--rq-accent) 8%, transparent)" : "transparent", fontWeight: isCurrent ? 600 : 400 }}>
+                {isDone ? "✓ " : `${i + 1}. `}{g.title}
+              </span>
+            );
+          })}
+        </div>
+      )}
       <div ref={scrollRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 16, display: "flex", flexDirection: "column", gap: 14, maskImage: "linear-gradient(to bottom, transparent 0, var(--rq-text) 32px)", WebkitMaskImage: "linear-gradient(to bottom, transparent 0, var(--rq-text) 32px)" }}>
         {chat.messages.map((m, mi) =>
           m.role === "user" ? (
@@ -3326,7 +3476,8 @@ export default function ResumeIQ() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          resumeData: getFinalResume(),
+          // A very large embedded photo would exceed the API's request size limit; send the resume without it.
+          resumeData: (getFinalResume()?.photoUrl?.length || 0) > 1_500_000 ? { ...getFinalResume(), photoUrl: null } : getFinalResume(),
           name: [getFinalResume()?.name, selectedJob && [selectedJob.role, selectedJob.company].filter(Boolean).join(" @ ")]
             .filter(Boolean)
             .join(" – "),
@@ -4298,6 +4449,8 @@ body {
                     setSuggestions((prev) => [...prev, { ...edit, title: edit.jdRequirement }]);
                     setApprovedIds((prev) => new Set(prev).add(edit.id));
                   }}
+                  onContinue={handleApplyChanges}
+                  continueLabel={approvedCount ? `Continue with ${approvedCount} edit${approvedCount === 1 ? "" : "s"} →` : "Continue with original resume →"}
                 />
                       <details style={{ border: "1px solid color-mix(in srgb, var(--rq-text) 8%, transparent)", borderRadius: 12, padding: "10px 14px", background: "color-mix(in srgb, var(--rq-text) 2%, transparent)" }}>
                         <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--rq-text-2)" }}>Job description</summary>
