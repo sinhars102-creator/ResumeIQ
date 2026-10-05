@@ -12,6 +12,10 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 // production builds (the API is deployed alongside the frontend at /api on Vercel).
 const API_BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://localhost:3001" : "");
 
+// Landing page the upload screen links back to: VITE_HOME_URL if set; otherwise the local
+// landing page server in dev. With neither, the link is hidden.
+const HOME_URL = import.meta.env.VITE_HOME_URL ?? (import.meta.env.DEV ? "http://localhost:8765/" : "");
+
 const SAMPLE_RESUME = {
   name: "Alex Chen",
   title: "Product Manager",
@@ -222,6 +226,18 @@ const styles = {
     fontSize: 11,
     color: "var(--rq-text-3)",
     marginTop: 8,
+  },
+  homeLink: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    minHeight: 44,
+    marginTop: -12,
+    marginBottom: 4,
+    fontSize: 13,
+    fontWeight: 500,
+    color: "var(--rq-text-2)",
+    textDecoration: "none",
   },
   uploadSplit: {
     display: "flex",
@@ -4438,6 +4454,7 @@ export default function ResumeIQ() {
 }
 .rq-wt-accept { animation: rqNudge 1.6s ease-in-out 2.2s infinite; }
 .rq-wt-step:not([aria-current]):hover { background: color-mix(in srgb, var(--rq-surface) 60%, transparent) !important; }
+.rq-home-link:hover { color: var(--rq-accent) !important; }
 .rq-wt-step:focus-visible { outline: 2px solid var(--rq-accent); outline-offset: 2px; }
 @media (max-width: 900px) {
   .rq-upload-split { flex-direction: column; }
@@ -4549,6 +4566,11 @@ body {
         <main className="rq-main-card" style={styles.mainCard}>
           {step === "upload" && (
             <section style={styles.stepSection}>
+              {HOME_URL && (
+                <a href={HOME_URL} className="rq-home-link" style={styles.homeLink}>
+                  <span aria-hidden="true">←</span> Back to home
+                </a>
+              )}
               <div className="rq-upload-split" style={styles.uploadSplit}>
                 <div className="rq-upload-guide" style={styles.uploadGuide}>
                   <UploadWalkthrough />
