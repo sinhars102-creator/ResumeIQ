@@ -5,6 +5,7 @@ import { jsPDF } from "jspdf";
 // PDF.js worker: bundle via Vite so production gets a valid asset URL (fixes "load failed" on Vercel)
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { track, bucket } from "./analytics.js";
+import UploadStep from "./UploadStep.jsx";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 
@@ -3200,8 +3201,6 @@ export default function ResumeIQ() {
   const [uploadedFileSize, setUploadedFileSize] = useState("");
   const [parsingStatus, setParsingStatus] = useState(() => ({ ...DEFAULT_PARSING_STATUS }));
   const [parsingError, setParsingError] = useState(null);
-  const [dropZoneHover, setDropZoneHover] = useState(false);
-  const fileInputRef = useRef(null);
   const [score, setScore] = useState(null);
   const [scoreBreakdown, setScoreBreakdown] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
@@ -4042,84 +4041,15 @@ body {
 
         <main className="rq-main-card" style={styles.mainCard}>
           {step === "upload" && (
-            <section style={styles.stepSection}>
-              <div style={styles.uploadHero}>
-                <div style={styles.uploadTitle}>Resume intelligence for your job search</div>
-                <h1 style={styles.uploadHeadline}>
-                  Find Jobs That <span style={styles.uploadHeadlineAccent}>Actually Fit You</span>
-                </h1>
-                <p style={styles.uploadSubtext}>
-                  Upload your resume. We’ll scan the job market, score every match, and help you tailor your resume to land interviews.
-                </p>
-              </div>
-              {parsingError && (
-                <div style={{ marginBottom: 16, padding: 12, background: "color-mix(in srgb, var(--rq-danger) 15%, transparent)", borderRadius: 8, fontSize: 13, color: "var(--rq-danger)" }}>
-                  {parsingError}
-                </div>
-              )}
-              <div
-                style={{
-                  ...styles.dropZone,
-                  ...(dropZoneHover ? styles.dropZoneHover : {}),
-                }}
-                onDragOver={(e) => { e.preventDefault(); setDropZoneHover(true); }}
-                onDragLeave={() => setDropZoneHover(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDropZoneHover(false);
-                  const file = e.dataTransfer?.files?.[0];
-                  if (file && /\.(pdf|txt|md)$/i.test(file.name)) handleUploadAndParse(file);
-                }}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <div style={styles.dropZoneIcon}>↑</div>
-                <div style={styles.dropZoneLabel}>Drop your resume here</div>
-                <div style={styles.dropZoneBrowse}>or browse files</div>
-                <div style={styles.dropZoneTypes}>PDF, TXT, Markdown</div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
-                  style={{ display: "none" }}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleUploadAndParse(file);
-                    e.target.value = "";
-                  }}
-                />
-              </div>
-              <div style={styles.featureGrid}>
-                <div style={styles.featureCard}>
-                  <div style={styles.featureCardTitle}>AI Resume Parsing</div>
-                  <div style={styles.featureCardDesc}>Extracts every detail automatically</div>
-                </div>
-                <div style={styles.featureCard}>
-                  <div style={styles.featureCardTitle}>Live Job Search</div>
-                  <div style={styles.featureCardDesc}>Real openings in India & worldwide</div>
-                </div>
-                <div style={styles.featureCard}>
-                  <div style={styles.featureCardTitle}>Match Scoring</div>
-                  <div style={styles.featureCardDesc}>% fit shown on every job card</div>
-                </div>
-                <div style={styles.featureCard}>
-                  <div style={styles.featureCardTitle}>Smart Edits</div>
-                  <div style={styles.featureCardDesc}>Approve AI suggestions one by one</div>
-                </div>
-              </div>
-              <p style={{ textAlign: "center", marginTop: 24, fontSize: 12, color: "var(--rq-text-3)" }}>
-                <button
-                  type="button"
-                  style={{ ...styles.ghostButton, fontSize: 12 }}
-                  onClick={() => {
-                    track("sample_resume_used");
-                    setResume(SAMPLE_RESUME);
-                    setStep("select");
-                  }}
-                >
-                  Use sample resume instead
-                </button>
-              </p>
-            </section>
+            <UploadStep
+              error={parsingError}
+              onFile={handleUploadAndParse}
+              onSample={() => {
+                track("sample_resume_used");
+                setResume(SAMPLE_RESUME);
+                setStep("select");
+              }}
+            />
           )}
 
           {step === "parsing" && (
