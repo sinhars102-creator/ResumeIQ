@@ -44,7 +44,7 @@ const FAQS = [
   },
   {
     q: "Where do the jobs come from?",
-    a: "Public listings from Indian job portals and company career pages, refreshed daily. Duplicates and expired roles are removed before you see them.",
+    a: "Company career pages (through the public job boards of Greenhouse, Lever, Ashby and Workable), Adzuna India and LinkedIn. When the same role shows up in more than one place, you see it once, with the fullest job description.",
   },
   {
     q: "What happens to my resume data?",
@@ -91,7 +91,7 @@ export default function Landing({ onStart }) {
             <p className="lp-pill">Built for job seekers in India</p>
             <h1>Find jobs you fit. Tailor your resume. Let us fill the form.</h1>
             <p className="lp-hero-sub">
-              ResumeIQ scans Naukri, LinkedIn, Instahyre and company career pages, scores your fit for every role,
+              ResumeIQ pulls fresh openings from company career pages, LinkedIn and Indian job boards, scores your fit for every role,
               and tailors your resume line by line, with every edit approved by you. Then our Chrome extension fills
               the whole application for you: details, CTC, notice period, resume upload and screening answers.
             </p>
@@ -161,7 +161,7 @@ export default function Landing({ onStart }) {
           <div className="lp-wrap lp-strip-inner">
             <p className="lp-strip-label">Fresh roles from</p>
             <div className="lp-strip-names">
-              <span>Naukri</span><span>LinkedIn</span><span>Instahyre</span><span>Foundit</span><span>Hirist</span><span>Company career pages</span>
+              <span>Company career pages</span><span>LinkedIn</span><span>Adzuna</span><span>Greenhouse</span><span>Lever</span><span>Ashby</span>
             </div>
           </div>
         </section>

@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "server": "node server/index.js",
     "start": "node server/index.js",
-    "dev:all": "concurrently \"npm run dev\" \"npm run server\""
+    "dev:all": "concurrently \"npm run dev\" \"npm run server\"",
+    "test": "node --test \"server/**/*.test.js\"",
+    "check-sources": "node scripts/check-job-sources.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
