@@ -95,14 +95,29 @@ export function isIndiaLocation(location, { allowRemote = true } = {}) {
 const STOP = new Set(["and", "or", "of", "the", "a", "an", "in", "for", "to", "with", "at", "on", "senior", "sr", "jr", "junior", "lead", "ii", "iii", "i"]);
 const tokens = (s) => String(s || "").toLowerCase().split(/[^a-z0-9+#]+/).filter((t) => t && !STOP.has(t));
 
-/** A role matches when every meaningful keyword token appears in its title (e.g. "product manager"). */
+// Searching for a "leader" means a senior level, which titles spell as Head / Director / VP / Group …
+const LEADERSHIP_QUERY = new Set(["leader", "leaders", "leadership", "head", "director", "vp"]);
+const LEADERSHIP_TITLE = new Set(["head", "director", "vp", "vice", "president", "chief", "principal", "group", "leader", "leadership", "cpo", "gpm"]);
+// A title naming another function ("Product Designer", "Product Marketing Manager") is a different job.
+const OTHER_FUNCTION = ["designer", "design", "marketing", "marketer", "engineer", "engineering", "developer", "sales", "support", "recruiter"];
+
+/**
+ * A role matches when every meaningful keyword appears in its title (e.g. "product manager"), with
+ * leadership words matched by level ("Product Leader" ↔ "Director - Product", "Group Product Manager")
+ * and titles from another function left out unless the search names that function.
+ */
 export function titleMatches(role, keywords) {
   const want = tokens(keywords);
   if (!want.length) return true;
   const have = new Set(tokens(role));
-  // allow simple plurals / abbreviations ("pm" ↔ "product manager")
-  if (want.join(" ") === "product manager" && have.has("pm")) return true;
-  return want.every((t) => have.has(t) || have.has(`${t}s`) || (t.endsWith("s") && have.has(t.slice(0, -1))));
+  // "PM" / "GPM" in a title stands for product manager.
+  if (have.has("pm") || have.has("gpm")) ["product", "manager"].forEach((t) => have.add(t));
+  const hasWord = (t) => have.has(t) || have.has(`${t}s`) || (t.endsWith("s") && have.has(t.slice(0, -1)));
+
+  if (OTHER_FUNCTION.some((f) => have.has(f) && !want.some((t) => t.startsWith(f.slice(0, 6))))) return false;
+  return want.every((t) =>
+    LEADERSHIP_QUERY.has(t) ? [...have].some((h) => LEADERSHIP_TITLE.has(h)) : hasWord(t),
+  );
 }
 
 /** Key used to drop the same role posted on several sources. */

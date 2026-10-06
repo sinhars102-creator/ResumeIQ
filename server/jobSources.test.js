@@ -145,6 +145,21 @@ test("titleMatches requires every keyword, ignores seniority words", () => {
   assert.ok(titleMatches("Anything", ""));
 });
 
+test("titleMatches reads leadership searches as a level and skips other functions", () => {
+  assert.ok(titleMatches("Director - Product", "Product Leader"));
+  assert.ok(titleMatches("Group Product Manager (Manager Effectiveness)", "Product Leader"));
+  assert.ok(titleMatches("Principal Product Manager", "Product Leader"));
+  assert.ok(titleMatches("Head of Product", "Product Leader"));
+  assert.ok(!titleMatches("Senior Product Manager", "Product Leader"));
+  assert.ok(!titleMatches("Lead Product Designer", "Product Leader"));
+  assert.ok(!titleMatches("Director of Product Design", "Product Leader"));
+  assert.ok(!titleMatches("VP Engineering", "Product Leader"));
+  assert.ok(!titleMatches("Product Marketing Manager", "Product Manager"));
+  assert.ok(!titleMatches("Senior Manager - Production", "Product Manager"));
+  assert.ok(titleMatches("Senior Product Designer", "Product Designer"));
+  assert.ok(titleMatches("Engineering Manager, Payments", "Engineering Manager"));
+});
+
 test("normalizers map each API to ResumeIQ's job shape", () => {
   const gh = normalizeGreenhouse(GREENHOUSE.jobs[0], { name: "Postman", slug: "postman" });
   assert.equal(gh.id, "gh-postman-7814498003");
