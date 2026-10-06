@@ -300,3 +300,19 @@ test("searches are grouped by a normalised key", async () => {
   assert.equal(normalizeQuery("Data Analyst"), "data analyst");
   assert.equal(normalizeQuery(""), "");
 });
+
+test("All Jobs Scraper items map to Naukri and Glassdoor roles", async () => {
+  const { normalizeAllJobsItem } = await import("./allJobsScraper.js");
+  const naukri = normalizeAllJobsItem({
+    platform: "Naukri.com", title: "Product Manager", company_name: "Niyo Solutions",
+    location: { raw: "Bengaluru" }, description: "Own the roadmap",
+    platform_url: "https://www.naukri.com/job-listings-product-manager-niyo-solutions-bengaluru-2-to-7-years-061026504587",
+  });
+  assert.equal(naukri.id, "naukri-061026504587");
+  assert.equal(naukri.source, "naukri");
+  assert.equal(naukri.location, "Bengaluru");
+  const gd = normalizeAllJobsItem({ platform: "Glassdoor", title: "PM", platform_url: "https://www.glassdoor.co.in/job-listing/j?jl=1010274301068", salary_minimum: 1500000, salary_maximum: 2500000, salary_currency: "INR", salary_period: "year" });
+  assert.equal(gd.id, "glassdoor-1010274301068");
+  assert.equal(gd.salary, "INR 15,00,000–25,00,000 per year");
+  assert.equal(normalizeAllJobsItem({ platform: "Indeed", platform_url: "https://in.indeed.com/viewjob?jk=1" }), null);
+});

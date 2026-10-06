@@ -24,9 +24,12 @@ const SOURCE_LABELS = {
   ashby: "Career page",
   workable: "Career page",
   adzuna: "Adzuna",
+  naukri: "Naukri",
+  glassdoor: "Glassdoor",
 };
 const sourceLabel = (source) => SOURCE_LABELS[source] || null;
-const postingLinkText = (source) => (source === "linkedin" ? "on LinkedIn" : source === "adzuna" ? "on Adzuna" : "on the company's career page");
+const SOURCE_SITES = { linkedin: "LinkedIn", adzuna: "Adzuna", naukri: "Naukri", glassdoor: "Glassdoor" };
+const postingLinkText = (source) => (SOURCE_SITES[source] ? `on ${SOURCE_SITES[source]}` : "on the company's career page");
 
 const SAMPLE_RESUME = {
   name: "Alex Chen",

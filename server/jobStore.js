@@ -29,11 +29,11 @@ function db() {
 
 /**
  * The id a role has at its source. ResumeIQ ids carry a source and board prefix
- * ("lever-fampay-<id>", "gh-truecaller-<id>", "adzuna-<id>"); LinkedIn's are bare.
+ * ("lever-fampay-<id>", "gh-truecaller-<id>", "adzuna-<id>", "naukri-<id>"); LinkedIn's are bare.
  */
 export function sourceJobId(job, board = null) {
   const id = String(job.id || "");
-  const prefix = { greenhouse: "gh", lever: "lever", ashby: "ashby", workable: "workable", adzuna: "adzuna" }[job.source];
+  const prefix = { greenhouse: "gh", lever: "lever", ashby: "ashby", workable: "workable", adzuna: "adzuna", naukri: "naukri", glassdoor: "glassdoor" }[job.source];
   if (!prefix) return id;
   const full = board ? `${prefix}-${board}-` : `${prefix}-`;
   return id.startsWith(full) ? id.slice(full.length) : id;
@@ -235,7 +235,7 @@ export async function companyNamesFromJobs(sources = ["linkedin", "adzuna"]) {
 
 /* ---------- Reading roles back for the app ---------- */
 
-const ID_PREFIX = { greenhouse: "gh", lever: "lever", ashby: "ashby", workable: "workable", adzuna: "adzuna" };
+const ID_PREFIX = { greenhouse: "gh", lever: "lever", ashby: "ashby", workable: "workable", adzuna: "adzuna", naukri: "naukri", glassdoor: "glassdoor" };
 
 /** jobs table row → ResumeIQ job, with the same id the source's live search would give it. */
 export function fromRow(row) {
