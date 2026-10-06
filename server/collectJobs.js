@@ -1,15 +1,17 @@
 /**
  * Jobs collector: pulls roles from every source into the Supabase jobs repository.
  *
- *   npm run collect                                  everything, in order: linkedin, adzuna, discover, boards
+ *   npm run collect                                  daily run: adzuna, discover, boards (LinkedIn excluded)
+ *   npm run collect -- --sources=linkedin            refresh LinkedIn for searches asked in the last 14 days
  *   npm run collect -- --sources=boards              only company career boards
  *   npm run collect -- --sources=discover            only look for new companies' boards
  *   npm run collect -- --sources=linkedin --queries="Product Manager" --limit=10
  *   npm run collect -- --dry-run                     fetch and count, write nothing
  *
  * Career boards (Greenhouse, Lever, Ashby, Workable) are pulled in full, and roles
- * that leave a board are marked closed. LinkedIn is demand-driven: it refreshes the searches
- * users asked for in the last DEMAND_DAYS (public.search_demand). Adzuna runs the queries in
+ * that leave a board are marked closed. LinkedIn is demand-driven and refreshed when a user
+ * searches (24h freshness, server/index.js), so the daily run skips it; run it explicitly to
+ * refresh the searches users asked for in the last DEMAND_DAYS (public.search_demand). Adzuna runs the queries in
  * server/collectQueries.js. Search-based roles close after 14 days unseen.
  * Discovery looks for boards for companies seen in those postings and in the curated list
  * (server/curatedCompanies.js); boards it finds are collected from then on.
@@ -185,9 +187,8 @@ export async function collectLinkedIn({ queries, limit = LINKEDIN_PER_QUERY, dry
     }
   });
 
-  const closed = dryRun ? 0 : await closeStale("linkedin", SEARCH_STALE_DAYS);
   const status = failed.length === 0 ? "ok" : failed.length < searches.length ? "partial" : "failed";
-  const result = { status, fetched, upserted, closed, details: { perQuery, failed } };
+  const result = { status, fetched, upserted, closed: 0, details: { perQuery, failed } };
   await endRun(run, result);
   return result;
 }
@@ -215,11 +216,13 @@ export async function collectAdzuna({ queries = COLLECT_QUERIES, limit = ADZUNA_
   return result;
 }
 
-// Default order matters: search sources first, so discovery sees their companies the same run.
+// Order matters: search sources first, so discovery sees their companies the same run.
 const COLLECTORS = { linkedin: collectLinkedIn, adzuna: collectAdzuna, discover: discoverCompanies, boards: collectCareerBoards };
+// LinkedIn is refreshed on demand when users search, so the daily run leaves it out.
+const DAILY_SOURCES = ["adzuna", "discover", "boards"];
 
 /** Runs the chosen collectors one after another; one failing never stops the others. */
-export async function collectAll({ sources = Object.keys(COLLECTORS), queries, limit, dryRun = false } = {}) {
+export async function collectAll({ sources = DAILY_SOURCES, queries, limit, dryRun = false } = {}) {
   if (!dryRun && !jobStoreConfigured()) {
     throw new Error("Supabase is not configured – set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or use --dry-run)");
   }
@@ -227,6 +230,10 @@ export async function collectAll({ sources = Object.keys(COLLECTORS), queries, l
   if (!dryRun) {
     const removed = await deleteOutOfScope();
     if (removed) console.log(`[collect] removed ${removed} roles outside the India-only scope`);
+    // LinkedIn can't tell us a role closed, so ones unseen for SEARCH_STALE_DAYS are closed here,
+    // whether or not this run searched LinkedIn.
+    const stale = await closeStale("linkedin", SEARCH_STALE_DAYS);
+    if (stale) console.log(`[collect] closed ${stale} LinkedIn roles unseen for ${SEARCH_STALE_DAYS} days`);
   }
   for (const source of sources) {
     const started = Date.now();
