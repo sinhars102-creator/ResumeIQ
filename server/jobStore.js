@@ -199,7 +199,11 @@ export async function listCompanies({ status } = {}) {
 /** Add companies we don't know yet (by name_key); existing rows are left alone. Returns how many were new. */
 export async function addCompanies(companies) {
   const rows = [...new Map(
-    companies.filter((c) => companyKey(c.name)).map((c) => [companyKey(c.name), { ...c, name_key: companyKey(c.name) }]),
+    // Every row carries every column: in a bulk insert, a missing key becomes null, not the column default.
+    companies.filter((c) => companyKey(c.name)).map((c) => [companyKey(c.name), {
+      name: c.name, name_key: companyKey(c.name), ats: c.ats || null, slug: c.slug || null,
+      origin: c.origin || "curated", status: c.status || "unprobed",
+    }]),
   ).values()];
   let added = 0;
   for (let i = 0; i < rows.length; i += UPSERT_BATCH) {
