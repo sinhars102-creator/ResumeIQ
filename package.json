@@ -12,10 +12,12 @@
     "start": "node server/index.js",
     "dev:all": "concurrently \"npm run dev\" \"npm run server\"",
     "test": "node --test \"server/**/*.test.js\"",
-    "check-sources": "node scripts/check-job-sources.mjs"
+    "check-sources": "node scripts/check-job-sources.mjs",
+    "collect": "node --env-file-if-exists=.env server/collectJobs.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
+    "@supabase/supabase-js": "^2.117.2",
     "@vercel/analytics": "^1.6.1",
     "cheerio": "^1.2.0",
     "cors": "^2.8.5",

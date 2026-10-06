@@ -250,3 +250,24 @@ test("searchApiSources combines sources, newest first", async () => {
   assert.equal(sources.adzuna.found, 2);
   assert.equal(jobs[0].id, "adzuna-4911024925", "dated job sorts before undated");
 });
+
+test("jobs repository rows keep the source, its own id and link", async () => {
+  const { toRow, sourceJobId } = await import("./jobStore.js");
+  const lever = { id: "lever-fampay-bc10", source: "lever", company: "Fam", role: "Senior PM", location: "Bengaluru", url: "https://jobs.lever.co/fampay/bc10", jd: "Own UPI" };
+  const row = toRow(lever, { board: "fampay", seenAt: "2026-10-06T00:00:00Z" });
+  assert.equal(row.id, "lever:bc10");
+  assert.equal(row.source_job_id, "bc10");
+  assert.equal(row.source_board, "fampay");
+  assert.equal(row.source_url, "https://jobs.lever.co/fampay/bc10");
+  assert.equal(row.is_india, true);
+  assert.equal(row.last_seen_at, "2026-10-06T00:00:00Z");
+  assert.deepEqual(row.source_query, []);
+
+  const li = toRow({ id: "4012345678", source: "linkedin", company: "Acme", role: "PM", location: "Remote - Estonia" }, { query: "Product Manager" });
+  assert.equal(li.id, "linkedin:4012345678");
+  assert.equal(li.is_india, false);
+  assert.deepEqual(li.source_query, ["Product Manager"]);
+
+  assert.equal(sourceJobId({ id: "gh-truecaller-77", source: "greenhouse" }, "truecaller"), "77");
+  assert.equal(sourceJobId({ id: "adzuna-55", source: "adzuna" }), "55");
+});
