@@ -271,3 +271,24 @@ test("jobs repository rows keep the source, its own id and link", async () => {
   assert.equal(sourceJobId({ id: "gh-truecaller-77", source: "greenhouse" }, "truecaller"), "77");
   assert.equal(sourceJobId({ id: "adzuna-55", source: "adzuna" }), "55");
 });
+
+test("India-only scope keeps India and country-less remote roles", async () => {
+  const { isRemoteAnywhere } = await import("./jobSources.js");
+  const { toRow, inScope } = await import("./jobStore.js");
+  assert.ok(isRemoteAnywhere("Remote"));
+  assert.ok(isRemoteAnywhere("Remote - Anywhere"));
+  assert.ok(!isRemoteAnywhere("Remote - Estonia"));
+  assert.ok(!isRemoteAnywhere("Remote-Friendly (Travel-Required) | Washington, DC"));
+  const row = (location) => toRow({ id: "1", source: "linkedin", company: "A", role: "PM", location });
+  assert.ok(inScope(row("Bengaluru, Karnataka")));
+  assert.ok(inScope(row("Remote")));
+  assert.ok(!inScope(row("Remote - Estonia")));
+  assert.ok(!inScope(row("San Francisco, CA")));
+});
+
+test("board name guesses come from the brand in a registered name", async () => {
+  const { slugCandidates } = await import("./companyDiscovery.js");
+  assert.deepEqual(slugCandidates("Razorpay Software Pvt Ltd"), ["razorpaysoftware", "razorpay-software", "razorpay"]);
+  assert.deepEqual(slugCandidates("Yellow.ai"), ["yellowai", "yellow-ai"]);
+  assert.deepEqual(slugCandidates(""), []);
+});

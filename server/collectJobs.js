@@ -1,20 +1,28 @@
 /**
  * Jobs collector: pulls roles from every source into the Supabase jobs repository.
  *
- *   npm run collect                                  all sources, all queries
+ *   npm run collect                                  everything, in order: linkedin, adzuna, discover, boards
  *   npm run collect -- --sources=boards              only company career boards
+ *   npm run collect -- --sources=discover            only look for new companies' boards
  *   npm run collect -- --sources=linkedin --queries="Product Manager" --limit=10
  *   npm run collect -- --dry-run                     fetch and count, write nothing
  *
  * Career boards (Greenhouse, Lever, Ashby, Workable) are pulled in full, and roles
  * that leave a board are marked closed. LinkedIn and Adzuna only answer searches, so
  * they run the queries in server/collectQueries.js; their roles close after 14 days unseen.
+ * Discovery looks for boards for companies seen in those postings and in the curated list
+ * (server/curatedCompanies.js); boards it finds are collected from then on.
+ *
+ * The repository is India-only: India roles plus remote roles that name no country.
  */
 import { pathToFileURL } from "url";
 import { loadCompanies, fetchBoard, searchAdzuna, adzunaConfigured } from "./jobSources.js";
+import { probeCompany, countScope } from "./companyDiscovery.js";
+import CURATED_COMPANIES from "./curatedCompanies.js";
 import { searchLinkedInRun } from "./linkedinJobs.js";
 import {
-  jobStoreConfigured, toRow, upsertJobs, closeMissingFromBoard, closeStale, startRun, finishRun, storeStats,
+  jobStoreConfigured, toRow, inScope, upsertJobs, closeMissingFromBoard, closeStale, startRun, finishRun, storeStats,
+  deleteOutOfScope, listCompanies, addCompanies, updateCompany, companyNamesFromJobs,
 } from "./jobStore.js";
 import { COLLECT_QUERIES, COLLECT_LOCATION, LINKEDIN_PER_QUERY, ADZUNA_PER_QUERY } from "./collectQueries.js";
 
@@ -23,6 +31,9 @@ const BOARD_CONCURRENCY = 6;
 const BOARD_TIMEOUT_MS = 60000;
 const SEARCH_STALE_DAYS = 14;
 const LINKEDIN_CONCURRENCY = 3;
+const DISCOVER_CONCURRENCY = 8;
+const DISCOVER_PER_RUN = 500; // companies probed per run; the rest wait for the next run
+const REPROBE_DAYS = 30; // look again for companies with no (India) board after this long
 
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
@@ -48,10 +59,10 @@ async function endRun(run, result) {
   if (run.id) await finishRun(run.id, result);
 }
 
-/** Every open role on every company career board. */
+/** Every open role on every active company career board (public.companies). */
 export async function collectCareerBoards({ dryRun = false } = {}) {
   const run = await beginRun("career_boards", dryRun);
-  const companies = loadCompanies();
+  const companies = await listCompanies({ status: "active" });
   const failed = [];
   let fetched = 0;
   let upserted = 0;
@@ -61,14 +72,21 @@ export async function collectCareerBoards({ dryRun = false } = {}) {
     try {
       const jobs = await fetchBoard(company, { fresh: true, timeoutMs: BOARD_TIMEOUT_MS });
       fetched += jobs.length;
+      const india = countScope(jobs);
       if (dryRun) return;
-      const rows = jobs.map((job) => toRow(job, { board: company.slug, seenAt: run.started_at }));
+      const rows = jobs.map((job) => toRow(job, { board: company.slug, seenAt: run.started_at })).filter(inScope);
       // Boards run in parallel: add each result after its await, or concurrent updates are lost.
       const saved = await upsertJobs(rows);
       upserted += saved;
       // Only a board that answered can tell us which of its roles are gone.
       const gone = await closeMissingFromBoard(company.ats, company.slug, run.started_at);
       closed += gone;
+      await updateCompany(company.id, {
+        total_open_roles: jobs.length,
+        india_open_roles: india,
+        last_collected_at: run.started_at,
+        ...(india === 0 ? { status: "no_india", last_probed_at: run.started_at } : {}),
+      });
     } catch (e) {
       failed.push(`${company.ats}:${company.slug} (${e.name === "AbortError" ? "timeout" : e.message})`);
     }
@@ -76,6 +94,57 @@ export async function collectCareerBoards({ dryRun = false } = {}) {
 
   const status = failed.length === 0 ? "ok" : failed.length < companies.length ? "partial" : "failed";
   const result = { status, fetched, upserted, closed, details: { boards: companies.length, failed } };
+  await endRun(run, result);
+  return result;
+}
+
+/**
+ * Look for career boards for companies we know by name: the seed boards and curated list
+ * (added once), companies on collected LinkedIn/Adzuna roles, and companies whose last
+ * check found nothing more than REPROBE_DAYS ago.
+ */
+export async function discoverCompanies({ dryRun = false } = {}) {
+  const run = await beginRun("discover", dryRun);
+  const seeded = await addCompanies([
+    ...loadCompanies().map((c) => ({ name: c.name, ats: c.ats, slug: c.slug, origin: "seed", status: "active" })),
+    ...CURATED_COMPANIES.map((name) => ({ name, origin: "curated" })),
+  ]);
+  const learned = await addCompanies((await companyNamesFromJobs()).map((name) => ({ name, origin: "discovered" })));
+
+  const reprobeBefore = Date.now() - REPROBE_DAYS * 24 * 60 * 60 * 1000;
+  const due = (await listCompanies({ status: ["unprobed", "no_board", "no_india"] }))
+    .filter((c) => c.status === "unprobed" || !c.last_probed_at || Date.parse(c.last_probed_at) < reprobeBefore)
+    .sort((a, b) => (a.status === "unprobed" ? 0 : 1) - (b.status === "unprobed" ? 0 : 1))
+    .slice(0, DISCOVER_PER_RUN);
+
+  const found = [];
+  let errors = 0;
+  await mapLimit(due, DISCOVER_CONCURRENCY, async (company) => {
+    try {
+      const board = await probeCompany(company.name);
+      if (board?.india > 0) found.push(`${company.name} → ${board.ats}:${board.slug} (${board.india} India)`);
+      if (dryRun) return;
+      const patch = board
+        ? { ats: board.ats, slug: board.slug, status: board.india > 0 ? "active" : "no_india", total_open_roles: board.total, india_open_roles: board.india }
+        : { status: "no_board" };
+      try {
+        await updateCompany(company.id, { ...patch, last_probed_at: run.started_at });
+      } catch {
+        // Another company already owns this board (same ats + slug): don't collect it twice.
+        await updateCompany(company.id, { status: "no_board", last_probed_at: run.started_at });
+      }
+    } catch {
+      errors += 1;
+    }
+  });
+
+  const result = {
+    status: "ok",
+    fetched: due.length,
+    upserted: found.length,
+    closed: 0,
+    details: { seeded, learned, probed: due.length, boardsFound: found.length, errors, found },
+  };
   await endRun(run, result);
   return result;
 }
@@ -97,7 +166,7 @@ export async function collectLinkedIn({ queries = COLLECT_QUERIES, limit = LINKE
       perQuery[query] = jobs.length;
       fetched += jobs.length;
       if (!dryRun && jobs.length) {
-        const saved = await upsertJobs(jobs.map((job) => toRow(job, { query, seenAt: run.started_at })));
+        const saved = await upsertJobs(jobs.map((job) => toRow(job, { query, seenAt: run.started_at })).filter(inScope));
         upserted += saved;
       }
     } catch (e) {
@@ -125,7 +194,7 @@ export async function collectAdzuna({ queries = COLLECT_QUERIES, limit = ADZUNA_
     perQuery[query] = jobs.length;
     fetched += jobs.length;
     if (!dryRun && jobs.length) {
-      upserted += await upsertJobs(jobs.map((job) => toRow(job, { query, seenAt: run.started_at })));
+      upserted += await upsertJobs(jobs.map((job) => toRow(job, { query, seenAt: run.started_at })).filter(inScope));
     }
   }
 
@@ -135,7 +204,8 @@ export async function collectAdzuna({ queries = COLLECT_QUERIES, limit = ADZUNA_
   return result;
 }
 
-const COLLECTORS = { boards: collectCareerBoards, linkedin: collectLinkedIn, adzuna: collectAdzuna };
+// Default order matters: search sources first, so discovery sees their companies the same run.
+const COLLECTORS = { linkedin: collectLinkedIn, adzuna: collectAdzuna, discover: discoverCompanies, boards: collectCareerBoards };
 
 /** Runs the chosen collectors one after another; one failing never stops the others. */
 export async function collectAll({ sources = Object.keys(COLLECTORS), queries, limit, dryRun = false } = {}) {
@@ -143,6 +213,10 @@ export async function collectAll({ sources = Object.keys(COLLECTORS), queries, l
     throw new Error("Supabase is not configured – set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (or use --dry-run)");
   }
   const results = {};
+  if (!dryRun) {
+    const removed = await deleteOutOfScope();
+    if (removed) console.log(`[collect] removed ${removed} roles outside the India-only scope`);
+  }
   for (const source of sources) {
     const started = Date.now();
     try {

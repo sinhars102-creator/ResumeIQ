@@ -5,7 +5,7 @@
  * service role key, which must never reach the browser.
  */
 import { createClient } from "@supabase/supabase-js";
-import { isIndiaLocation } from "./jobSources.js";
+import { isIndiaLocation, isRemoteAnywhere } from "./jobSources.js";
 
 const UPSERT_BATCH = 500;
 // Existing rows are looked up by id in the request URL; long ids (Lever UUIDs) overflow it past ~100.
@@ -54,6 +54,7 @@ export function toRow(job, { board = null, query = null, raw = null, seenAt = ne
     title: job.role || "Role",
     location: job.location || null,
     is_india: isIndiaLocation(job.location, { allowRemote: false }),
+    remote_anywhere: isRemoteAnywhere(job.location),
     salary: job.salary || null,
     description: job.jd || null,
     posted_at: job.postedAt || null,
@@ -61,6 +62,11 @@ export function toRow(job, { board = null, query = null, raw = null, seenAt = ne
     last_seen_at: seenAt,
     closed_at: null,
   };
+}
+
+/** The repository is India-only: India roles plus remote roles that name no country. */
+export function inScope(row) {
+  return row.is_india || row.remote_anywhere;
 }
 
 /**
@@ -152,4 +158,73 @@ export async function storeStats() {
     open: await count(base().is("closed_at", null)),
     openIndia: await count(base().is("closed_at", null).eq("is_india", true)),
   };
+}
+
+/** Remove stored roles outside the India-only scope (e.g. from runs before the scope was set). */
+export async function deleteOutOfScope() {
+  const { data, error } = await db()
+    .from("jobs")
+    .delete()
+    .eq("is_india", false)
+    .eq("remote_anywhere", false)
+    .select("id");
+  if (error) throw new Error(`removing out-of-scope roles failed: ${error.message}`);
+  return (data || []).length;
+}
+
+/* ---------- Company registry (public.companies) ---------- */
+
+/** Normalised company name used to avoid duplicates ("Razorpay Software Pvt. Ltd." → "razorpay software"). */
+export function companyKey(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/\b(private|pvt|limited|ltd|llp|inc|llc|corp|corporation|co|company|plc|gmbh)\b\.?/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+export async function listCompanies({ status } = {}) {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    let q = db().from("companies").select("*").order("id").range(from, from + 999);
+    if (status) q = Array.isArray(status) ? q.in("status", status) : q.eq("status", status);
+    const { data, error } = await q;
+    if (error) throw new Error(`listing companies failed: ${error.message}`);
+    out.push(...data);
+    if (data.length < 1000) return out;
+  }
+}
+
+/** Add companies we don't know yet (by name_key); existing rows are left alone. Returns how many were new. */
+export async function addCompanies(companies) {
+  const rows = [...new Map(
+    companies.filter((c) => companyKey(c.name)).map((c) => [companyKey(c.name), { ...c, name_key: companyKey(c.name) }]),
+  ).values()];
+  let added = 0;
+  for (let i = 0; i < rows.length; i += UPSERT_BATCH) {
+    const { data, error } = await db()
+      .from("companies")
+      .upsert(rows.slice(i, i + UPSERT_BATCH), { onConflict: "name_key", ignoreDuplicates: true })
+      .select("id");
+    if (error) throw new Error(`adding companies failed: ${error.message}`);
+    added += (data || []).length;
+  }
+  return added;
+}
+
+export async function updateCompany(id, patch) {
+  const { error } = await db().from("companies").update(patch).eq("id", id);
+  if (error) throw new Error(`updating company ${id} failed: ${error.message}`);
+}
+
+/** Distinct company names on roles from search-based sources, for board discovery. */
+export async function companyNamesFromJobs(sources = ["linkedin", "adzuna"]) {
+  const names = new Set();
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db().from("jobs").select("company").in("source", sources).order("id").range(from, from + 999);
+    if (error) throw new Error(`reading company names failed: ${error.message}`);
+    for (const r of data) if (r.company && r.company !== "Company") names.add(r.company.trim());
+    if (data.length < 1000) return [...names];
+  }
 }

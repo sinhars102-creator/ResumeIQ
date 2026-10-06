@@ -92,6 +92,16 @@ export function isIndiaLocation(location, { allowRemote = true } = {}) {
   return false;
 }
 
+// Words that only say "remote"; whatever remains after removing them names a place.
+const REMOTE_WORDS = /\b(remote|remote-friendly|fully|friendly|anywhere|worldwide|global|globally|work from home|wfh|distributed|travel|required|optional|first|only|based|hybrid)\b/g;
+
+/** True when a role is remote with no country or city stated ("Remote", "Remote - Anywhere", "Worldwide"). */
+export function isRemoteAnywhere(location) {
+  const loc = String(location || "").toLowerCase();
+  if (!/\bremote\b|\banywhere\b|\bworldwide\b|\bwork from home\b|\bwfh\b/.test(loc)) return false;
+  return loc.replace(REMOTE_WORDS, " ").replace(/[^a-z]+/g, "") === "";
+}
+
 const STOP = new Set(["and", "or", "of", "the", "a", "an", "in", "for", "to", "with", "at", "on", "senior", "sr", "jr", "junior", "lead", "ii", "iii", "i"]);
 const tokens = (s) => String(s || "").toLowerCase().split(/[^a-z0-9+#]+/).filter((t) => t && !STOP.has(t));
 
