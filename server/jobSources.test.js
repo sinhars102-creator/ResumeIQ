@@ -292,3 +292,11 @@ test("board name guesses come from the brand in a registered name", async () => 
   assert.deepEqual(slugCandidates("Yellow.ai"), ["yellowai", "yellow-ai"]);
   assert.deepEqual(slugCandidates(""), []);
 });
+
+test("searches are grouped by a normalised key", async () => {
+  const { normalizeQuery } = await import("./searchDemand.js");
+  assert.equal(normalizeQuery("Sr PM"), "senior product manager");
+  assert.equal(normalizeQuery("  Senior Product Manager jobs in India "), "senior product manager");
+  assert.equal(normalizeQuery("Data Analyst"), "data analyst");
+  assert.equal(normalizeQuery(""), "");
+});

@@ -232,3 +232,89 @@ export async function companyNamesFromJobs(sources = ["linkedin", "adzuna"]) {
     if (data.length < 1000) return [...names];
   }
 }
+
+/* ---------- Reading roles back for the app ---------- */
+
+const ID_PREFIX = { greenhouse: "gh", lever: "lever", ashby: "ashby", workable: "workable", adzuna: "adzuna" };
+
+/** jobs table row → ResumeIQ job, with the same id the source's live search would give it. */
+export function fromRow(row) {
+  const prefix = ID_PREFIX[row.source];
+  const id = !prefix ? row.source_job_id : row.source_board ? `${prefix}-${row.source_board}-${row.source_job_id}` : `${prefix}-${row.source_job_id}`;
+  return {
+    id,
+    company: row.company,
+    role: row.title,
+    location: row.location || "",
+    salary: row.salary || "",
+    badge: null,
+    source: row.source,
+    jd: row.description || "",
+    url: row.source_url || "",
+    postedAt: row.posted_at,
+    lastSeenAt: row.last_seen_at ? Date.parse(row.last_seen_at) : null,
+  };
+}
+
+const READ_COLUMNS = "id, source, source_job_id, source_board, source_url, company, title, location, salary, description, posted_at, last_seen_at";
+
+/**
+ * Open roles whose title (or company) contains every word of the search, newest first.
+ * The repository is India-only, so "India" needs no location filter; a city narrows it.
+ */
+export async function findStoredJobs({ keywords = "", location = "", limit = 60 } = {}) {
+  const words = String(keywords).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1);
+  if (!words.length) return [];
+  let q = db()
+    .from("jobs")
+    .select(READ_COLUMNS)
+    .is("closed_at", null)
+    .textSearch("search_text", words.join(" & "), { config: "simple" })
+    .order("last_seen_at", { ascending: false })
+    .limit(limit);
+  const place = String(location).trim();
+  if (place && !/^india$/i.test(place)) q = q.ilike("location", `%${place.replace(/[%_]/g, "")}%`);
+  const { data, error } = await q;
+  if (error) throw new Error(`reading stored roles failed: ${error.message}`);
+  return (data || []).map(fromRow);
+}
+
+/* ---------- Search demand (public.search_demand) ---------- */
+
+/** Count one user asking for a search; returns its demand row (with last_collected_at). */
+export async function recordDemand(queryKey, query) {
+  const { data, error } = await db().rpc("record_search_demand", { p_key: queryKey, p_query: query });
+  if (error) throw new Error(`recording search demand failed: ${error.message}`);
+  return Array.isArray(data) ? data[0] : data;
+}
+
+export async function markDemandCollected(queryKey, at = new Date().toISOString()) {
+  const { error } = await db().from("search_demand").update({ last_collected_at: at }).eq("query_key", queryKey);
+  if (error) console.warn(`[jobs-db] could not mark ${queryKey} collected: ${error.message}`);
+}
+
+/** LinkedIn roles stored for a search, open and newest first. */
+export async function linkedInJobsForQuery(queryKey, limit = 150) {
+  const { data, error } = await db()
+    .from("jobs")
+    .select(READ_COLUMNS)
+    .eq("source", "linkedin")
+    .is("closed_at", null)
+    .contains("source_query", [queryKey])
+    .order("last_seen_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`reading LinkedIn roles failed: ${error.message}`);
+  return (data || []).map(fromRow);
+}
+
+/** Searches someone asked for in the last `days` days, as the wording last typed. */
+export async function demandedQueries(days) {
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await db()
+    .from("search_demand")
+    .select("query_key, query")
+    .gte("last_asked_at", since)
+    .order("ask_count", { ascending: false });
+  if (error) throw new Error(`reading search demand failed: ${error.message}`);
+  return data || [];
+}

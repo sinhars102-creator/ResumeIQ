@@ -11,6 +11,10 @@ import { fileURLToPath } from "url";
 import * as cheerio from "cheerio";
 import { saveJobs, findJobs, repositorySize } from "./jobRepository.js";
 import { htmlToText, normalizeJob, fetchJobsApify, fetchJobsValig } from "./linkedinJobs.js";
+import {
+  jobStoreConfigured, toRow, inScope, upsertJobs, findStoredJobs, recordDemand, markDemandCollected, linkedInJobsForQuery,
+} from "./jobStore.js";
+import { normalizeQuery, FRESH_HOURS } from "./searchDemand.js";
 import { searchApiSources, adzunaConfigured, loadCompanies } from "./jobSources.js";
 import { callLLM, llmProvider, llmModel, LLMUserError } from "./llm.js";
 
@@ -30,7 +34,7 @@ const cwdEnv = resolve(process.cwd(), ".env");
 const ENV_KEYS = [
   "RAPIDAPI_KEY", "APIFY_TOKEN", "APIFY_API_TOKEN", "RXRESUME_API_KEY", "RXRESUME_URL",
   "GROQ_API_KEY", "GROQ_MODEL", "ANTHROPIC_API_KEY", "VITE_ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_EFFORT", "GROQ_FALLBACK_MODELS", "LLM_PROVIDER",
-  "ADZUNA_APP_ID", "ADZUNA_APP_KEY",
+  "ADZUNA_APP_ID", "ADZUNA_APP_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
 ];
 
 function loadEnvFile(filePath) {
@@ -242,17 +246,42 @@ app.post("/api/assistant", async (req, res) => {
  * Saved roles from earlier live searches that match this one – returns
  * instantly so the job grid isn't empty while /api/linkedin-jobs scrapes.
  */
-app.get("/api/jobs/saved", (req, res) => {
+app.get("/api/jobs/saved", async (req, res) => {
   const keywords = (req.query.keywords || "").trim();
   const location = (req.query.location || "").trim();
   const levels = String(req.query.experienceLevel || "")
     .split(",")
     .map((x) => x.trim())
     .filter((x) => /^[1-6]$/.test(x));
+  // The Supabase jobs repository (every source) when configured; otherwise the local file.
+  if (jobStoreConfigured()) {
+    try {
+      const jobs = await findStoredJobs({ keywords, location, limit: Math.min(Number(req.query.limit) || 100, 200) });
+      return res.json({ jobs, repository: "supabase" });
+    } catch (err) {
+      console.warn("[jobs-db] saved roles lookup failed, using the local file:", err.message);
+    }
+  }
   const limit = Math.min(Number(req.query.limit) || 30, 100);
   const jobs = findJobs({ keywords, location, levels, limit });
   res.json({ jobs, repositorySize: repositorySize() });
 });
+
+const isIndiaSearch = (location) => !location || /^india$/i.test(String(location).trim());
+
+/** Save a live LinkedIn search to the Supabase repository, tagged with its normalised search. */
+async function storeLinkedInResults(jobs, keywords, location) {
+  if (!jobStoreConfigured() || !isIndiaSearch(location) || !normalizeQuery(keywords)) return;
+  const key = normalizeQuery(keywords);
+  try {
+    const rows = jobs.filter((job) => /^\d+$/.test(job.id)).map((job) => toRow(job, { query: key })).filter(inScope);
+    const saved = await upsertJobs(rows);
+    await markDemandCollected(key);
+    console.log(`[jobs-db] live search "${key}" – ${saved} roles saved`);
+  } catch (err) {
+    console.warn("[jobs-db] saving live search failed:", err.message);
+  }
+}
 
 /**
  * Roles from sources with official public APIs: company career boards on Greenhouse,
@@ -308,6 +337,24 @@ app.post("/api/linkedin-jobs/start", async (req, res) => {
   if (!token) return res.status(400).json({ error: "Live search not configured", fallback: true });
   const { keywords, location, limit, experienceLevel } = req.body || {};
   const levels = parseExperienceLevels(experienceLevel);
+  // Demand-driven: count the ask, and serve a search collected in the last FRESH_HOURS
+  // from the repository instead of paying for another live run.
+  const key = normalizeQuery(keywords);
+  if (jobStoreConfigured() && key && isIndiaSearch(location)) {
+    try {
+      const demand = await recordDemand(key, String(keywords).trim());
+      const collected = demand?.last_collected_at ? Date.parse(demand.last_collected_at) : 0;
+      if (Date.now() - collected < FRESH_HOURS * 60 * 60 * 1000) {
+        const jobs = await linkedInJobsForQuery(key);
+        if (jobs.length) {
+          console.log(`[jobs-db] "${key}" served from repository – ${jobs.length} roles, no live run`);
+          return res.json({ cached: true, jobs });
+        }
+      }
+    } catch (err) {
+      console.warn("[jobs-db] demand/cache check failed, searching live:", err.message);
+    }
+  }
   try {
     const { data } = await apifyJson(`/acts/${VALIG_ACTOR}/runs?timeout=180`, token, {
       method: "POST",
@@ -362,6 +409,7 @@ app.get("/api/linkedin-jobs/results", async (req, res) => {
       levels: parseExperienceLevels(req.query.experienceLevel),
     });
     console.log(`[jobs-repo] live search – ${jobs.length} roles, ${added} new, ${total} in repository`);
+    await storeLinkedInResults(jobs, req.query.keywords, location);
     return res.json({ jobs });
   } catch (err) {
     console.warn("[linkedin-jobs] results failed:", err.message);
@@ -382,9 +430,10 @@ app.get("/api/linkedin-jobs", async (req, res) => {
     .map((x) => x.trim())
     .filter((x) => /^[1-6]$/.test(x));
 
-  const respondWithJobs = (result) => {
+  const respondWithJobs = async (result) => {
     const { added, total } = saveJobs(result.jobs, { location, levels: experienceLevels });
     console.log(`[jobs-repo] saved search – ${added} new roles, ${total} in repository`);
+    await storeLinkedInResults(result.jobs, keywords, location);
     return res.json(result);
   };
 

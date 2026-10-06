@@ -1,10 +1,9 @@
 /**
- * Searches the collector runs on search-based sources (LinkedIn, Adzuna), which have
- * no "list every role" API. Every result is stored, so this list decides coverage:
- * add a role family here to start collecting it. Career boards need no queries –
- * they are pulled in full.
+ * Searches the collector runs on Adzuna, which has no "list every role" API. LinkedIn
+ * doesn't use this list: it is demand-driven, collecting the searches users ask for
+ * (public.search_demand). Career boards need no queries – they are pulled in full.
  *
- * Cost: each LinkedIn query is one Apify run of up to LINKEDIN_PER_QUERY roles.
+ * Cost: each LinkedIn search is one Apify run of up to LINKEDIN_PER_QUERY roles (~$0.04 per 100).
  */
 export const COLLECT_LOCATION = "India";
 export const LINKEDIN_PER_QUERY = 100;

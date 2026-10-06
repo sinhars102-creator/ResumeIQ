@@ -3466,7 +3466,10 @@ export default function ResumeIQ() {
       })
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null);
-      if (started?.runId && started?.datasetId) {
+      if (started?.cached && Array.isArray(started.jobs)) {
+        // Searched recently by someone: served from the jobs repository, no live run.
+        liveJobs = started.jobs;
+      } else if (started?.runId && started?.datasetId) {
         const run = new URLSearchParams({ runId: started.runId, datasetId: started.datasetId });
         let status = "RUNNING";
         while (isCurrent() && ["READY", "RUNNING"].includes(status)) {
@@ -3480,7 +3483,7 @@ export default function ResumeIQ() {
         }
         if (!isCurrent()) return;
         if (status === "SUCCEEDED") {
-          const results = new URLSearchParams({ datasetId: started.datasetId, location, experienceLevel: levels.join(",") });
+          const results = new URLSearchParams({ datasetId: started.datasetId, keywords, location, experienceLevel: levels.join(",") });
           const data = await fetch(`${base}/api/linkedin-jobs/results?${results}`)
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null);

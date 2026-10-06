@@ -8,8 +8,9 @@
  *   npm run collect -- --dry-run                     fetch and count, write nothing
  *
  * Career boards (Greenhouse, Lever, Ashby, Workable) are pulled in full, and roles
- * that leave a board are marked closed. LinkedIn and Adzuna only answer searches, so
- * they run the queries in server/collectQueries.js; their roles close after 14 days unseen.
+ * that leave a board are marked closed. LinkedIn is demand-driven: it refreshes the searches
+ * users asked for in the last DEMAND_DAYS (public.search_demand). Adzuna runs the queries in
+ * server/collectQueries.js. Search-based roles close after 14 days unseen.
  * Discovery looks for boards for companies seen in those postings and in the curated list
  * (server/curatedCompanies.js); boards it finds are collected from then on.
  *
@@ -20,9 +21,10 @@ import { loadCompanies, fetchBoard, searchAdzuna, adzunaConfigured } from "./job
 import { probeCompany, countScope } from "./companyDiscovery.js";
 import CURATED_COMPANIES from "./curatedCompanies.js";
 import { searchLinkedInRun } from "./linkedinJobs.js";
+import { normalizeQuery, DEMAND_DAYS } from "./searchDemand.js";
 import {
   jobStoreConfigured, toRow, inScope, upsertJobs, closeMissingFromBoard, closeStale, startRun, finishRun, storeStats,
-  deleteOutOfScope, listCompanies, addCompanies, updateCompany, companyNamesFromJobs,
+  deleteOutOfScope, listCompanies, addCompanies, updateCompany, companyNamesFromJobs, demandedQueries, markDemandCollected,
 } from "./jobStore.js";
 import { COLLECT_QUERIES, COLLECT_LOCATION, LINKEDIN_PER_QUERY, ADZUNA_PER_QUERY } from "./collectQueries.js";
 
@@ -149,25 +151,34 @@ export async function discoverCompanies({ dryRun = false } = {}) {
   return result;
 }
 
-/** LinkedIn roles for each query (Apify). LinkedIn job ids are stable; generated fallback ids are skipped. */
-export async function collectLinkedIn({ queries = COLLECT_QUERIES, limit = LINKEDIN_PER_QUERY, dryRun = false } = {}) {
+/**
+ * LinkedIn roles (Apify) for the searches users asked for recently, or for `queries` when
+ * given (e.g. --queries on the command line). LinkedIn job ids are stable; generated
+ * fallback ids are skipped. Roles are tagged with the normalised search that found them.
+ */
+export async function collectLinkedIn({ queries, limit = LINKEDIN_PER_QUERY, dryRun = false } = {}) {
   const token = process.env.APIFY_TOKEN || process.env.APIFY_API_TOKEN;
   if (!token) return { status: "skipped", reason: "APIFY_TOKEN not set" };
+  const searches = queries
+    ? queries.map((query) => ({ query, query_key: normalizeQuery(query) }))
+    : await demandedQueries(DEMAND_DAYS);
+  if (!searches.length) return { status: "skipped", reason: `no searches asked for in the last ${DEMAND_DAYS} days` };
   const run = await beginRun("linkedin", dryRun);
   const failed = [];
   const perQuery = {};
   let fetched = 0;
   let upserted = 0;
 
-  await mapLimit(queries, LINKEDIN_CONCURRENCY, async (query) => {
+  await mapLimit(searches, LINKEDIN_CONCURRENCY, async ({ query, query_key: key }) => {
     try {
       const result = await searchLinkedInRun(token, query, COLLECT_LOCATION, limit);
       const jobs = result.jobs.filter((job) => /^\d+$/.test(job.id));
       perQuery[query] = jobs.length;
       fetched += jobs.length;
-      if (!dryRun && jobs.length) {
-        const saved = await upsertJobs(jobs.map((job) => toRow(job, { query, seenAt: run.started_at })).filter(inScope));
+      if (!dryRun) {
+        const saved = await upsertJobs(jobs.map((job) => toRow(job, { query: key, seenAt: run.started_at })).filter(inScope));
         upserted += saved;
+        if (!queries) await markDemandCollected(key, run.started_at);
       }
     } catch (e) {
       failed.push(`${query} (${e.message})`);
@@ -175,7 +186,7 @@ export async function collectLinkedIn({ queries = COLLECT_QUERIES, limit = LINKE
   });
 
   const closed = dryRun ? 0 : await closeStale("linkedin", SEARCH_STALE_DAYS);
-  const status = failed.length === 0 ? "ok" : failed.length < queries.length ? "partial" : "failed";
+  const status = failed.length === 0 ? "ok" : failed.length < searches.length ? "partial" : "failed";
   const result = { status, fetched, upserted, closed, details: { perQuery, failed } };
   await endRun(run, result);
   return result;
