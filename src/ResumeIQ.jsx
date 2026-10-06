@@ -5,12 +5,25 @@ import { jsPDF } from "jspdf";
 // PDF.js worker: bundle via Vite so production gets a valid asset URL (fixes "load failed" on Vercel)
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { track, bucket } from "./analytics.js";
+import UploadStep from "./UploadStep.jsx";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 
 // API origin: VITE_API_URL if set; otherwise the local dev server, or the same origin in
 // production builds (the API is deployed alongside the frontend at /api on Vercel).
 const API_BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://localhost:3001" : "");
+
+// Where a role came from – shown as a pill on its card and in the "View posting" link.
+const SOURCE_LABELS = {
+  linkedin: "LinkedIn",
+  greenhouse: "Career page",
+  lever: "Career page",
+  ashby: "Career page",
+  workable: "Career page",
+  adzuna: "Adzuna",
+};
+const sourceLabel = (source) => SOURCE_LABELS[source] || null;
+const postingLinkText = (source) => (source === "linkedin" ? "on LinkedIn" : source === "adzuna" ? "on Adzuna" : "on the company's career page");
 
 const SAMPLE_RESUME = {
   name: "Alex Chen",
@@ -3200,8 +3213,6 @@ export default function ResumeIQ() {
   const [uploadedFileSize, setUploadedFileSize] = useState("");
   const [parsingStatus, setParsingStatus] = useState(() => ({ ...DEFAULT_PARSING_STATUS }));
   const [parsingError, setParsingError] = useState(null);
-  const [dropZoneHover, setDropZoneHover] = useState(false);
-  const fileInputRef = useRef(null);
   const [score, setScore] = useState(null);
   const [scoreBreakdown, setScoreBreakdown] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
@@ -3352,16 +3363,36 @@ export default function ResumeIQ() {
    * Returns how many were added.
    */
   const mergeJobs = (incoming, { markFresh = false } = {}) => {
+    // The same role often appears on LinkedIn and on the company's own career page:
+    // match on company + title + city and keep one card, with the longest description.
+    const dupKey = (job) => {
+      const norm = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      return `${norm(job.company)}|${norm(job.role)}|${norm(String(job.location || "").split(",")[0])}`;
+    };
     const shownIds = new Set(jobsRef.current.map((job) => job.id));
-    const addedCount = new Set(incoming.map((job) => job.id).filter((id) => !shownIds.has(id))).size;
+    const shownKeys = new Set(jobsRef.current.map(dupKey));
+    const addedCount = new Set(
+      incoming.filter((job) => !shownIds.has(job.id) && !shownKeys.has(dupKey(job))).map((job) => job.id),
+    ).size;
     setJobs((prev) => {
       const byId = new Map(prev.map((job) => [job.id, job]));
+      const idByKey = new Map(prev.map((job) => [dupKey(job), job.id]));
       for (const job of incoming) {
-        const existing = byId.get(job.id);
+        const existingId = byId.has(job.id) ? job.id : idByKey.get(dupKey(job));
+        const existing = existingId ? byId.get(existingId) : null;
         if (existing) {
-          byId.set(job.id, { ...existing, ...job, jd: job.jd || existing.jd, badge: existing.badge });
+          const longer = (job.jd || "").length > (existing.jd || "").length;
+          byId.set(existingId, {
+            ...existing,
+            ...(existingId === job.id ? job : {}),
+            jd: longer ? job.jd : existing.jd,
+            url: existing.url || job.url,
+            salary: existing.salary || job.salary,
+            badge: existing.badge,
+          });
         } else {
-          byId.set(job.id, { ...job, source: "linkedin", badge: markFresh ? "Just in" : null });
+          byId.set(job.id, { ...job, source: job.source || "linkedin", badge: markFresh ? "Just in" : null });
+          idByKey.set(dupKey(job), job.id);
         }
       }
       return [...byId.values()];
@@ -3394,7 +3425,7 @@ export default function ResumeIQ() {
 
     setLinkedInSearchError(null);
     setLinkedInSearching(true);
-    setJobFeedStatus({ keywords, savedCount: null, linkedInFound: 0, linkedInTotal: null, freshCount: null, startedAt: Date.now() });
+    setJobFeedStatus({ keywords, savedCount: null, careerCount: null, linkedInFound: 0, linkedInTotal: null, freshCount: null, startedAt: Date.now() });
     const searchStarted = Date.now();
     track("job_search_started", { india_only: linkedInSearchIndiaOnly, limit: linkedInSearchLimit, has_years: levels.length > 0 });
     const updateFeed = (patch) => setJobFeedStatus((s) => (s && s.keywords === keywords ? { ...s, ...patch } : s));
@@ -3406,6 +3437,20 @@ export default function ResumeIQ() {
         updateFeed({ savedCount: mergeJobs(data.jobs || []) });
       })
       .catch(() => updateFeed({ savedCount: 0 }));
+
+    // Company career pages (Greenhouse, Lever, Ashby, Workable) and Adzuna – official APIs, full JDs.
+    const sourceParams = new URLSearchParams(params);
+    sourceParams.set("limit", "150");
+    fetch(`${base}/api/jobs/sources?${sourceParams}`)
+      .then((res) => (res.ok ? res.json() : { jobs: [] }))
+      .then((data) => {
+        if (!isCurrent()) return;
+        const found = data.jobs || [];
+        const added = mergeJobs(found, { markFresh: true });
+        updateFeed({ careerCount: found.length, careerAdded: added });
+        track("job_sources_completed", { found: found.length, new_roles: added, adzuna: !!data.sources?.adzuna?.configured });
+      })
+      .catch(() => updateFeed({ careerCount: 0, careerAdded: 0 }));
 
     try {
       params.set("limit", String(linkedInSearchLimit));
@@ -4042,84 +4087,15 @@ body {
 
         <main className="rq-main-card" style={styles.mainCard}>
           {step === "upload" && (
-            <section style={styles.stepSection}>
-              <div style={styles.uploadHero}>
-                <div style={styles.uploadTitle}>Resume intelligence for your job search</div>
-                <h1 style={styles.uploadHeadline}>
-                  Find Jobs That <span style={styles.uploadHeadlineAccent}>Actually Fit You</span>
-                </h1>
-                <p style={styles.uploadSubtext}>
-                  Upload your resume. We’ll scan the job market, score every match, and help you tailor your resume to land interviews.
-                </p>
-              </div>
-              {parsingError && (
-                <div style={{ marginBottom: 16, padding: 12, background: "color-mix(in srgb, var(--rq-danger) 15%, transparent)", borderRadius: 8, fontSize: 13, color: "var(--rq-danger)" }}>
-                  {parsingError}
-                </div>
-              )}
-              <div
-                style={{
-                  ...styles.dropZone,
-                  ...(dropZoneHover ? styles.dropZoneHover : {}),
-                }}
-                onDragOver={(e) => { e.preventDefault(); setDropZoneHover(true); }}
-                onDragLeave={() => setDropZoneHover(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDropZoneHover(false);
-                  const file = e.dataTransfer?.files?.[0];
-                  if (file && /\.(pdf|txt|md)$/i.test(file.name)) handleUploadAndParse(file);
-                }}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <div style={styles.dropZoneIcon}>↑</div>
-                <div style={styles.dropZoneLabel}>Drop your resume here</div>
-                <div style={styles.dropZoneBrowse}>or browse files</div>
-                <div style={styles.dropZoneTypes}>PDF, TXT, Markdown</div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
-                  style={{ display: "none" }}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleUploadAndParse(file);
-                    e.target.value = "";
-                  }}
-                />
-              </div>
-              <div style={styles.featureGrid}>
-                <div style={styles.featureCard}>
-                  <div style={styles.featureCardTitle}>AI Resume Parsing</div>
-                  <div style={styles.featureCardDesc}>Extracts every detail automatically</div>
-                </div>
-                <div style={styles.featureCard}>
-                  <div style={styles.featureCardTitle}>Live Job Search</div>
-                  <div style={styles.featureCardDesc}>Real openings in India & worldwide</div>
-                </div>
-                <div style={styles.featureCard}>
-                  <div style={styles.featureCardTitle}>Match Scoring</div>
-                  <div style={styles.featureCardDesc}>% fit shown on every job card</div>
-                </div>
-                <div style={styles.featureCard}>
-                  <div style={styles.featureCardTitle}>Smart Edits</div>
-                  <div style={styles.featureCardDesc}>Approve AI suggestions one by one</div>
-                </div>
-              </div>
-              <p style={{ textAlign: "center", marginTop: 24, fontSize: 12, color: "var(--rq-text-3)" }}>
-                <button
-                  type="button"
-                  style={{ ...styles.ghostButton, fontSize: 12 }}
-                  onClick={() => {
-                    track("sample_resume_used");
-                    setResume(SAMPLE_RESUME);
-                    setStep("select");
-                  }}
-                >
-                  Use sample resume instead
-                </button>
-              </p>
-            </section>
+            <UploadStep
+              error={parsingError}
+              onFile={handleUploadAndParse}
+              onSample={() => {
+                track("sample_resume_used");
+                setResume(SAMPLE_RESUME);
+                setStep("select");
+              }}
+            />
           )}
 
           {step === "parsing" && (
@@ -4196,6 +4172,15 @@ body {
                     detail: f.savedCount == null ? "Checking…" : f.savedCount > 0 ? `${f.savedCount} matched instantly` : "None yet for this role",
                   },
                   {
+                    label: "Company career pages & job boards",
+                    state: f.careerCount == null ? "active" : "done",
+                    detail: f.careerCount == null
+                      ? "Checking…"
+                      : f.careerCount > 0
+                        ? `${f.careerCount} found${f.careerAdded ? ` · ${f.careerAdded} new` : ""}`
+                        : "None for this role yet",
+                  },
+                  {
                     label: "LinkedIn · live listings",
                     state: done ? "done" : "active",
                     detail: done
@@ -4246,7 +4231,7 @@ body {
               <div style={styles.linkedInPanel}>
                 <div style={styles.panelLabelRow}>
                   <div style={styles.panelLabel}>
-                    <span>Search LinkedIn Jobs</span>
+                    <span>Search jobs</span>
                   </div>
                   <div style={styles.smallPill}>India & worldwide · up to 150 jobs</div>
                 </div>
@@ -4306,7 +4291,7 @@ body {
                     disabled={linkedInSearching}
                     onClick={() => handleSearchLinkedInJobs()}
                   >
-                    {linkedInSearching ? "Searching…" : "Search LinkedIn"}
+                    {linkedInSearching ? "Searching…" : "Search jobs"}
                   </button>
                 </div>
                 {suggestedRoles.length > 0 && (
@@ -4395,7 +4380,7 @@ body {
               )}
               {sortedJobs.length === 0 && !linkedInSearching && (
                 <div style={{ padding: 24, textAlign: "center", fontSize: 13, color: "var(--rq-text-2)", border: "1px dashed color-mix(in srgb, var(--rq-text) 12%, transparent)", borderRadius: 12, marginBottom: 16 }}>
-                  No jobs yet. Search LinkedIn above to find roles that match your resume.
+                  No jobs yet. Search above to find roles that match your resume.
                 </div>
               )}
               <div style={styles.jobGrid}>
@@ -4456,8 +4441,8 @@ body {
                             {job.badge}
                           </div>
                         )}
-                        {job.source === "linkedin" && (
-                          <div style={styles.sourcePill}>LinkedIn</div>
+                        {sourceLabel(job.source) && (
+                          <div style={styles.sourcePill}>{sourceLabel(job.source)}</div>
                         )}
                       </div>
                       <div style={styles.jobPreview}>
@@ -4471,7 +4456,7 @@ body {
                           onClick={(e) => e.stopPropagation()}
                           style={{ fontSize: 11, color: "var(--rq-info)", marginTop: 6, display: "inline-block" }}
                         >
-                          View full JD on LinkedIn →
+                          View full JD {postingLinkText(job.source)} →
                         </a>
                       )}
                       <div style={styles.cardFooterRow}>
@@ -4526,8 +4511,8 @@ body {
                     </div>
                   )}
                   {expandedJob.badge && <div style={styles.badgePill(expandedJob.badge)}>{expandedJob.badge}</div>}
-                  {expandedJob.source === "linkedin" && (
-                    <div style={styles.sourcePill}>LinkedIn</div>
+                  {sourceLabel(expandedJob.source) && (
+                    <div style={styles.sourcePill}>{sourceLabel(expandedJob.source)}</div>
                   )}
                 </div>
                 {expandedJob.url && (
@@ -4537,7 +4522,7 @@ body {
                     rel="noopener noreferrer"
                     style={{ fontSize: 12, color: "var(--rq-info)", display: "inline-block", marginTop: 4 }}
                   >
-                    View full posting on LinkedIn →
+                    View full posting {postingLinkText(expandedJob.source)} →
                   </a>
                 )}
                 <div style={styles.jobModalDivider} />

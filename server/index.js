@@ -10,6 +10,7 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import * as cheerio from "cheerio";
 import { saveJobs, findJobs, repositorySize } from "./jobRepository.js";
+import { searchApiSources, adzunaConfigured, loadCompanies } from "./jobSources.js";
 import { callLLM, llmProvider, llmModel, LLMUserError } from "./llm.js";
 
 /** Provider errors can leak account details (e.g. Groq org ids); only our own messages reach users. */
@@ -28,6 +29,7 @@ const cwdEnv = resolve(process.cwd(), ".env");
 const ENV_KEYS = [
   "RAPIDAPI_KEY", "APIFY_TOKEN", "APIFY_API_TOKEN", "RXRESUME_API_KEY", "RXRESUME_URL",
   "GROQ_API_KEY", "GROQ_MODEL", "ANTHROPIC_API_KEY", "VITE_ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_EFFORT", "GROQ_FALLBACK_MODELS", "LLM_PROVIDER",
+  "ADZUNA_APP_ID", "ADZUNA_APP_KEY",
 ];
 
 function loadEnvFile(filePath) {
@@ -448,6 +450,30 @@ app.get("/api/jobs/saved", (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 30, 100);
   const jobs = findJobs({ keywords, location, levels, limit });
   res.json({ jobs, repositorySize: repositorySize() });
+});
+
+/**
+ * Roles from sources with official public APIs: company career boards on Greenhouse,
+ * Lever, Ashby and Workable (server/jobBoards.js), plus Adzuna India when keyed.
+ * Runs alongside the LinkedIn search; results are saved to the roles repository too.
+ */
+app.get("/api/jobs/sources", async (req, res) => {
+  const keywords = String(req.query.keywords || "").trim().slice(0, 120) || "Product Manager";
+  const location = String(req.query.location || "").trim().slice(0, 80) || "India";
+  const limit = Math.min(Number(req.query.limit) || 100, 200);
+  try {
+    const result = await searchApiSources({ keywords, location, limit });
+    const { added, total } = saveJobs(result.jobs, { location, levels: parseExperienceLevels(req.query.experienceLevel) });
+    console.log(
+      `[job-sources] "${keywords}" in ${location} – ${result.jobs.length} roles ` +
+        `(boards ${result.sources.companyBoards.boardsOk}/${result.sources.companyBoards.boardsChecked} ok, ` +
+        `adzuna ${result.sources.adzuna.configured ? result.sources.adzuna.found : "off"}), ${added} new, ${total} saved`,
+    );
+    return res.json(result);
+  } catch (err) {
+    console.warn("[job-sources] search failed:", err.message);
+    return res.status(502).json({ error: "Could not search career pages", jobs: [] });
+  }
 });
 
 /**
@@ -1096,6 +1122,8 @@ app.get("/api/health", (_, res) =>
     apify: !!getApifyToken(),
     rapidapi: !!getRapidApiKey(),
     rxresume: !!getRxResumeKey(),
+    adzuna: adzunaConfigured(),
+    careerBoards: loadCompanies().length,
   })
 );
 
@@ -1113,6 +1141,8 @@ if (!process.env.VERCEL) app.listen(PORT, () => {
   if (rapid) console.log("  RAPIDAPI_KEY: loaded (fallback)");
   if (!apify && !rapid) console.log("  No API keys – will use free LinkedIn guest API when job search runs");
   console.log(`  LLM: ${llmProvider() ? `${llmProvider()} – ${llmModel()}` : "not configured – set GROQ_API_KEY or ANTHROPIC_API_KEY"}`);
+  console.log(`  Career boards: ${loadCompanies().length} companies (server/jobBoards.js)`);
+  console.log(`  Adzuna India: ${adzunaConfigured() ? "configured" : "off – set ADZUNA_APP_ID and ADZUNA_APP_KEY"}`);
   if (rxresume) console.log("  RXRESUME_API_KEY: loaded (Reactive Resume AI tailoring)");
   else console.log("  RXRESUME_API_KEY: not set – suggestion generation will fail until it's configured");
 });
