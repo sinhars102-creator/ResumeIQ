@@ -8,6 +8,8 @@ import { createClient } from "@supabase/supabase-js";
 import { isIndiaLocation } from "./jobSources.js";
 
 const UPSERT_BATCH = 500;
+// Existing rows are looked up by id in the request URL; long ids (Lever UUIDs) overflow it past ~100.
+const LOOKUP_BATCH = 100;
 
 let client = null;
 
@@ -70,12 +72,15 @@ export async function upsertJobs(rows) {
   let upserted = 0;
   for (let i = 0; i < unique.length; i += UPSERT_BATCH) {
     const batch = unique.slice(i, i + UPSERT_BATCH);
-    const { data: existing, error: readErr } = await db()
-      .from("jobs")
-      .select("id, description, source_query")
-      .in("id", batch.map((r) => r.id));
-    if (readErr) throw new Error(`read before upsert failed: ${readErr.message}`);
-    const known = new Map((existing || []).map((r) => [r.id, r]));
+    const known = new Map();
+    for (let j = 0; j < batch.length; j += LOOKUP_BATCH) {
+      const { data: existing, error: readErr } = await db()
+        .from("jobs")
+        .select("id, description, source_query")
+        .in("id", batch.slice(j, j + LOOKUP_BATCH).map((r) => r.id));
+      if (readErr) throw new Error(`read before upsert failed: ${readErr.message}`);
+      for (const r of existing || []) known.set(r.id, r);
+    }
     const merged = batch.map((row) => {
       const prev = known.get(row.id);
       if (!prev) return row;

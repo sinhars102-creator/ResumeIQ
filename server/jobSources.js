@@ -256,11 +256,11 @@ export function loadCompanies() {
 const boardCache = new Map(); // `${ats}:${slug}` → { at, jobs }
 
 /** All open roles on one company's board (cached). Throws on network/HTTP errors. */
-export async function fetchBoard(company, { fresh = false } = {}) {
+export async function fetchBoard(company, { fresh = false, timeoutMs = FETCH_TIMEOUT_MS } = {}) {
   const key = `${company.ats}:${company.slug}`;
   const cached = boardCache.get(key);
   if (!fresh && cached && Date.now() - cached.at < BOARD_CACHE_MS) return cached.jobs;
-  const data = await fetchJson(BOARD_URL[company.ats](company.slug));
+  const data = await fetchJson(BOARD_URL[company.ats](company.slug), { timeoutMs });
   const jobs = NORMALIZE[company.ats](data, company);
   boardCache.set(key, { at: Date.now(), jobs });
   return jobs;

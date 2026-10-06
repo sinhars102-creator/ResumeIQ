@@ -202,3 +202,39 @@ export async function fetchJobsValig(token, keywords, location, limit, experienc
   console.log("[linkedin-jobs] Valig 200 – jobs count:", jobs.length, "with JDs");
   return { jobs };
 }
+
+const VALIG_ACTOR = "valig~linkedin-jobs-scraper";
+const RUN_DONE = new Set(["SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED"]);
+
+async function apify(path, token, options = {}) {
+  const response = await fetch(`https://api.apify.com/v2${path}`, {
+    ...options,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(options.headers || {}) },
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(data?.error?.message || `Apify ${response.status}`);
+  return data;
+}
+
+/**
+ * One LinkedIn search for background collection: start an Apify run, poll until it ends,
+ * then read its dataset. Unlike the run-sync call, no connection is held open for minutes
+ * (Node drops those after 5). A run that times out still returns what it collected.
+ */
+export async function searchLinkedInRun(token, keywords, location, limit, { pollMs = 5000, maxWaitMs = 8 * 60 * 1000 } = {}) {
+  const { data: run } = await apify(`/acts/${VALIG_ACTOR}/runs?timeout=300`, token, {
+    method: "POST",
+    body: JSON.stringify({ keywords, location, limit: Math.min(Number(limit) || 50, 100) }),
+  });
+  const deadline = Date.now() + maxWaitMs;
+  let status = run.status;
+  while (!RUN_DONE.has(status)) {
+    if (Date.now() > deadline) throw new Error(`run ${run.id} still ${status} after ${Math.round(maxWaitMs / 60000)} min`);
+    await new Promise((r) => setTimeout(r, pollMs));
+    status = (await apify(`/actor-runs/${run.id}`, token)).data?.status;
+  }
+  const items = await apify(`/datasets/${run.defaultDatasetId}/items?format=json&clean=true`, token);
+  const jobs = (Array.isArray(items) ? items : []).map((raw, i) => normalizeJob(raw, i));
+  if (status !== "SUCCEEDED" && !jobs.length) throw new Error(`Apify run ${status.toLowerCase()}`);
+  return { jobs, status };
+}

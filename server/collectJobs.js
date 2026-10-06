@@ -12,14 +12,17 @@
  */
 import { pathToFileURL } from "url";
 import { loadCompanies, fetchBoard, searchAdzuna, adzunaConfigured } from "./jobSources.js";
-import { fetchJobsValig, fetchJobsApify } from "./linkedinJobs.js";
+import { searchLinkedInRun } from "./linkedinJobs.js";
 import {
   jobStoreConfigured, toRow, upsertJobs, closeMissingFromBoard, closeStale, startRun, finishRun, storeStats,
 } from "./jobStore.js";
 import { COLLECT_QUERIES, COLLECT_LOCATION, LINKEDIN_PER_QUERY, ADZUNA_PER_QUERY } from "./collectQueries.js";
 
 const BOARD_CONCURRENCY = 6;
+// Large boards (Paytm's is ~3 MB) take longer than a live search should wait.
+const BOARD_TIMEOUT_MS = 60000;
 const SEARCH_STALE_DAYS = 14;
+const LINKEDIN_CONCURRENCY = 3;
 
 async function mapLimit(items, limit, fn) {
   const out = new Array(items.length);
@@ -56,13 +59,16 @@ export async function collectCareerBoards({ dryRun = false } = {}) {
 
   await mapLimit(companies, BOARD_CONCURRENCY, async (company) => {
     try {
-      const jobs = await fetchBoard(company, { fresh: true });
+      const jobs = await fetchBoard(company, { fresh: true, timeoutMs: BOARD_TIMEOUT_MS });
       fetched += jobs.length;
       if (dryRun) return;
       const rows = jobs.map((job) => toRow(job, { board: company.slug, seenAt: run.started_at }));
-      upserted += await upsertJobs(rows);
+      // Boards run in parallel: add each result after its await, or concurrent updates are lost.
+      const saved = await upsertJobs(rows);
+      upserted += saved;
       // Only a board that answered can tell us which of its roles are gone.
-      closed += await closeMissingFromBoard(company.ats, company.slug, run.started_at);
+      const gone = await closeMissingFromBoard(company.ats, company.slug, run.started_at);
+      closed += gone;
     } catch (e) {
       failed.push(`${company.ats}:${company.slug} (${e.name === "AbortError" ? "timeout" : e.message})`);
     }
@@ -84,22 +90,20 @@ export async function collectLinkedIn({ queries = COLLECT_QUERIES, limit = LINKE
   let fetched = 0;
   let upserted = 0;
 
-  for (const query of queries) {
+  await mapLimit(queries, LINKEDIN_CONCURRENCY, async (query) => {
     try {
-      const result =
-        (await fetchJobsValig(token, query, COLLECT_LOCATION, limit)) ||
-        (await fetchJobsApify(token, query, COLLECT_LOCATION, limit));
-      if (result?.error) throw new Error(result.error);
-      const jobs = (result?.jobs || []).filter((job) => /^\d+$/.test(job.id));
+      const result = await searchLinkedInRun(token, query, COLLECT_LOCATION, limit);
+      const jobs = result.jobs.filter((job) => /^\d+$/.test(job.id));
       perQuery[query] = jobs.length;
       fetched += jobs.length;
       if (!dryRun && jobs.length) {
-        upserted += await upsertJobs(jobs.map((job) => toRow(job, { query, seenAt: run.started_at })));
+        const saved = await upsertJobs(jobs.map((job) => toRow(job, { query, seenAt: run.started_at })));
+        upserted += saved;
       }
     } catch (e) {
       failed.push(`${query} (${e.message})`);
     }
-  }
+  });
 
   const closed = dryRun ? 0 : await closeStale("linkedin", SEARCH_STALE_DAYS);
   const status = failed.length === 0 ? "ok" : failed.length < queries.length ? "partial" : "failed";
