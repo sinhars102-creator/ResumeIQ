@@ -5,6 +5,7 @@ import { jsPDF } from "jspdf";
 // PDF.js worker: bundle via Vite so production gets a valid asset URL (fixes "load failed" on Vercel)
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { track, bucket } from "./analytics.js";
+import UploadStep from "./UploadStep.jsx";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 
@@ -74,9 +75,6 @@ const SAMPLE_RESUME = {
     "Agile/Scrum",
   ],
 };
-
-/** How long each upload-screen walkthrough step stays up before advancing. */
-const WALKTHROUGH_STEP_MS = 5000;
 
 const styles = {
   appRoot: {
@@ -238,303 +236,31 @@ const styles = {
     color: "var(--rq-text-3)",
     marginTop: 8,
   },
-  homeLink: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    minHeight: 44,
-    marginTop: -12,
-    marginBottom: 4,
-    fontSize: 13,
-    fontWeight: 500,
-    color: "var(--rq-text-2)",
-    textDecoration: "none",
+  featureGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(2, 1fr)",
+    gap: 14,
+    marginTop: 32,
+    maxWidth: 560,
+    marginLeft: "auto",
+    marginRight: "auto",
   },
-  uploadSplit: {
-    display: "flex",
-    gap: 32,
-    alignItems: "stretch",
-  },
-  uploadGuide: {
-    flex: "1 1 0",
-    minWidth: 0,
-    background: "color-mix(in srgb, var(--rq-accent) 5%, var(--rq-bg))",
-    border: "1px solid var(--rq-border)",
-    borderRadius: 16,
-    padding: 24,
-  },
-  uploadPanel: {
-    flex: "1 1 0",
-    minWidth: 0,
-    display: "flex",
-    flexDirection: "column",
-    justifyContent: "center",
-    padding: "8px 8px",
-  },
-  wtHeading: {
-    fontSize: 20,
-    fontWeight: 700,
-    lineHeight: 1.3,
-    color: "var(--rq-text)",
-    margin: "0 0 18px",
-  },
-  wtScreen: {
-    background: "var(--rq-surface)",
+  featureCard: {
+    background: "color-mix(in srgb, var(--rq-surface) 80%, transparent)",
     border: "1px solid var(--rq-border)",
     borderRadius: 12,
-    overflow: "hidden",
-    boxShadow: "0 8px 24px rgba(31, 42, 46, 0.06)",
+    padding: 16,
   },
-  wtScreenBar: {
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-    padding: "8px 12px",
-    borderBottom: "1px solid var(--rq-border)",
-    background: "color-mix(in srgb, var(--rq-border) 35%, var(--rq-surface))",
-  },
-  wtDot: {
-    width: 8,
-    height: 8,
-    borderRadius: "50%",
-    background: "var(--rq-border-strong)",
-    flex: "none",
-  },
-  wtScreenTitle: {
-    marginLeft: 6,
-    fontSize: 11,
-    color: "var(--rq-text-2)",
-    whiteSpace: "nowrap",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-  },
-  wtScreenBody: {
-    height: 272,
-    padding: 18,
-    boxSizing: "border-box",
-    overflow: "hidden",
-  },
-  wtVisualRow: {
-    display: "flex",
-    gap: 18,
-    alignItems: "center",
-    height: "100%",
-  },
-  wtDoc: {
-    position: "relative",
-    flex: "0 0 42%",
-    height: "100%",
-    boxSizing: "border-box",
-    background: "var(--rq-surface)",
-    border: "1px solid var(--rq-border)",
-    borderRadius: 8,
-    padding: 14,
-    overflow: "hidden",
-  },
-  wtLine: {
-    height: 6,
-    borderRadius: 3,
-    background: "var(--rq-border)",
-    marginTop: 7,
-  },
-  wtScan: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: 0,
-    height: 36,
-    background: "linear-gradient(to bottom, transparent, color-mix(in srgb, var(--rq-accent) 22%, transparent))",
-    borderBottom: "2px solid var(--rq-accent)",
-    animation: "rqScan 2.2s ease-in-out infinite",
-  },
-  wtDocBadge: {
-    position: "absolute",
-    right: 10,
-    bottom: 10,
-    width: 28,
-    height: 28,
-    borderRadius: "50%",
-    background: "var(--rq-accent)",
-    color: "var(--rq-surface)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 15,
-    fontWeight: 700,
-  },
-  wtChips: {
-    flex: 1,
-    minWidth: 0,
-    display: "flex",
-    flexWrap: "wrap",
-    alignContent: "center",
-    gap: 8,
-  },
-  wtChip: {
+  featureCardTitle: {
     fontSize: 12,
-    fontWeight: 600,
-    color: "var(--rq-accent)",
-    background: "color-mix(in srgb, var(--rq-accent) 12%, transparent)",
-    borderRadius: 999,
-    padding: "5px 10px",
-  },
-  wtStack: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 10,
-  },
-  wtJob: {
-    border: "1px solid var(--rq-border)",
-    borderRadius: 10,
-    padding: "9px 12px",
-  },
-  wtJobRole: {
-    fontSize: 13,
     fontWeight: 600,
     color: "var(--rq-text)",
+    marginBottom: 4,
   },
-  wtJobMeta: {
+  featureCardDesc: {
     fontSize: 11,
     color: "var(--rq-text-2)",
-    width: "100%",
-  },
-  wtJobScore: {
-    fontSize: 15,
-    fontWeight: 700,
-    flex: "none",
-  },
-  wtBarTrack: {
-    marginTop: 7,
-    height: 5,
-    borderRadius: 3,
-    background: "var(--rq-border)",
-    overflow: "hidden",
-  },
-  wtBarFill: {
-    height: "100%",
-    borderRadius: 3,
-    transformOrigin: "left",
-  },
-  wtEditCard: {
-    background: "var(--rq-text)",
-    color: "var(--rq-bg)",
-    borderRadius: 10,
-    padding: 14,
-  },
-  wtEditLabel: {
-    fontSize: 10,
-    fontWeight: 600,
-    letterSpacing: "0.06em",
-    textTransform: "uppercase",
-    color: "color-mix(in srgb, var(--rq-accent) 55%, white)",
-  },
-  wtEditOld: {
-    marginTop: 8,
-    fontSize: 12,
-    lineHeight: 1.45,
-    color: "color-mix(in srgb, var(--rq-bg) 55%, transparent)",
-    textDecoration: "line-through",
-  },
-  wtEditNew: {
-    marginTop: 4,
-    fontSize: 13,
-    lineHeight: 1.45,
-  },
-  wtEditSource: {
-    marginTop: 4,
-    fontSize: 11,
-    color: "color-mix(in srgb, var(--rq-bg) 55%, transparent)",
-  },
-  wtAccept: {
-    display: "inline-block",
-    fontSize: 12,
-    fontWeight: 600,
-    color: "var(--rq-surface)",
-    background: "var(--rq-accent)",
-    borderRadius: 6,
-    padding: "6px 12px",
-  },
-  wtReject: {
-    display: "inline-block",
-    fontSize: 12,
-    fontWeight: 500,
-    color: "inherit",
-    border: "1px solid color-mix(in srgb, var(--rq-bg) 30%, transparent)",
-    borderRadius: 6,
-    padding: "5px 12px",
-  },
-  wtBlocked: {
-    fontSize: 12,
-    lineHeight: 1.45,
-    color: "var(--rq-warn)",
-    background: "color-mix(in srgb, var(--rq-warn) 10%, transparent)",
-    border: "1px solid color-mix(in srgb, var(--rq-warn) 30%, transparent)",
-    borderRadius: 8,
-    padding: "8px 12px",
-  },
-  wtExportTitle: {
-    fontSize: 14,
-    fontWeight: 700,
-    color: "var(--rq-text)",
-    width: "100%",
-  },
-  wtSteps: {
-    listStyle: "none",
-    margin: "16px 0 0",
-    padding: 0,
-    display: "flex",
-    flexDirection: "column",
-    gap: 6,
-  },
-  wtStep: {
-    position: "relative",
-    width: "100%",
-    display: "flex",
-    alignItems: "flex-start",
-    gap: 12,
-    textAlign: "left",
-    font: "inherit",
-    color: "var(--rq-text)",
-    background: "transparent",
-    border: "1px solid transparent",
-    borderRadius: 10,
-    padding: "10px 12px",
-    minHeight: 44,
-    cursor: "pointer",
-    overflow: "hidden",
-  },
-  wtStepActive: {
-    background: "var(--rq-surface)",
-    borderColor: "var(--rq-border)",
-  },
-  wtStepTitle: {
-    display: "block",
-    fontSize: 14,
-    fontWeight: 600,
-    lineHeight: "20px",
-  },
-  wtStepDesc: {
-    display: "block",
-    marginTop: 2,
-    fontSize: 13,
-    lineHeight: 1.5,
-    minHeight: "3em",
-    color: "var(--rq-text-2)",
-  },
-  wtProgressTrack: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 2,
-    background: "var(--rq-border)",
-  },
-  wtProgressFill: {
-    display: "block",
-    height: "100%",
-    background: "var(--rq-accent)",
-    transformOrigin: "left",
-    animation: `rqProgress ${WALKTHROUGH_STEP_MS}ms linear both`,
+    lineHeight: 1.4,
   },
   parsingCard: {
     maxWidth: 420,
@@ -3454,213 +3180,6 @@ function ResumeDocument({ resume, highlights = [], dim = false, afterMode = fals
 
 const DEFAULT_PARSING_STATUS = { extractText: false, parseStructure: false, findJobs: false };
 
-/** Steps shown beside the upload box: what the user gets after uploading. */
-const WALKTHROUGH_STEPS = [
-  {
-    id: "parse",
-    title: "We read your resume",
-    desc: "Your roles, skills, dates and achievements are pulled out in seconds. Nothing is changed yet.",
-  },
-  {
-    id: "match",
-    title: "You see jobs ranked by fit",
-    desc: "Live openings get a match score, with the skills that matched and the gaps.",
-  },
-  {
-    id: "tailor",
-    title: "You approve every edit",
-    desc: "Suggestions arrive one at a time. Accept or reject each; nothing is made up.",
-  },
-  {
-    id: "export",
-    title: "You download a tailored resume",
-    desc: "Preview the finished resume for that role, tweak anything, and export a PDF.",
-  },
-];
-
-/** Illustration for one walkthrough step. Remounted on each step so its animations replay. */
-function WalkthroughVisual({ stepId }) {
-  const pop = (delay) => ({ animation: `rqPop 0.45s ease-out ${delay}s both` });
-  const slide = (delay) => ({ animation: `rqSlideIn 0.5s ease-out ${delay}s both` });
-
-  if (stepId === "parse") {
-    return (
-      <div style={styles.wtVisualRow}>
-        <div style={styles.wtDoc}>
-          <div className="rq-wt-scan" style={styles.wtScan} />
-          <div style={{ ...styles.wtLine, width: "55%", height: 9, background: "var(--rq-text)" }} />
-          <div style={{ ...styles.wtLine, width: "80%" }} />
-          <div style={{ ...styles.wtLine, width: "35%", marginTop: 14, background: "var(--rq-accent)" }} />
-          <div style={{ ...styles.wtLine, width: "92%" }} />
-          <div style={{ ...styles.wtLine, width: "86%" }} />
-          <div style={{ ...styles.wtLine, width: "70%" }} />
-          <div style={{ ...styles.wtLine, width: "35%", marginTop: 14, background: "var(--rq-accent)" }} />
-          <div style={{ ...styles.wtLine, width: "88%" }} />
-          <div style={{ ...styles.wtLine, width: "64%" }} />
-        </div>
-        <div style={styles.wtChips}>
-          {["Product Manager", "6 yrs experience", "SQL", "A/B testing", "Payments"].map((chip, i) => (
-            <span key={chip} style={{ ...styles.wtChip, ...pop(0.5 + i * 0.35) }}>
-              {chip}
-            </span>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (stepId === "match") {
-    const rows = [
-      { role: "Senior PM, Payments", meta: "Paybridge · Bengaluru", score: 92 },
-      { role: "Product Manager, Supply", meta: "Kirana Cloud · Gurugram", score: 78 },
-      { role: "Group PM, AI Platform", meta: "Zestly · Remote", score: 61 },
-    ];
-    return (
-      <div style={styles.wtStack}>
-        {rows.map((r, i) => (
-          <div key={r.role} style={{ ...styles.wtJob, ...slide(0.2 + i * 0.3) }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={styles.wtJobRole}>{r.role}</div>
-                <div style={styles.wtJobMeta}>{r.meta}</div>
-              </div>
-              <div style={{ ...styles.wtJobScore, color: r.score >= 75 ? "var(--rq-accent)" : "var(--rq-warn)" }}>
-                {r.score}%
-              </div>
-            </div>
-            <div style={styles.wtBarTrack}>
-              <div
-                style={{
-                  ...styles.wtBarFill,
-                  width: `${r.score}%`,
-                  background: r.score >= 75 ? "var(--rq-accent)" : "var(--rq-warn)",
-                  animation: `rqFill 0.9s ease-out ${0.5 + i * 0.3}s both`,
-                }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  if (stepId === "tailor") {
-    return (
-      <div style={styles.wtStack}>
-        <div style={styles.wtEditCard}>
-          <div style={styles.wtEditLabel}>Suggested edit 3 of 7</div>
-          <div style={{ ...styles.wtEditOld, ...pop(0.2) }}>Worked on payments features for the app.</div>
-          <div style={{ ...styles.wtEditNew, ...pop(0.9) }}>
-            Led the UPI checkout redesign that lifted payment success from 82% to 91%.
-          </div>
-          <div style={{ ...styles.wtEditSource, ...pop(1.3) }}>Based on your resume, line 14</div>
-          <div style={{ display: "flex", gap: 8, marginTop: 12, ...pop(1.6) }}>
-            <span className="rq-wt-accept" style={styles.wtAccept}>Accept</span>
-            <span style={styles.wtReject}>Reject</span>
-          </div>
-        </div>
-        <div style={{ ...styles.wtBlocked, ...pop(2.2) }}>
-          “Kafka” isn’t in your resume, so we won’t add it.
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div style={styles.wtVisualRow}>
-      <div style={{ ...styles.wtDoc, ...pop(0.1) }}>
-        <div style={{ ...styles.wtLine, width: "55%", height: 9, background: "var(--rq-text)" }} />
-        <div style={{ ...styles.wtLine, width: "80%" }} />
-        <div style={{ ...styles.wtLine, width: "35%", marginTop: 14, background: "var(--rq-accent)" }} />
-        <div style={{ ...styles.wtLine, width: "92%", background: "color-mix(in srgb, var(--rq-accent) 45%, transparent)" }} />
-        <div style={{ ...styles.wtLine, width: "86%" }} />
-        <div style={{ ...styles.wtLine, width: "74%", background: "color-mix(in srgb, var(--rq-accent) 45%, transparent)" }} />
-        <div style={{ ...styles.wtLine, width: "35%", marginTop: 14, background: "var(--rq-accent)" }} />
-        <div style={{ ...styles.wtLine, width: "88%" }} />
-        <div style={{ ...styles.wtDocBadge, ...pop(0.7) }}>✓</div>
-      </div>
-      <div style={styles.wtChips}>
-        <div style={{ ...styles.wtExportTitle, ...pop(0.5) }}>Tailored for Senior PM, Payments</div>
-        <div style={{ ...styles.wtJobMeta, ...pop(0.8) }}>7 edits approved · 1 page</div>
-        <div style={{ marginTop: 10, ...pop(1.1) }}>
-          <span className="rq-wt-accept" style={styles.wtAccept}>↓ Download PDF</span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** Left half of the upload screen: an auto-advancing guide to what happens after upload. */
-function UploadWalkthrough() {
-  const [active, setActive] = useState(0);
-  // Hovering pauses the tour; leaving restarts the current step's countdown.
-  const [paused, setPaused] = useState(false);
-  const [round, setRound] = useState(0);
-  const current = WALKTHROUGH_STEPS[active];
-
-  useEffect(() => {
-    if (paused || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return undefined;
-    const timer = setTimeout(() => setActive((i) => (i + 1) % WALKTHROUGH_STEPS.length), WALKTHROUGH_STEP_MS);
-    return () => clearTimeout(timer);
-  }, [active, paused, round]);
-
-  return (
-    <div
-      className="rq-wt"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => { setPaused(false); setRound((r) => r + 1); }}
-    >
-      <div style={styles.uploadTitle}>What happens after you upload</div>
-      <h2 style={styles.wtHeading}>From resume to a tailored application in about ten minutes</h2>
-
-      <div style={styles.wtScreen} aria-hidden="true">
-        <div style={styles.wtScreenBar}>
-          <span style={styles.wtDot} />
-          <span style={styles.wtDot} />
-          <span style={styles.wtDot} />
-          <span style={styles.wtScreenTitle}>
-            Step {active + 1} of {WALKTHROUGH_STEPS.length} · {current.title}
-          </span>
-        </div>
-        <div key={current.id} style={styles.wtScreenBody}>
-          <WalkthroughVisual stepId={current.id} />
-        </div>
-      </div>
-
-      <ol style={styles.wtSteps}>
-        {WALKTHROUGH_STEPS.map((s, i) => {
-          const isActive = i === active;
-          return (
-            <li key={s.id}>
-              <button
-                type="button"
-                className="rq-wt-step"
-                aria-current={isActive ? "step" : undefined}
-                style={{ ...styles.wtStep, ...(isActive ? styles.wtStepActive : {}) }}
-                onClick={() => setActive(i)}
-              >
-                <span style={styles.stepCircle(isActive)}>{i + 1}</span>
-                <span style={{ minWidth: 0 }}>
-                  <span style={styles.wtStepTitle}>{s.title}</span>
-                  {isActive && <span style={styles.wtStepDesc}>{s.desc}</span>}
-                </span>
-                {isActive && (
-                  <span style={styles.wtProgressTrack}>
-                    <span
-                      key={`${s.id}-${round}`}
-                      style={{ ...styles.wtProgressFill, animationPlayState: paused ? "paused" : "running" }}
-                    />
-                  </span>
-                )}
-              </button>
-            </li>
-          );
-        })}
-      </ol>
-    </div>
-  );
-}
-
 export default function ResumeIQ() {
   const [step, setStep] = useState("upload");
   const [jobs, setJobs] = useState([]);
@@ -3697,8 +3216,6 @@ export default function ResumeIQ() {
   const [uploadedFileSize, setUploadedFileSize] = useState("");
   const [parsingStatus, setParsingStatus] = useState(() => ({ ...DEFAULT_PARSING_STATUS }));
   const [parsingError, setParsingError] = useState(null);
-  const [dropZoneHover, setDropZoneHover] = useState(false);
-  const fileInputRef = useRef(null);
   const [score, setScore] = useState(null);
   const [scoreBreakdown, setScoreBreakdown] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
@@ -4472,43 +3989,6 @@ export default function ResumeIQ() {
   0% { opacity: 0; transform: translateY(12px); }
   100% { opacity: 1; transform: translateY(0); }
 }
-/* Upload screen walkthrough */
-@keyframes rqPop {
-  0% { opacity: 0; transform: translateY(6px) scale(0.96); }
-  100% { opacity: 1; transform: none; }
-}
-@keyframes rqSlideIn {
-  0% { opacity: 0; transform: translateX(-14px); }
-  100% { opacity: 1; transform: none; }
-}
-@keyframes rqFill {
-  0% { transform: scaleX(0); }
-  100% { transform: scaleX(1); }
-}
-@keyframes rqScan {
-  0% { transform: translateY(-36px); }
-  100% { transform: translateY(272px); }
-}
-@keyframes rqProgress {
-  0% { transform: scaleX(0); }
-  100% { transform: scaleX(1); }
-}
-@keyframes rqNudge {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--rq-accent) 0%, transparent); }
-  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--rq-accent) 25%, transparent); }
-}
-.rq-wt-accept { animation: rqNudge 1.6s ease-in-out 2.2s infinite; }
-.rq-wt-step:not([aria-current]):hover { background: color-mix(in srgb, var(--rq-surface) 60%, transparent) !important; }
-.rq-home-link:hover { color: var(--rq-accent) !important; }
-.rq-wt-step:focus-visible { outline: 2px solid var(--rq-accent); outline-offset: 2px; }
-@media (max-width: 900px) {
-  .rq-upload-split { flex-direction: column; }
-  .rq-upload-panel { order: -1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .rq-wt *, .rq-wt-accept { animation: none !important; }
-  .rq-wt-scan { display: none; }
-}
 
 body {
   background: var(--rq-bg);
@@ -4610,76 +4090,16 @@ body {
 
         <main className="rq-main-card" style={styles.mainCard}>
           {step === "upload" && (
-            <section style={styles.stepSection}>
-              <a href={HOME_URL} className="rq-home-link" style={styles.homeLink}>
-                <span aria-hidden="true">←</span> Back to home
-              </a>
-              <div className="rq-upload-split" style={styles.uploadSplit}>
-                <div className="rq-upload-guide" style={styles.uploadGuide}>
-                  <UploadWalkthrough />
-                </div>
-                <div className="rq-upload-panel" style={styles.uploadPanel}>
-                  <div style={styles.uploadHero}>
-                    <div style={styles.uploadTitle}>Resume intelligence for your job search</div>
-                    <h1 style={styles.uploadHeadline}>
-                      Find Jobs That <span style={styles.uploadHeadlineAccent}>Actually Fit You</span>
-                    </h1>
-                    <p style={styles.uploadSubtext}>
-                      Upload your resume. We’ll scan the job market, score every match, and help you tailor your resume to land interviews.
-                    </p>
-                  </div>
-                  {parsingError && (
-                    <div style={{ marginBottom: 16, padding: 12, background: "color-mix(in srgb, var(--rq-danger) 15%, transparent)", borderRadius: 8, fontSize: 13, color: "var(--rq-danger)" }}>
-                      {parsingError}
-                    </div>
-                  )}
-                  <div
-                    style={{
-                      ...styles.dropZone,
-                      ...(dropZoneHover ? styles.dropZoneHover : {}),
-                    }}
-                    onDragOver={(e) => { e.preventDefault(); setDropZoneHover(true); }}
-                    onDragLeave={() => setDropZoneHover(false)}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      setDropZoneHover(false);
-                      const file = e.dataTransfer?.files?.[0];
-                      if (file && /\.(pdf|txt|md)$/i.test(file.name)) handleUploadAndParse(file);
-                    }}
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <div style={styles.dropZoneIcon}>↑</div>
-                    <div style={styles.dropZoneLabel}>Drop your resume here</div>
-                    <div style={styles.dropZoneBrowse}>or browse files</div>
-                    <div style={styles.dropZoneTypes}>PDF, TXT, Markdown</div>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
-                      style={{ display: "none" }}
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) handleUploadAndParse(file);
-                        e.target.value = "";
-                      }}
-                    />
-                  </div>
-                  <p style={{ textAlign: "center", marginTop: 24, fontSize: 12, color: "var(--rq-text-3)" }}>
-                    <button
-                      type="button"
-                      style={{ ...styles.ghostButton, fontSize: 12 }}
-                      onClick={() => {
-                        track("sample_resume_used");
-                        setResume(SAMPLE_RESUME);
-                        setStep("select");
-                      }}
-                    >
-                      Use sample resume instead
-                    </button>
-                  </p>
-                </div>
-              </div>
-            </section>
+            <UploadStep
+              homeHref={HOME_URL}
+              error={parsingError}
+              onFile={handleUploadAndParse}
+              onSample={() => {
+                track("sample_resume_used");
+                setResume(SAMPLE_RESUME);
+                setStep("select");
+              }}
+            />
           )}
 
           {step === "parsing" && (
