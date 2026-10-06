@@ -467,6 +467,194 @@ const styles = {
     fontSize: 12,
     color: "var(--rq-text-2)",
   },
+  jobsLayout: {
+    display: "grid",
+    gridTemplateColumns: "190px minmax(0, 1fr)",
+    gap: 28,
+    alignItems: "start",
+  },
+  jobsNav: {
+    position: "sticky",
+    top: 96,
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    paddingRight: 20,
+    borderRight: "1px solid var(--rq-border)",
+  },
+  jobsNavItem: (active) => ({
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    minHeight: 44,
+    padding: "8px 12px",
+    borderRadius: 10,
+    border: "none",
+    background: active ? "color-mix(in srgb, var(--rq-accent) 12%, transparent)" : "transparent",
+    color: active ? "var(--rq-accent)" : "var(--rq-text-2)",
+    fontFamily: "inherit",
+    fontSize: 14,
+    fontWeight: active ? 600 : 500,
+    textAlign: "left",
+    textDecoration: "none",
+    cursor: active ? "default" : "pointer",
+  }),
+  pasteJdDetails: {
+    marginBottom: 20,
+    padding: "12px 16px",
+    border: "1px solid var(--rq-border)",
+    borderRadius: 12,
+    background: "var(--rq-surface)",
+  },
+  pasteJdSummary: {
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 600,
+    color: "var(--rq-text)",
+    minHeight: 24,
+  },
+  jobList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
+  },
+  jobRow: (hovered) => ({
+    display: "flex",
+    alignItems: "stretch",
+    gap: 0,
+    background: "var(--rq-surface)",
+    border: `1px solid ${hovered ? "var(--rq-border-strong)" : "var(--rq-border)"}`,
+    borderRadius: 16,
+    overflow: "hidden",
+    cursor: "pointer",
+    boxShadow: hovered ? "0 8px 24px rgba(31, 42, 46, 0.08)" : "0 1px 2px rgba(31, 42, 46, 0.04)",
+    transition: "box-shadow 0.15s ease, border-color 0.15s ease",
+  }),
+  jobRowBody: {
+    flex: 1,
+    minWidth: 0,
+    padding: "20px 22px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+  },
+  companyMark: {
+    flex: "none",
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 22,
+    fontWeight: 700,
+    color: "var(--rq-accent)",
+    background: "color-mix(in srgb, var(--rq-accent) 10%, var(--rq-surface))",
+    border: "1px solid var(--rq-border)",
+  },
+  jobTagRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 6,
+  },
+  jobTag: {
+    fontSize: 11,
+    fontWeight: 600,
+    padding: "3px 8px",
+    borderRadius: 6,
+    background: "color-mix(in srgb, var(--rq-border) 60%, transparent)",
+    color: "var(--rq-text-2)",
+  },
+  jobRowTitle: {
+    margin: 0,
+    fontSize: 20,
+    fontWeight: 700,
+    lineHeight: 1.25,
+    color: "var(--rq-text)",
+  },
+  jobRowCompany: {
+    marginTop: 2,
+    fontSize: 14,
+    color: "var(--rq-text-2)",
+  },
+  jobRowMeta: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "8px 24px",
+    paddingTop: 12,
+    borderTop: "1px solid var(--rq-border)",
+  },
+  jobRowMetaItem: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 13,
+    color: "var(--rq-text)",
+  },
+  jobRowPreview: {
+    margin: 0,
+    fontSize: 13,
+    lineHeight: 1.55,
+    color: "var(--rq-text-2)",
+  },
+  jobRowActions: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  jobRowLink: {
+    fontSize: 12,
+    color: "var(--rq-info)",
+  },
+  jobIconButton: {
+    width: 40,
+    height: 40,
+    padding: 0, // the global button padding would squeeze the icon to nothing
+    borderRadius: 999,
+    border: "1px solid var(--rq-border)",
+    background: "var(--rq-surface)",
+    color: "var(--rq-text-2)",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+  },
+  jobScorePanel: {
+    flex: "none",
+    width: 210,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    padding: "20px 16px",
+    textAlign: "center",
+    background: "var(--rq-scrim)",
+    color: "#FFFFFF",
+  },
+  jobScoreValue: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 28,
+    fontWeight: 700,
+  },
+  jobScoreTier: {
+    fontSize: 14,
+    fontWeight: 700,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+  },
+  jobScoreNote: {
+    marginTop: 4,
+    fontSize: 11,
+    lineHeight: 1.4,
+    color: "rgba(255,255,255,0.72)",
+  },
   jobGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(min(340px, 100%), 1fr))",
@@ -1104,6 +1292,18 @@ function getStepOrder(step) {
     default:
       return 1;
   }
+}
+
+/** "3 days ago" style age for a posting date, or "" when unknown. */
+function timeAgo(date) {
+  const ms = Date.now() - Date.parse(date || "");
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const units = [["year", 365 * 864e5], ["month", 30 * 864e5], ["week", 7 * 864e5], ["day", 864e5], ["hour", 36e5], ["minute", 6e4]];
+  for (const [unit, size] of units) {
+    const n = Math.floor(ms / size);
+    if (n >= 1) return `${n} ${unit}${n === 1 ? "" : "s"} ago`;
+  }
+  return "Just now";
 }
 
 function getScoreTier(score) {
@@ -3955,6 +4155,18 @@ export default function ResumeIQ() {
   .rq-two-col > * { flex: 1 1 100% !important; width: 100% !important; position: static !important; }
 }
 
+/* Job Matches: the left nav becomes a row above the list on narrow screens; on phones the score panel sits under the card. */
+@media (max-width: 900px) {
+  .rq-jobs-layout { grid-template-columns: minmax(0, 1fr) !important; gap: 16px !important; }
+  .rq-jobs-nav { position: static !important; flex-direction: row !important; overflow-x: auto; padding-right: 0 !important; border-right: none !important; border-bottom: 1px solid var(--rq-border); padding-bottom: 8px; }
+  .rq-jobs-nav-item { white-space: nowrap; }
+}
+@media (max-width: 640px) {
+  .rq-job-card { flex-direction: column; }
+  .rq-job-score { width: auto !important; flex-direction: row !important; justify-content: flex-start !important; text-align: left !important; }
+}
+.rq-jobs-nav-item:not([aria-current]):hover { background: color-mix(in srgb, var(--rq-border) 50%, transparent) !important; color: var(--rq-text) !important; }
+.rq-jobs-nav-item:focus-visible, .rq-job-card button:focus-visible, .rq-job-card a:focus-visible { outline: 2px solid var(--rq-accent); outline-offset: 2px; }
 /* Phones: wrap the header, compact the stepper, stack two-column layouts. */
 @media (max-width: 640px) {
   .rq-app-root { padding: 12px 12px 32px !important; }
@@ -4145,6 +4357,37 @@ body {
 
           {step === "select" && (
             <section style={styles.stepSection}>
+              <div className="rq-jobs-layout" style={styles.jobsLayout}>
+              <nav className="rq-jobs-nav" aria-label="ResumeIQ sections" style={styles.jobsNav}>
+                {[
+                  { id: "jobs", label: "Jobs", icon: <><rect x="3" y="7" width="18" height="13" rx="2" /><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /><path d="M3 13h18" /></>, active: true },
+                  { id: "resume", label: "Resume", icon: <><path d="M7 3h7l5 5v13H7z" /><path d="M14 3v5h5" /><path d="M10 13h6M10 17h4" /></>, onClick: () => setStep("preview") },
+                  { id: "upload", label: "Upload new resume", icon: <><path d="M12 16V4" /><path d="M6 10l6-6 6 6" /><path d="M4 20h16" /></>, onClick: handleReset },
+                  { id: "home", label: "Home", icon: <><path d="M3 11l9-8 9 8" /><path d="M5 10v10h14V10" /></>, href: HOME_URL },
+                ].map((item) => {
+                  const content = (
+                    <>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{item.icon}</svg>
+                      <span>{item.label}</span>
+                    </>
+                  );
+                  return item.href ? (
+                    <a key={item.id} href={item.href} className="rq-jobs-nav-item" style={styles.jobsNavItem(false)}>{content}</a>
+                  ) : (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="rq-jobs-nav-item"
+                      aria-current={item.active ? "page" : undefined}
+                      style={styles.jobsNavItem(item.active)}
+                      onClick={item.onClick}
+                    >
+                      {content}
+                    </button>
+                  );
+                })}
+              </nav>
+              <div style={{ minWidth: 0 }}>
               <div style={{ ...styles.sectionHeader, display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
                 <div>
                   <h2 style={styles.sectionTitle}>Your Job Matches</h2>
@@ -4336,7 +4579,9 @@ body {
                 )}
               </div>
 
-              <div style={styles.linkedInPanel}>
+              <details className="rq-paste-jd" style={styles.pasteJdDetails}>
+                <summary style={styles.pasteJdSummary}>Found a role elsewhere? Paste its job description</summary>
+                <div style={{ marginTop: 12 }}>
                 <div style={styles.panelLabelRow}>
                   <div style={styles.panelLabel}>
                     <span>Paste JD / Job Posting</span>
@@ -4372,7 +4617,8 @@ body {
                     </span>
                   )}
                 </div>
-              </div>
+                              </div>
+              </details>
 
               {belowLevelJobIds.size > 0 && (
                 <div style={{ marginBottom: 12, fontSize: 12, color: "var(--rq-text-2)", display: "flex", alignItems: "center", gap: 8 }}>
@@ -4393,101 +4639,130 @@ body {
                   No jobs yet. Search above to find roles that match your resume.
                 </div>
               )}
-              <div style={styles.jobGrid}>
+              <div style={styles.jobList}>
                 {sortedJobs.map((job) => {
                   const hovered = hoveredJobId === job.id;
                   const matchInfo = jobMatchScores.get(job.id);
+                  const tier = matchInfo ? getScoreTier(matchInfo.score) : null;
+                  const posted = timeAgo(job.postedAt);
                   return (
-                    <div
+                    <article
                       key={job.id}
-                      style={styles.jobCard(hovered)}
+                      className="rq-job-card"
+                      style={styles.jobRow(hovered)}
                       onMouseEnter={() => setHoveredJobId(job.id)}
                       onMouseLeave={() => setHoveredJobId(null)}
                       onClick={() => setExpandedJob(job)}
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 8,
-                          marginBottom: 4,
-                        }}
-                      >
-                        <div style={styles.jobCompany}>
-                          {job.company}
+                      <div style={styles.jobRowBody}>
+                        <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+                          <div style={styles.companyMark} aria-hidden="true">
+                            {(job.company || "?").trim().charAt(0).toUpperCase()}
+                          </div>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={styles.jobTagRow}>
+                              {posted && <span style={styles.jobTag}>{posted}</span>}
+                              {job.badge && <span style={styles.badgePill(job.badge)}>{job.badge}</span>}
+                              {sourceLabel(job.source) && <span style={styles.sourcePill}>{sourceLabel(job.source)}</span>}
+                            </div>
+                            <h3 style={styles.jobRowTitle}>{job.role}</h3>
+                            <div style={styles.jobRowCompany}>{job.company}</div>
+                          </div>
                         </div>
-                        <button
-                          type="button"
-                          style={{
-                            ...styles.dangerButton,
-                            padding: "4px 8px",
-                            fontSize: 10,
-                          }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteJob(job.id);
-                          }}
-                        >
-                          ✕ Remove
-                        </button>
-                      </div>
-                      <div style={styles.jobTitle}>{job.role}</div>
-                      <div style={styles.jobMetaRow}>
-                        <div style={styles.jobLocation}>{job.location}</div>
-                        <div style={styles.jobSalary}>{job.salary}</div>
-                      </div>
-                      <div style={styles.jobMetaRow}>
-                        {matchInfo && (
-                          <div
-                            style={styles.matchPill(matchInfo.score)}
-                            title={matchInfo.analyzed ? "Score from the full AI analysis" : "Quick keyword estimate – open the role and Analyze My Fit for the full score"}
+                        <div style={styles.jobRowMeta}>
+                          {job.location && (
+                            <span style={styles.jobRowMetaItem}>
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z" /><circle cx="12" cy="10" r="2.5" /></svg>
+                              {job.location}
+                            </span>
+                          )}
+                          {job.salary && (
+                            <span style={styles.jobRowMetaItem}>
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /></svg>
+                              {job.salary}
+                            </span>
+                          )}
+                        </div>
+                        {job.jd && (
+                          <p style={styles.jobRowPreview}>{job.jd.length > 220 ? `${job.jd.slice(0, 220)}…` : job.jd}</p>
+                        )}
+                        <div style={styles.jobRowActions}>
+                          {job.url && (
+                            <a
+                              href={job.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              style={styles.jobRowLink}
+                            >
+                              View posting {postingLinkText(job.source)} →
+                            </a>
+                          )}
+                          <span style={{ flex: 1 }} />
+                          <button
+                            type="button"
+                            aria-label={`Remove ${job.role} at ${job.company}`}
+                            title="Remove this role"
+                            style={styles.jobIconButton}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteJob(job.id);
+                            }}
                           >
-                            {matchInfo.analyzed ? `${matchInfo.score}% Match ✓` : `~${matchInfo.score}% Match`}
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M5.6 5.6l12.8 12.8" /></svg>
+                          </button>
+                          <button
+                            type="button"
+                            style={styles.ghostButton}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedJob(job);
+                            }}
+                          >
+                            View details
+                          </button>
+                          <button
+                            type="button"
+                            style={styles.primaryButton}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleJobAnalyzeClick(job);
+                            }}
+                          >
+                            Analyze my fit →
+                          </button>
+                        </div>
+                      </div>
+                      <div className="rq-job-score" style={styles.jobScorePanel}>
+                        <div style={{ position: "relative", width: 96, height: 96 }}>
+                          <svg width="96" height="96" viewBox="0 0 96 96" aria-hidden="true">
+                            <circle cx="48" cy="48" r="42" fill="none" stroke="rgba(255,255,255,0.14)" strokeWidth="6" />
+                            {matchInfo && (
+                              <circle
+                                cx="48" cy="48" r="42" fill="none"
+                                stroke={`color-mix(in srgb, ${tier.color} 70%, white)`}
+                                strokeWidth="6" strokeLinecap="round"
+                                strokeDasharray={`${(matchInfo.score / 100) * 263.9} 263.9`}
+                                transform="rotate(-90 48 48)"
+                              />
+                            )}
+                          </svg>
+                          <div style={styles.jobScoreValue}>
+                            {matchInfo ? <>{matchInfo.analyzed ? "" : "~"}{matchInfo.score}<span style={{ fontSize: 15 }}>%</span></> : "–"}
                           </div>
-                        )}
-                        {job.badge && (
-                          <div style={styles.badgePill(job.badge)}>
-                            {job.badge}
+                        </div>
+                        <div>
+                          <div style={styles.jobScoreTier}>{tier ? tier.label : "Not scored yet"}</div>
+                          <div style={styles.jobScoreNote}>
+                            {!matchInfo ? "Open the role to analyze" : matchInfo.analyzed ? "From the full AI analysis" : "Quick estimate · analyze for the full score"}
                           </div>
-                        )}
-                        {sourceLabel(job.source) && (
-                          <div style={styles.sourcePill}>{sourceLabel(job.source)}</div>
-                        )}
+                        </div>
                       </div>
-                      <div style={styles.jobPreview}>
-                        {job.jd ? (job.jd.length > 280 ? `${job.jd.slice(0, 280)}…` : job.jd) : ""}
-                      </div>
-                      {job.url && (
-                        <a
-                          href={job.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ fontSize: 11, color: "var(--rq-info)", marginTop: 6, display: "inline-block" }}
-                        >
-                          View full JD {postingLinkText(job.source)} →
-                        </a>
-                      )}
-                      <div style={styles.cardFooterRow}>
-                        <button
-                          type="button"
-                          style={styles.analyzeCta(hovered)}
-                        >
-                          View Details →
-                        </button>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            color: "var(--rq-text-3)",
-                          }}
-                        >
-                          Click anywhere to open
-                        </span>
-                      </div>
-                    </div>
+                    </article>
                   );
                 })}
+              </div>
+              </div>
               </div>
             </section>
           )}
