@@ -21,7 +21,8 @@ const CHROME_PATH = process.env.CHROME_PATH || "/Applications/Google Chrome.app/
 const PAGE_TIMEOUT_MS = 45000;
 const SESSION_TTL_MS = 10 * 60 * 1000; // how long a submission waits for a verification code
 const RESULT_WAIT_MS = 20000;
-const UPLOAD_WAIT_MS = 30000; // the resume uploads in the background after it's chosen
+const UPLOAD_WAIT_MS = 30000;
+const CODE_RESULT_WAIT_MS = 45000; // submitting after the code can take a while (spinner on the button) // the resume uploads in the background after it's chosen
 
 let browserPromise = null;
 const sessions = new Map(); // sessionId → { context, page, dir, timer }
@@ -232,23 +233,30 @@ async function keepPage(page, step) {
   console.log(`[easy-apply] ${step} page kept at ${base}.png`);
 }
 
-/** What the page shows after a submit or code click. */
-async function readOutcome(page) {
-  const deadline = Date.now() + RESULT_WAIT_MS;
+const BAD_CODE_TEXT = /(invalid|incorrect|wrong|expired)[^.]{0,40}code|code[^.]{0,40}(invalid|incorrect|expired|doesn't match|does not match)/;
+
+/**
+ * What the page shows after a submit or code click. Greenhouse keeps its code message on the
+ * page while it submits (the button shows a spinner), so after a code is entered that message
+ * means "still working", not "code needed": only success, a rejected code or errors end the wait.
+ */
+async function readOutcome(page, { afterCode = false } = {}) {
+  const deadline = Date.now() + (afterCode ? CODE_RESULT_WAIT_MS : RESULT_WAIT_MS);
   while (Date.now() < deadline) {
-    const state = await page.evaluate(({ success, code, codeInputs }) => {
+    const state = await page.evaluate(({ success, code, badCode, codeInputs, afterCode }) => {
       const text = document.body.innerText.toLowerCase();
       const visible = (el) => !!(el.offsetWidth || el.offsetHeight);
       const codeBoxes = [...document.querySelectorAll(codeInputs)].filter(visible).length;
       if (/\/confirmation\b/.test(location.pathname) || (new RegExp(success).test(text) && !codeBoxes)) return { status: "submitted" };
-      if (codeBoxes || new RegExp(code).test(text)) return { status: "code_required" };
+      if (afterCode && new RegExp(badCode).test(text)) return { status: "code_required", errors: ["That code wasn't accepted – check the latest email and try again"] };
+      if (!afterCode && (codeBoxes || new RegExp(code).test(text))) return { status: "code_required" };
       const errors = [...document.querySelectorAll('[aria-invalid="true"], .helper-text--error')]
         .filter(visible)
         .map((el) => (el.closest("[class*=field], .select, fieldset")?.querySelector("label")?.textContent || el.textContent || "").trim())
         .filter(Boolean);
       if (errors.length) return { status: "errors", errors: [...new Set(errors)].slice(0, 10) };
       return null;
-    }, { success: SUCCESS_TEXT.source, code: CODE_TEXT.source, codeInputs: CODE_INPUTS });
+    }, { success: SUCCESS_TEXT.source, code: CODE_TEXT.source, badCode: BAD_CODE_TEXT.source, codeInputs: CODE_INPUTS, afterCode });
     if (state) return state;
     await page.waitForTimeout(800);
   }
@@ -309,7 +317,7 @@ export async function enterCode(sessionId, code) {
   if (!filledOne) for (let i = 0; i < Math.min(count, chars.length); i += 1) await boxes.nth(i).fill(chars[i]);
   const button = page.getByRole("button", { name: /verify|confirm|continue|submit/i }).first();
   if (await button.count()) await button.click().catch(() => {});
-  const outcome = await readOutcome(page);
+  const outcome = await readOutcome(page, { afterCode: true });
   await keepPage(page, `after-code-${outcome.status}`);
   if (outcome.status !== "code_required") closeSession(sessionId);
   return outcome;
