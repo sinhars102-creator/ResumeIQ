@@ -338,3 +338,14 @@ test("Easy Apply fill: rules from profile, never diversity or acknowledgements",
   assert.ok(!answers.q3 && needsYou.some((n) => n.id === "q3"));
   assert.ok(!answers.q4 && needsYou.some((n) => n.id === "q4"));
 });
+
+test("Easy Apply fill reads CCTC / ECTC as current / expected CTC", async () => {
+  const { fillForm } = await import("./easyApplyFill.js");
+  const fields = [
+    { id: "a", label: "What is your CCTC in LPA ?", type: "text", required: true, section: "application" },
+    { id: "b", label: "What is your Expected CTC in LPA ?", type: "text", required: true, section: "application" },
+  ];
+  const { answers } = await fillForm({ fields, profile: { current_ctc_lpa: 28, expected_ctc_lpa: 38 } });
+  assert.equal(answers.a.value, "28 LPA");
+  assert.equal(answers.b.value, "38 LPA");
+});

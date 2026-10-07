@@ -74,8 +74,9 @@ function ruleAnswer(field, profile, resume) {
     }
   }
   if (/notice period/.test(label) && profile.notice_period_days != null) return value(`${profile.notice_period_days} days`);
-  if (/current (ctc|salary|compensation)/.test(label) && profile.current_ctc_lpa != null) return value(`${profile.current_ctc_lpa} LPA`);
-  if (/expected (ctc|salary|compensation)/.test(label) && profile.expected_ctc_lpa != null) return value(`${profile.expected_ctc_lpa} LPA`);
+  // Indian forms often write CCTC / ECTC for current / expected CTC.
+  if (/\bcctc\b|current (ctc|salary|compensation|package)/.test(label) && profile.current_ctc_lpa != null) return value(`${profile.current_ctc_lpa} LPA`);
+  if (/\bectc\b|expected (ctc|salary|compensation|package)/.test(label) && profile.expected_ctc_lpa != null) return value(`${profile.expected_ctc_lpa} LPA`);
   return null;
 }
 

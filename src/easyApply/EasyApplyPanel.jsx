@@ -14,6 +14,12 @@ const questionKey = (label) => String(label || "").toLowerCase().replace(/[^a-z0
 // Fields whose answer is the same for every employer, kept as profile columns rather than saved answers.
 const PROFILE_FIELD = { first_name: "first_name", last_name: "last_name", email: "email", phone: "phone", location: "city" };
 
+/** "linkedin.com/in/x" → "https://linkedin.com/in/x"; empty stays empty. */
+const withScheme = (url) => {
+  const u = String(url || "").trim();
+  return !u || /^https?:\/\//i.test(u) ? u : `https://${u}`;
+};
+
 /** Starting profile from the parsed resume: name, email, phone, LinkedIn from its contact line. */
 function profileFromResume(resume, email) {
   const parts = String(resume?.name || "").trim().split(/\s+/).filter(Boolean);
@@ -105,6 +111,7 @@ function ProfileStep({ initial, onSave, onCancel }) {
     try {
       await onSave({
         ...p,
+        linkedin_url: withScheme(p.linkedin_url),
         current_ctc_lpa: num(p.current_ctc_lpa),
         expected_ctc_lpa: num(p.expected_ctc_lpa),
         notice_period_days: num(p.notice_period_days),
@@ -131,7 +138,8 @@ function ProfileStep({ initial, onSave, onCancel }) {
         {text("last_name", "Last name", "text", { required: true })}
         {text("email", "Email", "email", { required: true })}
         {text("phone", "Phone", "tel", { required: true })}
-        {text("linkedin_url", "LinkedIn URL", "url")}
+        {/* Plain text, not type="url": resumes write "linkedin.com/in/…" without https://, which a url input rejects. */}
+        {text("linkedin_url", "LinkedIn URL", "text", { inputMode: "url", placeholder: "linkedin.com/in/yourname" })}
         {text("city", "Current city")}
         {text("current_ctc_lpa", "Current CTC (LPA)", "number", { min: 0, step: "0.1" })}
         {text("expected_ctc_lpa", "Expected CTC (LPA)", "number", { min: 0, step: "0.1" })}
