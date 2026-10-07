@@ -21,6 +21,7 @@ const CHROME_PATH = process.env.CHROME_PATH || "/Applications/Google Chrome.app/
 const PAGE_TIMEOUT_MS = 45000;
 const SESSION_TTL_MS = 10 * 60 * 1000; // how long a submission waits for a verification code
 const RESULT_WAIT_MS = 20000;
+const UPLOAD_WAIT_MS = 30000; // the resume uploads in the background after it's chosen
 
 let browserPromise = null;
 const sessions = new Map(); // sessionId → { context, page, dir, timer }
@@ -80,7 +81,7 @@ async function fillField(page, field, value, files) {
     const input = page.locator(cssId(field.id));
     if (!(await input.count())) return "upload box not found";
     await input.setInputFiles(path);
-    return null;
+    return (await resumeAttached(page, files.resumeName, UPLOAD_WAIT_MS)) ? null : "the resume didn't finish uploading";
   }
   if (value == null || value === "" || (Array.isArray(value) && !value.length)) return null;
 
@@ -122,6 +123,27 @@ async function fillField(page, field, value, files) {
   return null;
 }
 
+/**
+ * Greenhouse uploads a chosen file in the background: the upload box disappears and the file's
+ * name shows once it's stored. Submitting before that fails with "Resume/CV is required".
+ */
+async function resumeAttached(page, fileName, waitMs) {
+  try {
+    await page.waitForFunction(
+      (name) => {
+        const text = document.body.innerText;
+        const at = text.indexOf("Resume/CV");
+        return at >= 0 && text.slice(at, at + 400).includes(name);
+      },
+      fileName,
+      { timeout: waitMs },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Phone needs its country picked first (the page's dial-code selector). */
 async function fillCountry(page, country) {
   const input = page.locator("#country");
@@ -138,7 +160,9 @@ async function openAndFill({ board, jobId, fields, values, country, resumePdfBas
   const dir = mkdtempSync(join(tmpdir(), "rq-apply-"));
   const files = {};
   if (resumePdfBase64) {
-    files.resume = join(dir, "resume.pdf");
+    const who = [values.first_name, values.last_name].filter(Boolean).join("_").replace(/[^A-Za-z0-9_-]+/g, "") || "Applicant";
+    files.resumeName = `${who}_Resume.pdf`;
+    files.resume = join(dir, files.resumeName);
     writeFileSync(files.resume, Buffer.from(String(resumePdfBase64).replace(/^data:[^,]*,/, ""), "base64"));
   }
   const context = await (await browser()).newContext({ locale: "en-IN", viewport: { width: 1280, height: 900 } });
@@ -157,7 +181,7 @@ async function openAndFill({ board, jobId, fields, values, country, resumePdfBas
       problems.push({ id: field.id, label: field.label, reason: err.message.split("\n")[0].slice(0, 120) });
     }
   }
-  return { context, page, dir, problems };
+  return { context, page, dir, problems, files };
 }
 
 function closeSession(id) {
@@ -204,12 +228,18 @@ async function readOutcome(page) {
 
 /** Fill and submit. A submission that needs a verification code stays open for enterCode(). */
 export async function submit(input) {
-  const { context, page, dir, problems } = await openAndFill(input);
+  const { context, page, dir, problems, files } = await openAndFill(input);
   const blocking = problems.filter((p) => input.fields.find((f) => f.id === p.id)?.required || p.id === "country");
   if (blocking.length) {
     await context.close().catch(() => {});
     rmSync(dir, { recursive: true, force: true });
     return { status: "not_filled", problems: blocking };
+  }
+  // Last check: never submit without the resume actually attached.
+  if (input.fields.some((f) => f.id === "resume") && files.resume && !(await resumeAttached(page, files.resumeName, 5000))) {
+    await context.close().catch(() => {});
+    rmSync(dir, { recursive: true, force: true });
+    return { status: "not_filled", problems: [{ id: "resume", label: "Resume/CV", reason: "the resume didn't finish uploading" }] };
   }
   await page.getByRole("button", { name: /submit application/i }).first().click();
   const outcome = await readOutcome(page);
