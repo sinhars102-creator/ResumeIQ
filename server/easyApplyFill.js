@@ -77,6 +77,7 @@ function ruleAnswer(field, profile, resume) {
     case "email": return value(profile.email || contactPart(resume, /[\w.+-]+@[\w-]+\.[\w.]+/), profile.email ? "profile" : "resume");
     case "phone": return value(profile.phone || contactPart(resume, /\+?\(?\d[\d\s()-]{8,}\d/), profile.phone ? "profile" : "resume");
     case "location": return value(profile.city || "");
+    case "full_name": return value([profile.first_name || name.first, profile.last_name || name.last].filter(Boolean).join(" "));
     default: break;
   }
   if (/preferred (first )?name/.test(label)) return value(profile.preferred_name || profile.first_name || name.first);

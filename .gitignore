@@ -34,3 +34,6 @@ server/data/
 
 # Claude Code personal settings
 .claude/settings.local.json
+
+# Chrome extension local config (generated from .env)
+extension/config.js

@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ResumeIQ</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="top">
+    <span class="logo" aria-hidden="true">◈</span>
+    <span class="brand">ResumeIQ</span>
+    <span id="who" class="who"></span>
+  </header>
+
+  <main>
+    <section id="signedOut" class="card" hidden>
+      <h2>Sign in to ResumeIQ</h2>
+      <p>Sign in on the ResumeIQ website and this panel connects automatically.</p>
+      <button id="openApp" class="btn primary" type="button">Open ResumeIQ</button>
+    </section>
+
+    <section id="jobCard" class="card" hidden>
+      <div class="row-between">
+        <h2>Job on this page</h2>
+        <button id="rescan" class="link" type="button">Re-read page</button>
+      </div>
+      <div id="jobStatus" class="status" role="status"></div>
+      <form id="jobForm">
+        <label>Job title<input id="title" required></label>
+        <label>Company<input id="company" required></label>
+        <label>Location<input id="location"></label>
+        <label>Job description<textarea id="description" rows="6"></textarea></label>
+        <button id="saveJob" class="btn primary" type="submit">Add to ResumeIQ</button>
+      </form>
+    </section>
+
+    <section id="matchCard" class="card" hidden>
+      <div class="score">
+        <div class="ring" id="ring"><span id="scoreValue">–</span></div>
+        <div>
+          <div id="scoreLabel" class="score-label"></div>
+          <div id="scoreSummary" class="muted"></div>
+        </div>
+      </div>
+      <h3>Holding your match back</h3>
+      <ul id="gaps" class="list gaps"></ul>
+      <h3>Where you fit</h3>
+      <ul id="matched" class="list matched"></ul>
+    </section>
+
+    <section id="applyCard" class="card" hidden>
+      <h2>Application form</h2>
+      <p class="muted">Fills this page's form from your ResumeIQ profile and attaches your resume. Diversity questions and agreements are left for you. Review everything, then submit on the page yourself.</p>
+      <button id="autofill" class="btn primary" type="button">Autofill this application</button>
+      <div id="applyStatus" class="status" role="status"></div>
+      <ul id="skipped" class="list gaps"></ul>
+    </section>
+  </main>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

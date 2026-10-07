@@ -13,7 +13,8 @@
     "dev:all": "concurrently \"npm run dev\" \"npm run server\"",
     "test": "node --test \"server/**/*.test.js\"",
     "check-sources": "node scripts/check-job-sources.mjs",
-    "collect": "node --env-file-if-exists=.env server/collectJobs.js"
+    "collect": "node --env-file-if-exists=.env server/collectJobs.js",
+    "ext:config": "node --env-file-if-exists=.env scripts/ext-config.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
