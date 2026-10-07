@@ -468,6 +468,36 @@ const styles = {
     fontSize: 12,
     color: "var(--rq-text-2)",
   },
+  jobFilterRow: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 10,
+    marginBottom: 14,
+  },
+  filterChip: (active) => ({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    minHeight: 40,
+    padding: "8px 14px",
+    borderRadius: 999,
+    border: `1px solid ${active ? "var(--rq-accent)" : "var(--rq-border-strong)"}`,
+    background: active ? "var(--rq-accent)" : "var(--rq-surface)",
+    color: active ? "#FFFFFF" : "var(--rq-text)",
+    fontFamily: "inherit",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+  }),
+  easyApplyTag: {
+    fontSize: 11,
+    fontWeight: 700,
+    padding: "3px 8px",
+    borderRadius: 6,
+    background: "color-mix(in srgb, var(--rq-accent) 14%, transparent)",
+    color: "var(--rq-accent)",
+  },
   jobsLayout: {
     display: "grid",
     gridTemplateColumns: "190px minmax(0, 1fr)",
@@ -1294,6 +1324,9 @@ function getStepOrder(step) {
       return 1;
   }
 }
+
+/** Roles Easy Apply can fill inside ResumeIQ (Greenhouse career pages, for now). */
+const isEasyApplyJob = (job) => String(job?.id || "").startsWith("gh-");
 
 /** "3 days ago" style age for a posting date, or "" when unknown. */
 function timeAgo(date) {
@@ -3388,6 +3421,7 @@ export default function ResumeIQ() {
   const [step, setStep] = useState("upload");
   // Job whose Easy Apply panel is open (Greenhouse roles only, for now).
   const [easyApplyJob, setEasyApplyJob] = useState(null);
+  const [easyApplyOnly, setEasyApplyOnly] = useState(false);
   const [jobs, setJobs] = useState([]);
   const jobsRef = useRef(jobs);
   const searchIdRef = useRef(0);
@@ -3529,6 +3563,8 @@ export default function ResumeIQ() {
     }
     return list;
   }, [jobs, jobSortBy, jobMatchScores, showBelowLevelJobs, belowLevelJobIds]);
+  const easyApplyCount = useMemo(() => sortedJobs.filter(isEasyApplyJob).length, [sortedJobs]);
+  const visibleJobs = useMemo(() => (easyApplyOnly ? sortedJobs.filter(isEasyApplyJob) : sortedJobs), [sortedJobs, easyApplyOnly]);
 
   const handleJobAnalyzeClick = (job) => {
     setSelectedJob(job);
@@ -4623,6 +4659,25 @@ body {
                               </div>
               </details>
 
+              {sortedJobs.length > 0 && (
+                <div style={styles.jobFilterRow}>
+                  <button
+                    type="button"
+                    aria-pressed={easyApplyOnly}
+                    className="rq-filter-chip"
+                    style={styles.filterChip(easyApplyOnly)}
+                    onClick={() => setEasyApplyOnly((v) => !v)}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z" /></svg>
+                    Easy Apply only ({easyApplyCount})
+                  </button>
+                  {easyApplyOnly && easyApplyCount === 0 && (
+                    <span style={{ fontSize: 13, color: "var(--rq-text-2)" }}>
+                      No Easy Apply roles in these results yet – they come from company career pages on Greenhouse.
+                    </span>
+                  )}
+                </div>
+              )}
               {belowLevelJobIds.size > 0 && (
                 <div style={{ marginBottom: 12, fontSize: 12, color: "var(--rq-text-2)", display: "flex", alignItems: "center", gap: 8 }}>
                   {showBelowLevelJobs
@@ -4643,7 +4698,7 @@ body {
                 </div>
               )}
               <div style={styles.jobList}>
-                {sortedJobs.map((job) => {
+                {visibleJobs.map((job) => {
                   const hovered = hoveredJobId === job.id;
                   const matchInfo = jobMatchScores.get(job.id);
                   const tier = matchInfo ? getScoreTier(matchInfo.score) : null;
@@ -4665,6 +4720,7 @@ body {
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <div style={styles.jobTagRow}>
                               {posted && <span style={styles.jobTag}>{posted}</span>}
+                              {isEasyApplyJob(job) && <span style={styles.easyApplyTag}>Easy Apply</span>}
                               {job.badge && <span style={styles.badgePill(job.badge)}>{job.badge}</span>}
                               {sourceLabel(job.source) && <span style={styles.sourcePill}>{sourceLabel(job.source)}</span>}
                             </div>
@@ -4726,7 +4782,7 @@ body {
                           </button>
                           <button
                             type="button"
-                            style={job.id.startsWith("gh-") ? styles.ghostButton : styles.primaryButton}
+                            style={isEasyApplyJob(job) ? styles.ghostButton : styles.primaryButton}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleJobAnalyzeClick(job);
@@ -4734,7 +4790,7 @@ body {
                           >
                             Analyze my fit →
                           </button>
-                          {job.id.startsWith("gh-") && (
+                          {isEasyApplyJob(job) && (
                             <button
                               type="button"
                               style={styles.primaryButton}
