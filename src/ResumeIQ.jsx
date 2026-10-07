@@ -5,6 +5,7 @@ import { jsPDF } from "jspdf";
 // PDF.js worker: bundle via Vite so production gets a valid asset URL (fixes "load failed" on Vercel)
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { track, bucket } from "./analytics.js";
+import EasyApplyPanel from "./easyApply/EasyApplyPanel.jsx";
 import UploadStep from "./UploadStep.jsx";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -3385,6 +3386,8 @@ const DEFAULT_PARSING_STATUS = { extractText: false, parseStructure: false, find
 
 export default function ResumeIQ() {
   const [step, setStep] = useState("upload");
+  // Job whose Easy Apply panel is open (Greenhouse roles only, for now).
+  const [easyApplyJob, setEasyApplyJob] = useState(null);
   const [jobs, setJobs] = useState([]);
   const jobsRef = useRef(jobs);
   const searchIdRef = useRef(0);
@@ -4723,7 +4726,7 @@ body {
                           </button>
                           <button
                             type="button"
-                            style={styles.primaryButton}
+                            style={job.id.startsWith("gh-") ? styles.ghostButton : styles.primaryButton}
                             onClick={(e) => {
                               e.stopPropagation();
                               handleJobAnalyzeClick(job);
@@ -4731,6 +4734,19 @@ body {
                           >
                             Analyze my fit →
                           </button>
+                          {job.id.startsWith("gh-") && (
+                            <button
+                              type="button"
+                              style={styles.primaryButton}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                track("easy_apply_opened", { source: job.source });
+                                setEasyApplyJob(job);
+                              }}
+                            >
+                              Easy Apply
+                            </button>
+                          )}
                         </div>
                       </div>
                       <div className="rq-job-score" style={styles.jobScorePanel}>
@@ -4765,6 +4781,20 @@ body {
               </div>
               </div>
             </section>
+          )}
+
+          {easyApplyJob && (
+            <EasyApplyPanel
+              job={easyApplyJob}
+              resume={resume}
+              apiBase={API_BASE}
+              onClose={() => setEasyApplyJob(null)}
+              onTailorResume={() => {
+                const job = easyApplyJob;
+                setEasyApplyJob(null);
+                handleJobAnalyzeClick(job);
+              }}
+            />
           )}
 
           {expandedJob && (
