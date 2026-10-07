@@ -8,7 +8,7 @@
  * name can occasionally match (most likely on Lever, whose API doesn't return the
  * company name). Requiring India roles keeps that rare; set status 'disabled' to drop one.
  */
-import { fetchBoard, isIndiaLocation, isRemoteAnywhere } from "./jobSources.js";
+import { fetchBoard, isIndiaScope } from "./jobSources.js";
 import { companyKey } from "./jobStore.js";
 
 const ATS_ORDER = ["greenhouse", "lever", "ashby", "workable"];
@@ -30,7 +30,7 @@ export function slugCandidates(name) {
 }
 
 export function countScope(jobs) {
-  return jobs.filter((j) => isIndiaLocation(j.location, { allowRemote: false }) || isRemoteAnywhere(j.location)).length;
+  return jobs.filter((j) => isIndiaScope(j.location)).length;
 }
 
 /**

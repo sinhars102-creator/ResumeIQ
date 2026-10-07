@@ -381,3 +381,11 @@ test("Easy Apply never agrees to terms on the applicant's behalf", async () => {
   assert.ok(!answers.arb && !answers.ack);
   assert.equal(needsYou.filter((n) => n.reason === "Needs your own acknowledgement").length, 2);
 });
+
+test("India-only scope leaves out remote roles tied to another country", async () => {
+  const { isIndiaScope } = await import("./jobSources.js");
+  assert.ok(isIndiaScope("Bengaluru, Karnataka"));
+  assert.ok(isIndiaScope("Remote"));
+  assert.ok(!isIndiaScope("Remote-Friendly (Travel-Required) |  Washington, DC"));
+  assert.ok(!isIndiaScope("Remote - Estonia"));
+});

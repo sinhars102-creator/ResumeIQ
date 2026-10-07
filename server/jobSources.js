@@ -102,6 +102,14 @@ export function isRemoteAnywhere(location) {
   return loc.replace(REMOTE_WORDS, " ").replace(/[^a-z]+/g, "") === "";
 }
 
+/**
+ * ResumeIQ's India-only scope, used everywhere roles are filtered: located in India, or remote
+ * with no country or city stated. "Remote-Friendly · Washington, DC" and "Remote - Estonia" are out.
+ */
+export function isIndiaScope(location) {
+  return isIndiaLocation(location, { allowRemote: false }) || isRemoteAnywhere(location);
+}
+
 const STOP = new Set(["and", "or", "of", "the", "a", "an", "in", "for", "to", "with", "at", "on", "senior", "sr", "jr", "junior", "lead", "ii", "iii", "i"]);
 const tokens = (s) => String(s || "").toLowerCase().split(/[^a-z0-9+#]+/).filter((t) => t && !STOP.has(t));
 
@@ -296,7 +304,7 @@ export async function searchCompanyBoards({ keywords, indiaOnly = true, companie
     try {
       const jobs = await fetchBoard(company);
       stats.ok += 1;
-      return jobs.filter((j) => titleMatches(j.role, keywords) && (!indiaOnly || isIndiaLocation(j.location)));
+      return jobs.filter((j) => titleMatches(j.role, keywords) && (!indiaOnly || isIndiaScope(j.location)));
     } catch (e) {
       stats.failed.push(`${company.ats}:${company.slug} (${e.name === "AbortError" ? "timeout" : e.message})`);
       return [];
