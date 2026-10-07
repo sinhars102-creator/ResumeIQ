@@ -15,6 +15,8 @@ import {
   jobStoreConfigured, toRow, inScope, upsertJobs, findStoredJobs, recordDemand, markDemandCollected, linkedInJobsForQuery,
 } from "./jobStore.js";
 import { normalizeQuery, FRESH_HOURS } from "./searchDemand.js";
+import { fetchEasyApplyForm, easyApplyTarget } from "./easyApply.js";
+import { fillForm } from "./easyApplyFill.js";
 import { searchApiSources, adzunaConfigured, loadCompanies } from "./jobSources.js";
 import { callLLM, llmProvider, llmModel, LLMUserError } from "./llm.js";
 
@@ -965,6 +967,31 @@ app.post("/api/rxresume/render-pdf", async (req, res) => {
 });
 
 // Health check for dev/proxy
+/**
+ * Easy Apply, phase 1 (nothing is submitted): the employer's real form for a job, and an
+ * autofill of it from the applicant's profile and resume for them to review.
+ */
+app.get("/api/easy-apply/form", async (req, res) => {
+  const jobId = String(req.query.jobId || "");
+  if (!easyApplyTarget(jobId)) return res.status(400).json({ error: "Easy Apply isn't available for this job yet" });
+  try {
+    return res.json(await fetchEasyApplyForm(jobId));
+  } catch (err) {
+    console.warn("[easy-apply] form fetch failed:", err.message);
+    return res.status(502).json({ error: "Could not load this application form" });
+  }
+});
+
+app.post("/api/easy-apply/fill", async (req, res) => {
+  const { fields, profile, resume, job } = req.body || {};
+  if (!Array.isArray(fields) || !fields.length) return res.status(400).json({ error: "fields are required" });
+  try {
+    return res.json(await fillForm({ fields: fields.slice(0, 80), profile: profile || {}, resume: resume || null, job: job || {} }));
+  } catch (err) {
+    return sendLLMError(res, err, "easy-apply");
+  }
+});
+
 app.get("/api/health", (_, res) =>
   res.json({
     ok: true,

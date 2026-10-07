@@ -316,3 +316,25 @@ test("All Jobs Scraper items map to Naukri and Glassdoor roles", async () => {
   assert.equal(gd.salary, "INR 15,00,000–25,00,000 per year");
   assert.equal(normalizeAllJobsItem({ platform: "Indeed", platform_url: "https://in.indeed.com/viewjob?jk=1" }), null);
 });
+
+test("Easy Apply fill: rules from profile, never diversity or acknowledgements", async () => {
+  const { fillForm, questionKey } = await import("./easyApplyFill.js");
+  const fields = [
+    { id: "first_name", label: "First Name", type: "text", required: true, section: "application" },
+    { id: "email", label: "Email", type: "email", required: true, section: "application" },
+    { id: "q1", label: "Are you legally authorized to work in India?", type: "select", required: true, section: "application", options: [{ value: "1", label: "Yes" }, { value: "0", label: "No" }] },
+    { id: "q2", label: "Will you require sponsorship?", type: "select", required: true, section: "application", options: [{ value: "a", label: "Yes" }, { value: "b", label: "No" }] },
+    { id: "q3", label: "Gender:", type: "select", required: false, section: "application", options: [{ value: "m", label: "Male" }] },
+    { id: "q4", label: "Candidate Privacy Policy", type: "select", required: true, section: "application", options: [{ value: "y", label: "I acknowledge" }] },
+    { id: "q5", label: "How did you hear about us?", type: "select", required: true, section: "application", options: [{ value: "li", label: "LinkedIn" }] },
+  ];
+  const profile = { first_name: "Asha", email: "asha@example.com", needs_sponsorship: false, saved_answers: { [questionKey("How did you hear about us?")]: "li" } };
+  const { answers, needsYou } = await fillForm({ fields, profile });
+  assert.equal(answers.first_name.value, "Asha");
+  assert.equal(answers.email.value, "asha@example.com");
+  assert.equal(answers.q1.value, "1");
+  assert.equal(answers.q2.value, "b");
+  assert.equal(answers.q5.source, "saved");
+  assert.ok(!answers.q3 && needsYou.some((n) => n.id === "q3"));
+  assert.ok(!answers.q4 && needsYou.some((n) => n.id === "q4"));
+});
