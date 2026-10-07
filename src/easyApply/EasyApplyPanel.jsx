@@ -45,7 +45,12 @@ function SignIn() {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const { error: err } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { shouldCreateUser: true } });
+    // The email carries a sign-in link back to the app (and a code too, once a custom email
+    // sender lets the template include one). Either signs the user in.
+    const { error: err } = await supabase.auth.signInWithOtp({
+      email: email.trim(),
+      options: { shouldCreateUser: true, emailRedirectTo: `${window.location.origin}/app` },
+    });
     setBusy(false);
     if (err) setError(err.message);
     else setSent(true);
@@ -67,11 +72,15 @@ function SignIn() {
         <form onSubmit={send} className="ea-signin-form">
           <label htmlFor="ea-email">Email</label>
           <input id="ea-email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-          <button type="submit" className="ea-btn ea-btn-primary" disabled={busy}>{busy ? "Sending…" : "Email me a sign-in code"}</button>
+          <button type="submit" className="ea-btn ea-btn-primary" disabled={busy}>{busy ? "Sending…" : "Email me a sign-in link"}</button>
         </form>
       ) : (
         <form onSubmit={verify} className="ea-signin-form">
-          <label htmlFor="ea-code">Code sent to {email}</label>
+          <div className="ea-sent">
+            <strong>Check your email.</strong> We sent a sign-in link to {email}. Click it and you'll be signed in here –
+            if it opens in a new tab, you can come back to this one.
+          </div>
+          <label htmlFor="ea-code">Got a code instead? Enter it here</label>
           <input id="ea-code" inputMode="numeric" autoComplete="one-time-code" required value={code} onChange={(e) => setCode(e.target.value)} placeholder="6-digit code" />
           <button type="submit" className="ea-btn ea-btn-primary" disabled={busy}>{busy ? "Checking…" : "Sign in"}</button>
           <button type="button" className="ea-link" onClick={() => setSent(false)}>Use a different email</button>

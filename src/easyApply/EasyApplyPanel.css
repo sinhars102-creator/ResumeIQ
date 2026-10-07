@@ -25,6 +25,7 @@
 .ea-signin h3, .ea-profile h3 { font-size: 22px; font-weight: 700; color: var(--rq-text); }
 .ea-signin p, .ea-profile p { font-size: 14px; color: var(--rq-text-2); line-height: 1.5; }
 .ea-signin-form { display: flex; flex-direction: column; gap: 10px; margin-top: 8px; }
+.ea-sent { font-size: 14px; line-height: 1.5; padding: 12px 14px; border-radius: 10px; background: color-mix(in srgb, var(--rq-accent) 10%, transparent); color: var(--rq-text); margin-bottom: 6px; }
 .ea-signin-form label, .ea-field > span { font-size: 13px; font-weight: 600; color: var(--rq-text); }
 .ea-panel input[type="text"], .ea-panel input[type="email"], .ea-panel input[type="tel"], .ea-panel input[type="url"], .ea-panel input[type="number"], .ea-panel input:not([type]), .ea-panel select, .ea-panel textarea {
   font: inherit; font-size: 14px; width: 100%; min-height: 44px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--rq-border-strong); background: var(--rq-surface); color: var(--rq-text);
