@@ -47,6 +47,22 @@ async function readJob() {
   }
 }
 
+/** ResumeIQ's id for a Greenhouse role from its page address, or null ("gh-<board>-<id>"). */
+function greenhouseJobId(url) {
+  try {
+    const u = new URL(url);
+    if (u.searchParams.get("gh_jid") && u.searchParams.get("for")) return `gh-${u.searchParams.get("for")}-${u.searchParams.get("gh_jid")}`;
+    if (u.hostname.endsWith("greenhouse.io")) {
+      const m = u.pathname.match(/^\/(?:embed\/job_app)?\/?([\w-]+)\/jobs\/(\d+)/);
+      if (m) return `gh-${m[1]}-${m[2]}`;
+      if (u.searchParams.get("token") && u.searchParams.get("for")) return `gh-${u.searchParams.get("for")}-${u.searchParams.get("token")}`;
+    }
+  } catch {
+    // not a URL
+  }
+  return null;
+}
+
 async function refresh() {
   const tab = await activeTab();
   tabId = tab?.id;
@@ -55,6 +71,10 @@ async function refresh() {
   $("signedOut").hidden = auth.signedIn;
   $("openApp").onclick = () => chrome.tabs.create({ url: auth.appUrl });
   for (const id of ["jobCard", "applyCard"]) $(id).hidden = !auth.signedIn;
+  // Greenhouse's dropdowns ignore extension input, so its applications go through Easy Apply.
+  const ghId = auth.signedIn ? greenhouseJobId(tab?.url || "") : null;
+  $("easyApplyCard").hidden = !ghId;
+  $("openEasyApply").onclick = () => chrome.tabs.create({ url: `${auth.appUrl}?easyApply=${encodeURIComponent(ghId)}` });
   if (auth.signedIn && /^https?:/.test(tab?.url || "")) await readJob();
 }
 

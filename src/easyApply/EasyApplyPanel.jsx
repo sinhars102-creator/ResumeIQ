@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase, loadProfile, saveProfile } from "./supabaseClient.js";
+import { buildResumePdf } from "../resumePdf.js";
 import "./EasyApplyPanel.css";
 
 /**
@@ -215,7 +216,7 @@ function FieldInput({ field, value, onChange }) {
 
 const SOURCE_LABEL = { profile: "From your profile", saved: "Your saved answer", resume: "From your resume", ai: "AI suggestion" };
 
-export default function EasyApplyPanel({ job, resume, getResumePdf, apiBase, onClose, onTailorResume }) {
+export default function EasyApplyPanel({ job, resume: appResume, getResumePdf, apiBase, onClose, onTailorResume }) {
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(!supabase);
   const [profile, setProfile] = useState(null);
@@ -233,6 +234,9 @@ export default function EasyApplyPanel({ job, resume, getResumePdf, apiBase, onC
   const [phase, setPhase] = useState("idle");
   const [result, setResult] = useState(null); // last response from rehearse / submit / code
   const [code, setCode] = useState("");
+
+  // Opened from the extension (no resume loaded in the app this session): use the profile's.
+  const resume = appResume || profile?.resume || null;
 
   // Session
   useEffect(() => {
@@ -337,7 +341,7 @@ export default function EasyApplyPanel({ job, resume, getResumePdf, apiBase, onC
     jobId: job.id,
     values,
     country: profile?.country || "India",
-    resumePdf: getResumePdf ? await getResumePdf() : null,
+    resumePdf: getResumePdf ? await getResumePdf() : resume ? buildResumePdf(resume, null)?.output("datauristring") : null,
   });
 
   /** Fill the employer's real page and show it – nothing is sent. */

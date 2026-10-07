@@ -3157,6 +3157,21 @@ export default function ResumeIQ() {
   // Job whose Easy Apply panel is open (Greenhouse roles only, for now).
   const [easyApplyJob, setEasyApplyJob] = useState(null);
   const [easyApplyOnly, setEasyApplyOnly] = useState(false);
+
+  // "/app?easyApply=gh-<board>-<id>" (from the Chrome extension) opens Easy Apply for that role.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const jobId = params.get("easyApply");
+    if (!jobId || !/^gh-[A-Za-z0-9_-]+-\d+$/.test(jobId)) return;
+    params.delete("easyApply");
+    window.history.replaceState({}, "", `${window.location.pathname}${params.size ? `?${params}` : ""}`);
+    fetch(`${API_BASE.replace(/\/$/, "")}/api/easy-apply/form?jobId=${encodeURIComponent(jobId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((form) => {
+        if (form) setEasyApplyJob({ id: jobId, role: form.job.title, company: form.job.company, location: form.job.location, url: form.applyUrl, source: "greenhouse" });
+      })
+      .catch(() => {});
+  }, []);
   const [jobs, setJobs] = useState([]);
   const jobsRef = useRef(jobs);
   const searchIdRef = useRef(0);
@@ -4578,7 +4593,7 @@ body {
             <EasyApplyPanel
               job={easyApplyJob}
               resume={updatedResume || resume}
-              getResumePdf={() => resumePdfDataUri(updatedResume || resume, pdfFormat)}
+              getResumePdf={updatedResume || resume ? () => resumePdfDataUri(updatedResume || resume, pdfFormat) : null}
               apiBase={API_BASE}
               onClose={() => setEasyApplyJob(null)}
               onTailorResume={() => {
