@@ -84,3 +84,4 @@
 .ea-rehearsal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13px; color: var(--rq-text); margin-bottom: 8px; }
 .ea-rehearsal img { display: block; width: 100%; max-height: 520px; object-fit: contain; object-position: top; background: #FFFFFF; border: 1px solid var(--rq-border); border-radius: 8px; }
 .ea-confirm { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--rq-text); }
+.ea-footer-error { font-size: 13px; font-weight: 600; color: var(--rq-danger); max-width: 360px; }

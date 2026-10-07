@@ -25,9 +25,19 @@ const RESULT_WAIT_MS = 20000;
 let browserPromise = null;
 const sessions = new Map(); // sessionId → { context, page, dir, timer }
 
-function browser() {
-  browserPromise ||= chromium.launch({ executablePath: CHROME_PATH, headless: process.env.EASY_APPLY_HEADFUL !== "1" });
-  return browserPromise;
+/** The shared automated browser, relaunched if it has closed or crashed since the last use. */
+async function browser() {
+  if (browserPromise) {
+    const b = await browserPromise.catch(() => null);
+    if (b?.isConnected()) return b;
+    browserPromise = null;
+  }
+  browserPromise = chromium.launch({ executablePath: CHROME_PATH, headless: process.env.EASY_APPLY_HEADFUL !== "1" });
+  const b = await browserPromise;
+  b.on("disconnected", () => {
+    browserPromise = null;
+  });
+  return b;
 }
 
 const cssId = (id) => `[id="${String(id).replace(/"/g, '\\"')}"]`;

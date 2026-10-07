@@ -268,6 +268,11 @@ export default function EasyApplyPanel({ job, resume, getResumePdf, apiBase, onC
       .catch((err) => setFormError(err.message));
   }, [apiBase, job.id]);
 
+  // Show results (rehearsal, errors, code screen) where the applicant will see them.
+  useEffect(() => {
+    if (result) document.querySelector(".ea-body")?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [result]);
+
   // Close on Escape
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
@@ -552,7 +557,13 @@ export default function EasyApplyPanel({ job, resume, getResumePdf, apiBase, onC
         </header>
         <div className="ea-body">{body()}</div>
         <footer className="ea-footer">
-          {missingRequired.length > 0 && form && session && !editingProfile && (
+          {(phase === "failed" || (result?.status === "error" && phase === "idle")) && (
+            <span className="ea-footer-error" role="alert">
+              {result?.status === "not_filled" ? "Some answers couldn't be filled – see the top of the panel." : result?.error || "Not sent – see the top of the panel."}
+            </span>
+          )}
+          {phase === "sending" && <span className="ea-muted" role="status">Filling and sending your application – this takes about 20 seconds…</span>}
+          {missingRequired.length > 0 && form && session && !editingProfile && phase !== "failed" && phase !== "sending" && (
             <span className="ea-muted">{missingRequired.length} required field{missingRequired.length === 1 ? "" : "s"} left</span>
           )}
           <a className="ea-btn" href={form?.applyUrl || job.url} target="_blank" rel="noopener noreferrer">Continue on company site</a>

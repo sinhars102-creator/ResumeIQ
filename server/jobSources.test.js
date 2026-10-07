@@ -368,3 +368,16 @@ test("Easy Apply fill picks the range a number falls in", async () => {
   assert.equal(answers.ectc.value, "2");
   assert.equal(answers.np.confidence, "check");
 });
+
+test("Easy Apply never agrees to terms on the applicant's behalf", async () => {
+  const { fillForm } = await import("./easyApplyFill.js");
+  const fields = [
+    { id: "arb", label: "Agreement to Arbitrate", type: "select", required: true, section: "application",
+      options: [{ value: "1", label: "I understand and agree to the terms of the Agreement to Arbitrate set forth above." }] },
+    { id: "ack", label: "Data processing", type: "select", required: true, section: "application",
+      options: [{ value: "y", label: "Yes, I acknowledge" }, { value: "n", label: "No" }] },
+  ];
+  const { answers, needsYou } = await fillForm({ fields, profile: {} });
+  assert.ok(!answers.arb && !answers.ack);
+  assert.equal(needsYou.filter((n) => n.reason === "Needs your own acknowledgement").length, 2);
+});

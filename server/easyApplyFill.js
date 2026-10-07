@@ -14,7 +14,11 @@
 import { callLLM } from "./llm.js";
 
 const DIVERSITY = /\b(gender|race|ethnic|veteran|disabilit|sexual orientation|pronoun|hispanic|latino|equal (employment )?opportunity|eeo)\b/i;
-const ACKNOWLEDGE = /\b(privacy (policy|notice)|attest\w*|acknowledg\w*|consent\w*|i (have read|agree|certify|confirm)|terms (and|&) conditions|declaration)\b/i;
+const ACKNOWLEDGE = /\b(privacy (policy|notice)|attest\w*|acknowledg\w*|consent\w*|agreement|arbitrat\w*|waiver|i (have read|agree|certify|confirm)|terms (and|&) conditions|terms of (use|service)|declaration|signature)\b/i;
+// An answer that commits the applicant ("I understand and agree…", "I acknowledge…") is theirs to give.
+const AGREEING_OPTION = /^\s*(yes,? )?i (understand|agree|acknowledge|accept|consent|certify|confirm|have read)\b/i;
+const isAcknowledgement = (field) =>
+  ACKNOWLEDGE.test(field.label) || field.type === "checkbox" || (field.options || []).some((o) => AGREEING_OPTION.test(o.label));
 
 /** Normalised form of a question, used to reuse saved answers across employers. */
 export function questionKey(label) {
@@ -151,7 +155,7 @@ export async function fillForm({ fields, profile = {}, resume = null, job = {} }
       needsYou.push({ id: field.id, reason: "Voluntary – your choice to answer" });
       continue;
     }
-    if (ACKNOWLEDGE.test(field.label) || field.type === "checkbox") {
+    if (isAcknowledgement(field)) {
       needsYou.push({ id: field.id, reason: "Needs your own acknowledgement" });
       continue;
     }
