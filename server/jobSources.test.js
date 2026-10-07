@@ -349,3 +349,22 @@ test("Easy Apply fill reads CCTC / ECTC as current / expected CTC", async () => 
   assert.equal(answers.a.value, "28 LPA");
   assert.equal(answers.b.value, "38 LPA");
 });
+
+test("Easy Apply fill picks the range a number falls in", async () => {
+  const { fillForm, optionRange } = await import("./easyApplyFill.js");
+  assert.deepEqual(optionRange("≤15 Days"), [0, 15]);
+  assert.deepEqual(optionRange("60 Days - 90 Days - Negotiable"), [60, 90]);
+  assert.deepEqual(optionRange("45 LPA +"), [45, Infinity]);
+  assert.equal(optionRange("Currently serving NP"), null);
+  const opts = (labels) => labels.map((label, i) => ({ value: String(i), label }));
+  const fields = [
+    { id: "np", label: "What is your official Notice Period?", type: "select", required: true, section: "application",
+      options: opts(["Currently not working", "≤15 Days", "30 Days Non Negotiable", "45 Days - Negotiable", "60 Days - 90 Days - Negotiable"]) },
+    { id: "ectc", label: "What is your Expected CTC in LPA ?", type: "select", required: true, section: "application",
+      options: opts(["Less than 10 LPA", "10 - 20 LPA", "32 - 40 LPA", "45 LPA +"]) },
+  ];
+  const { answers } = await fillForm({ fields, profile: { notice_period_days: 60, expected_ctc_lpa: 38 } });
+  assert.equal(answers.np.value, "4");
+  assert.equal(answers.ectc.value, "2");
+  assert.equal(answers.np.confidence, "check");
+});

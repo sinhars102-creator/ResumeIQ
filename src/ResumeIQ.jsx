@@ -2187,8 +2187,8 @@ async function extractPdfPhoto(file) {
  * Single-column resume PDF: photo top-left, name/title/contact to the right, then Summary, Experience, Education, Skills.
  * Uses format options so it matches the on-screen PDF preview.
  */
-function downloadResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FORMAT) {
-  if (!resumeData || typeof resumeData !== "object") return;
+function buildResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FORMAT) {
+  if (!resumeData || typeof resumeData !== "object") return null;
   const doc = new jsPDF({ format: "a4", unit: "mm" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -2415,8 +2415,33 @@ function downloadResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FORMAT
   doc.text("ResumeIQ", margin, pageH - 6);
   doc.setTextColor(0, 0, 0);
 
+  return doc;
+}
+
+function downloadResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FORMAT) {
+  const doc = buildResumePdf(resumeData, photoDataUrl, format);
+  if (!doc) return;
   const safeName = (resumeData.name || "resume").replace(/[^a-z0-9-_]/gi, "_").slice(0, 40);
   doc.save(`${safeName}_resume.pdf`);
+}
+
+/** The resume as a PDF data URI (for Easy Apply's upload), with its photo when it has one. */
+async function resumePdfDataUri(resumeData, format = DEFAULT_PDF_FORMAT) {
+  const photoUrl = resumeData?.photoUrl || null;
+  let photoDataUrl = photoUrl && photoUrl.startsWith("data:") ? photoUrl : null;
+  if (photoUrl && !photoDataUrl) {
+    try {
+      const blob = await (await fetch(photoUrl)).blob();
+      photoDataUrl = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      photoDataUrl = null; // the PDF still goes, just without the photo
+    }
+  }
+  return buildResumePdf(resumeData, photoDataUrl, format)?.output("datauristring") || null;
 }
 
 const FONT_FAMILY_MAP = { helvetica: "Helvetica, Arial", times: "Times New Roman, serif", courier: "Courier New, monospace" };
@@ -4842,7 +4867,8 @@ body {
           {easyApplyJob && (
             <EasyApplyPanel
               job={easyApplyJob}
-              resume={resume}
+              resume={updatedResume || resume}
+              getResumePdf={() => resumePdfDataUri(updatedResume || resume, pdfFormat)}
               apiBase={API_BASE}
               onClose={() => setEasyApplyJob(null)}
               onTailorResume={() => {

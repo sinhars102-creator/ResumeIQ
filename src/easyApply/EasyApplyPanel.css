@@ -75,3 +75,12 @@
   .ea-header h2 { font-size: 15px; white-space: normal; }
 }
 @media (prefers-reduced-motion: reduce) { .ea-panel { animation: none; } }
+
+.ea-outcome { max-width: 520px; margin: 0 auto; padding: 40px 24px; display: flex; flex-direction: column; gap: 12px; }
+.ea-outcome h3 { font-size: 22px; font-weight: 700; color: var(--rq-text); }
+.ea-outcome p { font-size: 14px; line-height: 1.5; color: var(--rq-text-2); }
+.ea-outcome-ok h3 { color: var(--rq-accent); }
+.ea-rehearsal { margin: 16px 20px 0; padding: 12px; border: 1px solid var(--rq-border); border-radius: 12px; background: color-mix(in srgb, var(--rq-border) 20%, var(--rq-surface)); }
+.ea-rehearsal-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13px; color: var(--rq-text); margin-bottom: 8px; }
+.ea-rehearsal img { display: block; width: 100%; max-height: 520px; object-fit: contain; object-position: top; background: #FFFFFF; border: 1px solid var(--rq-border); border-radius: 8px; }
+.ea-confirm { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; color: var(--rq-text); }

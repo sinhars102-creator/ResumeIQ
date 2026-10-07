@@ -215,7 +215,7 @@ function FieldInput({ field, value, onChange }) {
 
 const SOURCE_LABEL = { profile: "From your profile", saved: "Your saved answer", resume: "From your resume", ai: "AI suggestion" };
 
-export default function EasyApplyPanel({ job, resume, apiBase, onClose, onTailorResume }) {
+export default function EasyApplyPanel({ job, resume, getResumePdf, apiBase, onClose, onTailorResume }) {
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(!supabase);
   const [profile, setProfile] = useState(null);
@@ -229,6 +229,10 @@ export default function EasyApplyPanel({ job, resume, apiBase, onClose, onTailor
   const [fillError, setFillError] = useState("");
   const [codeMethod, setCodeMethod] = useState(null); // "gmail" | "manual"
   const [savedNote, setSavedNote] = useState("");
+  // Submission: idle | confirm | rehearsing | sending | code | done | failed
+  const [phase, setPhase] = useState("idle");
+  const [result, setResult] = useState(null); // last response from rehearse / submit / code
+  const [code, setCode] = useState("");
 
   // Session
   useEffect(() => {
@@ -278,6 +282,7 @@ export default function EasyApplyPanel({ job, resume, apiBase, onClose, onTailor
     return Array.isArray(v) ? v.length > 0 : v != null && String(v).trim() !== "";
   };
   const missingRequired = required.filter((f) => !isAnswered(f));
+  const canSubmit = !!(session && form && profile && !editingProfile && Object.keys(meta).length);
 
   const autofill = async () => {
     setFilling(true);
@@ -309,6 +314,63 @@ export default function EasyApplyPanel({ job, resume, apiBase, onClose, onTailor
   const setValue = (field, v) => {
     setValues((prev) => ({ ...prev, [field.id]: v }));
     setMeta((prev) => ({ ...prev, [field.id]: { ...prev[field.id], source: "you", confidence: "high" } }));
+  };
+
+  /** Call a phase-2 endpoint as the signed-in applicant. */
+  const callApply = async (path, body) => {
+    const r = await fetch(API(apiBase, path), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok && !d.status) throw new Error(d.error || `HTTP ${r.status}`);
+    return d;
+  };
+
+  const applyBody = async () => ({
+    jobId: job.id,
+    values,
+    country: profile?.country || "India",
+    resumePdf: getResumePdf ? await getResumePdf() : null,
+  });
+
+  /** Fill the employer's real page and show it – nothing is sent. */
+  const checkFilledForm = async () => {
+    setPhase("rehearsing");
+    setResult(null);
+    try {
+      setResult(await callApply("/api/easy-apply/rehearse", await applyBody()));
+    } catch (err) {
+      setResult({ status: "error", error: err.message });
+    }
+    setPhase("idle");
+  };
+
+  const sendApplication = async () => {
+    setPhase("sending");
+    setResult(null);
+    try {
+      const d = await callApply("/api/easy-apply/submit", await applyBody());
+      setResult(d);
+      setPhase(d.status === "submitted" ? "done" : d.status === "code_required" ? "code" : "failed");
+    } catch (err) {
+      setResult({ status: "error", error: err.message });
+      setPhase("failed");
+    }
+  };
+
+  const sendCode = async (e) => {
+    e.preventDefault();
+    setPhase("sending");
+    try {
+      const d = await callApply("/api/easy-apply/code", { sessionId: result.sessionId, code: code.trim() });
+      setResult((prev) => ({ ...d, sessionId: prev?.sessionId }));
+      setPhase(d.status === "submitted" ? "done" : d.status === "code_required" ? "code" : "failed");
+    } catch (err) {
+      setResult({ status: "error", error: err.message });
+      setPhase("failed");
+    }
   };
 
   /** Remember the answers the applicant gave, so the next form fills itself. */
@@ -350,10 +412,54 @@ export default function EasyApplyPanel({ job, resume, apiBase, onClose, onTailor
       );
     }
     if (formError) return <div className="ea-error" role="alert">{formError}</div>;
+    if (phase === "done") {
+      return (
+        <div className="ea-outcome ea-outcome-ok" role="status">
+          <h3>Application sent</h3>
+          <p>{form?.job.company} has your application for {form?.job.title}. It's saved to your applications.</p>
+          <button type="button" className="ea-btn ea-btn-primary" onClick={onClose}>Back to jobs</button>
+        </div>
+      );
+    }
+    if (phase === "code" || (phase === "sending" && result?.sessionId)) {
+      return (
+        <form className="ea-outcome" onSubmit={sendCode}>
+          <h3>Enter the verification code</h3>
+          <p>{form?.job.company}'s application system just emailed you a code. Enter it to finish sending your application.</p>
+          {codeMethod === "gmail" && <p className="ea-muted">Reading the code from Gmail automatically is coming next – please type it for now.</p>}
+          <label htmlFor="ea-verify" className="ea-q-label">Code</label>
+          <input id="ea-verify" autoComplete="one-time-code" required value={code} onChange={(e) => setCode(e.target.value)} placeholder="Code from the email" />
+          {result?.status === "code_required" && result?.errors?.length > 0 && <div className="ea-error">{result.errors.join(" · ")}</div>}
+          <button type="submit" className="ea-btn ea-btn-primary" disabled={phase === "sending" || !code.trim()}>{phase === "sending" ? "Sending…" : "Submit code"}</button>
+        </form>
+      );
+    }
     if (!form || !profile) return <div className="ea-message">Loading the application form…</div>;
 
     return (
       <>
+        {phase === "failed" && result && (
+          <div className="ea-error" role="alert">
+            {result.status === "not_filled"
+              ? `Couldn't fill: ${(result.problems || []).map((p) => p.label).join(", ")}. Check those answers, or finish on the company site.`
+              : result.status === "errors"
+                ? `The application page didn't accept it: ${(result.errors || []).join(" · ")}`
+                : result.error || "The application page didn't confirm it was sent. Please finish on the company site."}
+          </div>
+        )}
+        {result?.status === "rehearsed" && (
+          <div className="ea-rehearsal">
+            <div className="ea-rehearsal-head">
+              <strong>This is {form.job.company}'s real form, filled with your answers. Nothing has been sent.</strong>
+              <button type="button" className="ea-link" onClick={() => setResult(null)}>Hide</button>
+            </div>
+            {result.problems?.length > 0 && (
+              <div className="ea-error">Couldn't fill: {result.problems.map((p) => `${p.label} (${p.reason})`).join(" · ")}</div>
+            )}
+            <img src={result.screenshot} alt={`${form.job.company}'s application form, filled with your answers`} />
+          </div>
+        )}
+        {result?.status === "error" && phase === "idle" && <div className="ea-error" role="alert">{result.error}</div>}
         <div className="ea-cards">
           <div className="ea-card">
             <div className="ea-card-title">Resume</div>
@@ -450,7 +556,30 @@ export default function EasyApplyPanel({ job, resume, apiBase, onClose, onTailor
             <span className="ea-muted">{missingRequired.length} required field{missingRequired.length === 1 ? "" : "s"} left</span>
           )}
           <a className="ea-btn" href={form?.applyUrl || job.url} target="_blank" rel="noopener noreferrer">Continue on company site</a>
-          <button type="button" className="ea-btn ea-btn-primary" disabled title="Submitting from ResumeIQ arrives in the next phase">Submit</button>
+          {canSubmit && phase !== "done" && phase !== "code" && (
+            <button type="button" className="ea-btn" onClick={checkFilledForm} disabled={phase === "rehearsing" || phase === "sending"}>
+              {phase === "rehearsing" ? "Filling the real form…" : "Check the filled form"}
+            </button>
+          )}
+          {phase === "confirm" ? (
+            <span className="ea-confirm" role="group" aria-label="Confirm sending">
+              <span>Send to {form?.job.company}?</span>
+              <button type="button" className="ea-btn" onClick={() => setPhase("idle")}>Cancel</button>
+              <button type="button" className="ea-btn ea-btn-primary" onClick={sendApplication}>Yes, send</button>
+            </span>
+          ) : (
+            phase !== "done" && phase !== "code" && (
+              <button
+                type="button"
+                className="ea-btn ea-btn-primary"
+                disabled={!canSubmit || missingRequired.length > 0 || phase === "sending" || phase === "rehearsing"}
+                title={missingRequired.length ? "Answer the required fields first" : undefined}
+                onClick={() => setPhase("confirm")}
+              >
+                {phase === "sending" ? "Sending…" : "Submit"}
+              </button>
+            )
+          )}
         </footer>
       </section>
     </div>

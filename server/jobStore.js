@@ -318,3 +318,23 @@ export async function demandedQueries(days) {
   if (error) throw new Error(`reading search demand failed: ${error.message}`);
   return data || [];
 }
+
+/* ---------- Easy Apply: who is asking, and what they sent ---------- */
+
+/** The signed-in user behind a Supabase access token (from the app's Authorization header), or null. */
+export async function userFromToken(token) {
+  if (!token) return null;
+  const { data, error } = await db().auth.getUser(token);
+  return error ? null : data.user;
+}
+
+export async function recordApplication(row) {
+  const { data, error } = await db().from("applications").insert(row).select("id").single();
+  if (error) throw new Error(`recording application failed: ${error.message}`);
+  return data.id;
+}
+
+export async function updateApplication(id, patch) {
+  const { error } = await db().from("applications").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
+  if (error) console.warn(`[easy-apply] could not update application ${id}: ${error.message}`);
+}

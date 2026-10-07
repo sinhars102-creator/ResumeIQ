@@ -29,6 +29,29 @@ function optionMatching(options, words) {
   return options.find((o) => words.some((w) => o.label.toLowerCase().includes(w)));
 }
 
+/**
+ * The low–high range an option label describes, for range dropdowns common on Indian forms:
+ * "≤15 Days" → [0, 15], "30 Days" → [30, 30], "60 Days - 90 Days" → [60, 90],
+ * "Less than 10 LPA" → [0, 10], "45 LPA +" → [45, ∞]. Null when it has no number.
+ */
+export function optionRange(label) {
+  const text = String(label).toLowerCase().replace(/,/g, "");
+  const nums = (text.match(/\d+(\.\d+)?/g) || []).map(Number);
+  if (!nums.length) return null;
+  if (/≤|<=|less than|below|under|upto|up to|max/.test(text)) return [0, nums[0]];
+  if (/\+|above|more than|over|≥|>=/.test(text)) return [nums[0], Infinity];
+  return [Math.min(...nums), Math.max(...nums)];
+}
+
+/** The first option whose range contains the number (e.g. notice days, CTC in LPA). */
+export function rangeOption(options, n) {
+  if (n == null || Number.isNaN(Number(n))) return null;
+  return options.find((o) => {
+    const r = optionRange(o.label);
+    return r && Number(n) >= r[0] && Number(n) <= r[1];
+  }) || null;
+}
+
 function splitName(resume) {
   const parts = String(resume?.name || "").trim().split(/\s+/).filter(Boolean);
   return { first: parts[0] || "", last: parts.slice(1).join(" ") };
@@ -72,6 +95,16 @@ function ruleAnswer(field, profile, resume) {
       const opt = optionMatching(field.options, [profile.highest_education.toLowerCase()]);
       return opt ? { value: opt.value, source: "profile", confidence: "high" } : null;
     }
+  }
+  // Range dropdowns ("30 Days - Negotiable", "32 - 40 LPA"): pick the range the number falls in.
+  if (field.options?.length) {
+    const pick = (n) => {
+      const opt = rangeOption(field.options, n);
+      return opt ? { value: opt.value, source: "profile", confidence: "check" } : null;
+    };
+    if (/notice period/.test(label)) return pick(profile.notice_period_days);
+    if (/\bcctc\b|current (ctc|salary|compensation|package)/.test(label)) return pick(profile.current_ctc_lpa);
+    if (/\bectc\b|expected (ctc|salary|compensation|package)/.test(label)) return pick(profile.expected_ctc_lpa);
   }
   if (/notice period/.test(label) && profile.notice_period_days != null) return value(`${profile.notice_period_days} days`);
   // Indian forms often write CCTC / ECTC for current / expected CTC.

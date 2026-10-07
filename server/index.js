@@ -13,10 +13,12 @@ import { saveJobs, findJobs, repositorySize } from "./jobRepository.js";
 import { htmlToText, normalizeJob, fetchJobsApify, fetchJobsValig } from "./linkedinJobs.js";
 import {
   jobStoreConfigured, toRow, inScope, upsertJobs, findStoredJobs, recordDemand, markDemandCollected, linkedInJobsForQuery,
+  userFromToken, recordApplication, updateApplication,
 } from "./jobStore.js";
 import { normalizeQuery, FRESH_HOURS } from "./searchDemand.js";
 import { fetchEasyApplyForm, easyApplyTarget } from "./easyApply.js";
 import { fillForm } from "./easyApplyFill.js";
+import { rehearse, submit as submitApplication, enterCode } from "./greenhouseSubmit.js";
 import { searchApiSources, adzunaConfigured, loadCompanies } from "./jobSources.js";
 import { callLLM, llmProvider, llmModel, LLMUserError } from "./llm.js";
 
@@ -989,6 +991,92 @@ app.post("/api/easy-apply/fill", async (req, res) => {
     return res.json(await fillForm({ fields: fields.slice(0, 80), profile: profile || {}, resume: resume || null, job: job || {} }));
   } catch (err) {
     return sendLLMError(res, err, "easy-apply");
+  }
+});
+
+/* Easy Apply, phase 2: fill the employer's real page and submit it – only when the signed-in applicant asks. */
+
+const easyApplySessions = new Map(); // verification-code sessionId → { userId, applicationId }
+
+async function easyApplyUser(req, res) {
+  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const user = jobStoreConfigured() ? await userFromToken(token) : null;
+  if (!user) res.status(401).json({ error: "Please sign in to apply" });
+  return user;
+}
+
+/** The form is fetched again here rather than trusted from the browser; answers are keyed by its field ids. */
+async function easyApplyInput(body) {
+  const target = easyApplyTarget(body.jobId);
+  if (!target) throw Object.assign(new Error("Easy Apply isn't available for this job yet"), { status: 400 });
+  const form = await fetchEasyApplyForm(body.jobId);
+  return {
+    form,
+    input: {
+      board: target.board,
+      jobId: target.jobId,
+      fields: form.fields,
+      values: body.values && typeof body.values === "object" ? body.values : {},
+      country: String(body.country || "India").slice(0, 60),
+      resumePdfBase64: typeof body.resumePdf === "string" ? body.resumePdf : null,
+    },
+  };
+}
+
+app.post("/api/easy-apply/rehearse", async (req, res) => {
+  if (!(await easyApplyUser(req, res))) return;
+  try {
+    const { input } = await easyApplyInput(req.body || {});
+    return res.json(await rehearse(input));
+  } catch (err) {
+    console.warn("[easy-apply] rehearsal failed:", err.message);
+    return res.status(err.status || 502).json({ error: err.status ? err.message : "Couldn't open the application page" });
+  }
+});
+
+app.post("/api/easy-apply/submit", async (req, res) => {
+  const user = await easyApplyUser(req, res);
+  if (!user) return;
+  let applicationId = null;
+  try {
+    const { form, input } = await easyApplyInput(req.body || {});
+    if (!input.resumePdfBase64) return res.status(400).json({ error: "Your resume PDF is missing" });
+    const result = await submitApplication(input);
+    const status = result.status === "submitted" ? "submitted" : result.status === "code_required" ? "code_required" : "failed";
+    applicationId = await recordApplication({
+      user_id: user.id, job_id: req.body.jobId, source: form.ats, company: form.job.company, title: form.job.title,
+      apply_url: form.applyUrl, status, details: { outcome: result.status, errors: result.errors, problems: result.problems },
+      submitted_at: status === "submitted" ? new Date().toISOString() : null,
+    });
+    if (result.sessionId) easyApplySessions.set(result.sessionId, { userId: user.id, applicationId });
+    console.log(`[easy-apply] ${form.job.company} – ${form.job.title}: ${result.status}`);
+    return res.json({ ...result, applicationId });
+  } catch (err) {
+    console.warn("[easy-apply] submit failed:", err.message);
+    if (applicationId) await updateApplication(applicationId, { status: "failed", details: { error: err.message } });
+    return res.status(err.status || 502).json({ error: err.status ? err.message : "Couldn't submit on the application page" });
+  }
+});
+
+app.post("/api/easy-apply/code", async (req, res) => {
+  const user = await easyApplyUser(req, res);
+  if (!user) return;
+  const { sessionId, code } = req.body || {};
+  const session = easyApplySessions.get(sessionId);
+  if (!session || session.userId !== user.id) return res.status(404).json({ status: "expired", error: "This application timed out – please submit again" });
+  try {
+    const result = await enterCode(sessionId, String(code || "").slice(0, 20));
+    if (result.status === "submitted") {
+      await updateApplication(session.applicationId, { status: "submitted", submitted_at: new Date().toISOString() });
+      easyApplySessions.delete(sessionId);
+    } else if (result.status !== "code_required") {
+      easyApplySessions.delete(sessionId);
+      await updateApplication(session.applicationId, { status: "failed", details: { outcome: result.status, errors: result.errors } });
+    }
+    return res.json(result);
+  } catch (err) {
+    console.warn("[easy-apply] code entry failed:", err.message);
+    return res.status(502).json({ error: "Couldn't enter the code on the application page" });
   }
 });
 
