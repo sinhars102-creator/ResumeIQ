@@ -80,7 +80,15 @@ async function fillField(page, field, value, files) {
     if (!path) return null;
     const input = page.locator(cssId(field.id));
     if (!(await input.count())) return "upload box not found";
+    // Watch Greenhouse's file storage answer, so a rejected upload is reported precisely.
+    const upload = page
+      .waitForResponse((r) => /amazonaws\.com/.test(r.url()) && r.request().method() === "POST", { timeout: UPLOAD_WAIT_MS })
+      .then((r) => ({ status: r.status() }))
+      .catch((err) => ({ error: err.message.split("\n")[0] }));
     await input.setInputFiles(path);
+    const answer = await upload;
+    console.log(`[easy-apply] resume upload (${files.resumeKb} KB):`, JSON.stringify(answer));
+    if (answer.status && answer.status >= 300) return `Greenhouse rejected the resume upload (HTTP ${answer.status})`;
     return (await resumeAttached(page, files.resumeName, UPLOAD_WAIT_MS)) ? null : "the resume didn't finish uploading";
   }
   if (value == null || value === "" || (Array.isArray(value) && !value.length)) return null;
@@ -163,7 +171,10 @@ async function openAndFill({ board, jobId, fields, values, country, resumePdfBas
     const who = [values.first_name, values.last_name].filter(Boolean).join("_").replace(/[^A-Za-z0-9_-]+/g, "") || "Applicant";
     files.resumeName = `${who}_Resume.pdf`;
     files.resume = join(dir, files.resumeName);
-    writeFileSync(files.resume, Buffer.from(String(resumePdfBase64).replace(/^data:[^,]*,/, ""), "base64"));
+    const bytes = Buffer.from(String(resumePdfBase64).replace(/^data:[^,]*,/, ""), "base64");
+    writeFileSync(files.resume, bytes);
+    files.resumeKb = Math.round(bytes.length / 1024);
+    if (bytes.subarray(0, 5).toString() !== "%PDF-") console.warn("[easy-apply] resume file doesn't look like a PDF");
   }
   const context = await (await browser()).newContext({ locale: "en-IN", viewport: { width: 1280, height: 900 } });
   const page = await context.newPage();
@@ -243,6 +254,12 @@ export async function submit(input) {
   }
   await page.getByRole("button", { name: /submit application/i }).first().click();
   const outcome = await readOutcome(page);
+  if (outcome.status === "errors" || outcome.status === "unknown") {
+    // Kept on this machine only (OS temp folder), to see what the page showed.
+    const shot = join(tmpdir(), `rq-apply-failed-${Date.now()}.png`);
+    await page.screenshot({ path: shot, fullPage: true }).catch(() => {});
+    console.warn(`[easy-apply] submit outcome ${outcome.status}; page saved to ${shot}`);
+  }
   if (outcome.status === "code_required") {
     const sessionId = randomUUID();
     sessions.set(sessionId, { context, page, dir, timer: setTimeout(() => closeSession(sessionId), SESSION_TTL_MS) });
