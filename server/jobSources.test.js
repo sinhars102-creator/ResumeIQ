@@ -389,3 +389,15 @@ test("India-only scope leaves out remote roles tied to another country", async (
   assert.ok(!isIndiaScope("Remote-Friendly (Travel-Required) |  Washington, DC"));
   assert.ok(!isIndiaScope("Remote - Estonia"));
 });
+
+test("extension identifies roles by their page address", async () => {
+  const { jobIdentity } = await import("./extensionApi.js");
+  assert.equal(jobIdentity("https://www.linkedin.com/jobs/view/senior-product-manager-at-pidge-4301234567/?trk=x").id, "4301234567");
+  assert.equal(jobIdentity("https://www.linkedin.com/jobs/search/?currentJobId=4301234567").source, "linkedin");
+  assert.equal(jobIdentity("https://job-boards.greenhouse.io/truecaller/jobs/7654321").id, "gh-truecaller-7654321");
+  assert.equal(jobIdentity("https://jobs.lever.co/fampay/bc1060ed-d15a-4f62-a560-856cc344201e/apply").id, "lever-fampay-bc1060ed-d15a-4f62-a560-856cc344201e");
+  assert.equal(jobIdentity("https://www.naukri.com/job-listings-product-manager-niyo-bengaluru-2-to-7-years-061026504587").id, "naukri-061026504587");
+  const web = jobIdentity("https://careers.example.com/jobs/pm?utm_source=x");
+  assert.equal(web.source, "web");
+  assert.equal(web.id, jobIdentity("https://careers.example.com/jobs/pm").id);
+});

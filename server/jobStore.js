@@ -167,6 +167,7 @@ export async function deleteOutOfScope() {
     .delete()
     .eq("is_india", false)
     .eq("remote_anywhere", false)
+    .eq("pinned", false) // roles users saved stay, whatever their location
     .select("id");
   if (error) throw new Error(`removing out-of-scope roles failed: ${error.message}`);
   return (data || []).length;
@@ -337,4 +338,44 @@ export async function recordApplication(row) {
 export async function updateApplication(id, patch) {
   const { error } = await db().from("applications").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
   if (error) console.warn(`[easy-apply] could not update application ${id}: ${error.message}`);
+}
+
+/* ---------- Chrome extension: saved jobs and the applicant's own data ---------- */
+
+export async function getProfile(userId) {
+  const { data, error } = await db().from("applicant_profiles").select("*").eq("user_id", userId).maybeSingle();
+  if (error) throw new Error(`reading profile failed: ${error.message}`);
+  return data;
+}
+
+/** Save a role for a user: the role into public.jobs (pinned), and the link into user_jobs. */
+export async function saveUserJob(userId, row, { addedFrom = null } = {}) {
+  const { error: jobErr } = await db().from("jobs").upsert({ ...row, pinned: true }, { onConflict: "id" });
+  if (jobErr) throw new Error(`saving the role failed: ${jobErr.message}`);
+  const { error } = await db()
+    .from("user_jobs")
+    .upsert({ user_id: userId, job_id: row.id, added_from: addedFrom, updated_at: new Date().toISOString() }, { onConflict: "user_id,job_id" });
+  if (error) throw new Error(`adding it to your jobs failed: ${error.message}`);
+  return row.id;
+}
+
+export async function setUserJobMatch(userId, jobId, match) {
+  const { error } = await db()
+    .from("user_jobs")
+    .update({ match_score: match.score, match, updated_at: new Date().toISOString() })
+    .eq("user_id", userId)
+    .eq("job_id", jobId);
+  if (error) console.warn(`[ext] could not store match for ${jobId}: ${error.message}`);
+}
+
+/** A user's saved roles, newest first, with their stored match. */
+export async function listUserJobs(userId, limit = 200) {
+  const { data, error } = await db()
+    .from("user_jobs")
+    .select(`job_id, status, match_score, match, created_at, job:jobs (${READ_COLUMNS})`)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(`reading your jobs failed: ${error.message}`);
+  return (data || []).filter((r) => r.job).map((r) => ({ ...fromRow(r.job), savedAt: r.created_at, matchScore: r.match_score, match: r.match, status: r.status }));
 }

@@ -19,6 +19,7 @@ import { normalizeQuery, FRESH_HOURS } from "./searchDemand.js";
 import { fetchEasyApplyForm, easyApplyTarget } from "./easyApply.js";
 import { fillForm } from "./easyApplyFill.js";
 import { rehearse, submit as submitApplication, enterCode } from "./greenhouseSubmit.js";
+import { registerExtensionRoutes } from "./extensionApi.js";
 import { searchApiSources, adzunaConfigured, loadCompanies } from "./jobSources.js";
 import { callLLM, llmProvider, llmModel, LLMUserError } from "./llm.js";
 
@@ -1004,6 +1005,11 @@ async function easyApplyUser(req, res) {
   if (!user) res.status(401).json({ error: "Please sign in to apply" });
   return user;
 }
+
+registerExtensionRoutes(app, {
+  userFromRequest: async (req) =>
+    jobStoreConfigured() ? userFromToken(String(req.headers.authorization || "").replace(/^Bearer\s+/i, "")) : null,
+});
 
 /** The form is fetched again here rather than trusted from the browser; answers are keyed by its field ids. */
 async function easyApplyInput(body) {
