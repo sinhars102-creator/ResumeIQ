@@ -41,7 +41,11 @@ async function browser() {
 }
 
 const cssId = (id) => `[id="${String(id).replace(/"/g, '\\"')}"]`;
-const applicationUrl = (board, jobId) => `https://job-boards.greenhouse.io/${encodeURIComponent(board)}/jobs/${encodeURIComponent(jobId)}`;
+// Greenhouse's embeddable application form: the same form and field ids as the hosted job page,
+// but it never redirects to the company's own careers site (e.g. rubrik.com), which can block
+// automated browsers with "Access Denied".
+const applicationUrl = (board, jobId) =>
+  `https://job-boards.greenhouse.io/embed/job_app?for=${encodeURIComponent(board)}&token=${encodeURIComponent(jobId)}`;
 
 /**
  * Pick an option in one of the page's search-box dropdowns by typing its label. Prefers an
