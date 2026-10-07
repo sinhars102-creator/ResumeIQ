@@ -449,7 +449,7 @@ export default function EasyApplyPanel({ job, resume, getResumePdf, apiBase, onC
               ? `Couldn't fill: ${(result.problems || []).map((p) => p.label).join(", ")}. Check those answers, or finish on the company site.`
               : result.status === "errors"
                 ? `The application page didn't accept it: ${(result.errors || []).join(" · ")}`
-                : result.error || "The application page didn't confirm it was sent. Please finish on the company site."}
+                : result.error || "We couldn't confirm it was sent. Check your email – a confirmation from the employer means it went through; otherwise finish on the company site."}
           </div>
         )}
         {result?.status === "rehearsed" && (

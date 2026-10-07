@@ -217,20 +217,38 @@ export async function rehearse(input) {
   }
 }
 
-/** What the page shows after a submit click. */
+const SUCCESS_TEXT = /thank you for (applying|your application|your interest)|thanks for applying|application (was |has been )?(received|submitted|sent|complete)|we('ve| have) received your application|successfully (submitted|applied)|you('ve| have) (successfully )?applied/;
+const CODE_TEXT = /security code|verification code|verify your email|enter the code|code (was |has been )?sent|check your email/;
+
+/** Visible inputs that look like a verification-code box (one box, or one per character). */
+const CODE_INPUTS = 'input[autocomplete="one-time-code"], input[maxlength="1"], input[name*="code" i], input[id*="code" i], input[aria-label*="code" i], input[placeholder*="code" i]';
+
+/** Keep what a page showed at a step, on this machine only (OS temp folder), to diagnose new layouts. */
+async function keepPage(page, step) {
+  const base = join(tmpdir(), `rq-apply-${step}-${Date.now()}`);
+  await page.screenshot({ path: `${base}.png`, fullPage: true }).catch(() => {});
+  const text = await page.evaluate(() => document.body.innerText).catch(() => "");
+  writeFileSync(`${base}.txt`, text);
+  console.log(`[easy-apply] ${step} page kept at ${base}.png`);
+}
+
+/** What the page shows after a submit or code click. */
 async function readOutcome(page) {
   const deadline = Date.now() + RESULT_WAIT_MS;
   while (Date.now() < deadline) {
-    const state = await page.evaluate(() => {
+    const state = await page.evaluate(({ success, code, codeInputs }) => {
       const text = document.body.innerText.toLowerCase();
-      if (/\/confirmation\b/.test(location.pathname) || /thank you for applying|application (has been )?(received|submitted)/.test(text)) return { status: "submitted" };
-      if (/security code|verification code|enter the code|code (was )?sent to/.test(text)) return { status: "code_required" };
-      const errors = [...document.querySelectorAll('[aria-invalid="true"], .helper-text--error, [class*="error"]')]
+      const visible = (el) => !!(el.offsetWidth || el.offsetHeight);
+      const codeBoxes = [...document.querySelectorAll(codeInputs)].filter(visible).length;
+      if (/\/confirmation\b/.test(location.pathname) || (new RegExp(success).test(text) && !codeBoxes)) return { status: "submitted" };
+      if (codeBoxes || new RegExp(code).test(text)) return { status: "code_required" };
+      const errors = [...document.querySelectorAll('[aria-invalid="true"], .helper-text--error')]
+        .filter(visible)
         .map((el) => (el.closest("[class*=field], .select, fieldset")?.querySelector("label")?.textContent || el.textContent || "").trim())
         .filter(Boolean);
       if (errors.length) return { status: "errors", errors: [...new Set(errors)].slice(0, 10) };
       return null;
-    });
+    }, { success: SUCCESS_TEXT.source, code: CODE_TEXT.source, codeInputs: CODE_INPUTS });
     if (state) return state;
     await page.waitForTimeout(800);
   }
@@ -261,6 +279,7 @@ export async function submit(input) {
     console.warn(`[easy-apply] submit outcome ${outcome.status}; page saved to ${shot}`);
   }
   if (outcome.status === "code_required") {
+    await keepPage(page, "code-step");
     const sessionId = randomUUID();
     sessions.set(sessionId, { context, page, dir, timer: setTimeout(() => closeSession(sessionId), SESSION_TTL_MS) });
     return { ...outcome, sessionId, problems };
@@ -276,17 +295,22 @@ export async function enterCode(sessionId, code) {
   if (!s) return { status: "expired" };
   const { page } = s;
   const chars = String(code).replace(/\s+/g, "");
-  const boxes = page.locator('input[autocomplete="one-time-code"], input[maxlength="1"], input[name*="code" i], input[id*="code" i], input[aria-label*="code" i]');
+  const boxes = page.locator(CODE_INPUTS).filter({ visible: true });
   const count = await boxes.count();
-  if (!count) return { status: "errors", errors: ["Couldn't find the code box on the page"] };
-  if (count > 1 && count >= chars.length) {
-    for (let i = 0; i < chars.length; i += 1) await boxes.nth(i).fill(chars[i]);
-  } else {
-    await boxes.first().fill(chars);
+  if (!count) {
+    await keepPage(page, "code-box-missing");
+    return { status: "code_required", errors: ["Couldn't find the code box on the page – please finish on the company site"] };
   }
-  const button = page.getByRole("button", { name: /submit|verify|confirm|continue/i }).first();
-  if (await button.count()) await button.click();
+  // Typing from the first box works for one box and for one-box-per-character layouts (they advance on input).
+  await boxes.first().click();
+  await boxes.first().fill("");
+  await page.keyboard.type(chars, { delay: 60 });
+  const filledOne = count === 1 || (await boxes.nth(count - 1).inputValue().catch(() => "")) !== "";
+  if (!filledOne) for (let i = 0; i < Math.min(count, chars.length); i += 1) await boxes.nth(i).fill(chars[i]);
+  const button = page.getByRole("button", { name: /verify|confirm|continue|submit/i }).first();
+  if (await button.count()) await button.click().catch(() => {});
   const outcome = await readOutcome(page);
+  await keepPage(page, `after-code-${outcome.status}`);
   if (outcome.status !== "code_required") closeSession(sessionId);
   return outcome;
 }
