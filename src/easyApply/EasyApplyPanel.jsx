@@ -319,7 +319,9 @@ export default function EasyApplyPanel({ job, resume, apiBase, onClose, onTailor
       const v = values[f.id];
       if (v == null || v === "" || f.type === "file" || f.section === "voluntary") continue;
       if (PROFILE_FIELD[f.id]) patch[PROFILE_FIELD[f.id]] = v;
-      else if (f.type === "select" || f.type === "textarea" || f.type === "text") saved[questionKey(f.label)] = v;
+      else if (f.type === "url" && /linkedin/i.test(f.label)) patch.linkedin_url = withScheme(v);
+      else if (f.type === "url" && /website|portfolio/i.test(f.label)) patch.website_url = withScheme(v);
+      else if (["select", "textarea", "text", "url", "email", "phone"].includes(f.type)) saved[questionKey(f.label)] = v;
     }
     try {
       const row = await saveProfile(userId, { ...patch, saved_answers: saved });
@@ -402,7 +404,7 @@ export default function EasyApplyPanel({ job, resume, apiBase, onClose, onTailor
             {form.fields.map((f) => {
               const m = meta[f.id];
               return (
-                <div key={f.id} className={`ea-q${needs[f.id] && !isAnswered(f) ? " ea-q-needs" : ""}`}>
+                <div key={f.id} className={`ea-q${f.required && needs[f.id] && !isAnswered(f) ? " ea-q-needs" : ""}`}>
                   <label id={`ea-f-${f.id}-label`} htmlFor={`ea-f-${f.id}`} className="ea-q-label">
                     {f.required && <span className="ea-star" aria-hidden="true">*</span>}
                     {f.label}
@@ -414,7 +416,11 @@ export default function EasyApplyPanel({ job, resume, apiBase, onClose, onTailor
                       {SOURCE_LABEL[m.source] || ""}{m.confidence === "check" ? " · please check" : ""}
                     </div>
                   )}
-                  {needs[f.id] && !isAnswered(f) && <div className="ea-hint ea-hint-needs">{needs[f.id]}</div>}
+                  {needs[f.id] && !isAnswered(f) && (
+                    f.required
+                      ? <div className="ea-hint ea-hint-needs">{needs[f.id]}</div>
+                      : <div className="ea-hint">Optional – leave blank if it doesn't apply.</div>
+                  )}
                 </div>
               );
             })}
