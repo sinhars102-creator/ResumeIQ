@@ -98,4 +98,14 @@ Track these items for future implementation.
 
 ---
 
+## 12. Keka as a job source
+**What:** Add Keka (keka.com) as a source of job postings.
+**Why:** Keka is an Indian HR platform whose hiring module ("Keka Hire") hosts careers pages for many Indian companies – roles we don't reach through Greenhouse, Lever, Ashby or Workable.
+**Notes (to verify when we start):**
+- Careers pages appear to live at `<company>.keka.com/careers`; check whether there's a public JSON feed per company (like Greenhouse's job board API) or whether pages must be read.
+- Discovery: learn Keka company slugs the same way as backlog item 9 (from job links seen on LinkedIn, the extension and Easy Apply), plus a curated list.
+- Then: India-scope filter, closing roles that leave a board, and whether Easy Apply / extension autofill can work on Keka's application form.
+
+---
+
 *Add new items below as needed.*
