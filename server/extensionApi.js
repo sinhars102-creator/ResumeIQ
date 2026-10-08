@@ -13,7 +13,7 @@
 import { createHash } from "crypto";
 import { callLLM } from "./llm.js";
 import { fillForm } from "./easyApplyFill.js";
-import { buildResumePdf } from "../src/resumePdf.js";
+import { buildResumePdf, pdfSafeText } from "../src/resumePdf.js";
 import { jsPDF } from "jspdf";
 import {
   toRow, saveUserJob, setUserJobMatch, getProfile, listUserJobs,
@@ -93,6 +93,7 @@ Return JSON: {"letter": "<the full letter text with \\n\\n between paragraphs>"}
 
 /** A one-page PDF of the letter: name and contact at the top, then the text. */
 export function coverLetterPdf(text, { name = "", contact = "" } = {}) {
+  [text, name, contact] = [text, name, contact].map(pdfSafeText); // ₹, special hyphens – see pdfSafeText
   const doc = new jsPDF({ format: "a4", unit: "mm" });
   const margin = 20;
   const width = doc.internal.pageSize.getWidth() - margin * 2;

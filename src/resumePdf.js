@@ -64,12 +64,44 @@ export function parseDividerColor(hexOrRgb) {
   return { r: 200, g: 208, b: 218 };
 }
 
+// Characters the standard PDF fonts can draw (WinAnsi): ASCII, Latin-1 and Windows-1252's extras.
+const PDF_SAFE = /[\x20-\x7E\xA0-\xFF€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ\n]/;
+
+/**
+ * Text the standard PDF fonts can draw. One character outside their set (₹, a non-breaking hyphen,
+ * →) makes jsPDF letter-space the whole line and print junk for the character, so swap those for
+ * safe equivalents and drop what has none.
+ */
+export function pdfSafeText(text) {
+  return String(text ?? "")
+    .replace(/₹\s*/g, "INR ")
+    .replace(/[\u2010\u2011\u2012\u2212\uFE63\uFF0D]/g, "-")
+    .replace(/[\u2192\u27F6\u279D]/g, "->")
+    .replace(/\u2190/g, "<-")
+    .replace(/[\u2713\u2714\u2705\u2611]\s*/g, "")
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g, "")
+    .replace(/[\u2000-\u200A\u202F\u205F\u3000\t]/g, " ")
+    .replace(/\r\n?/g, "\n")
+    .split("")
+    .map((ch) => (PDF_SAFE.test(ch) ? ch : ch.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").split("").filter((c) => PDF_SAFE.test(c)).join("")))
+    .join("");
+}
+
+/** The resume with every piece of text made safe for the PDF fonts. */
+function pdfSafeResume(value) {
+  if (typeof value === "string") return pdfSafeText(value);
+  if (Array.isArray(value)) return value.map(pdfSafeResume);
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, pdfSafeResume(v)]));
+  return value;
+}
+
 /**
  * Single-column resume PDF: photo top-left, name/title/contact to the right, then Summary, Experience, Education, Skills.
  * Uses format options so it matches the on-screen PDF preview.
  */
 export function buildResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FORMAT) {
   if (!resumeData || typeof resumeData !== "object") return null;
+  resumeData = pdfSafeResume(resumeData);
   const doc = new jsPDF({ format: "a4", unit: "mm" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
