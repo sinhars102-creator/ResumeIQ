@@ -186,6 +186,76 @@ function ruleAnswer(field, profile, resume) {
   return null;
 }
 
+/* ---------- Employment entries: each block on the form filled from one job, in resume order ---------- */
+
+const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+
+function datePart(text) {
+  const t = String(text || "").toLowerCase().trim();
+  if (!t) return null;
+  if (/present|current|now|till|to date|ongoing/.test(t)) return { current: true };
+  const year = t.match(/\b(19|20)\d{2}\b/)?.[0] || (t.match(/'(\d{2})\b/) ? `20${t.match(/'(\d{2})\b/)[1]}` : null);
+  let month = MONTHS.findIndex((m) => new RegExp(`\\b${m.slice(0, 3)}`).test(t));
+  if (month < 0) {
+    const numeric = t.match(/\b(\d{1,2})[/.-](19|20)\d{2}\b/);
+    if (numeric && Number(numeric[1]) >= 1 && Number(numeric[1]) <= 12) month = Number(numeric[1]) - 1;
+  }
+  return year || month >= 0 ? { year, month: month >= 0 ? month : null } : null;
+}
+
+/** "Mar 2024 – Mar 2026" / "01/2020-03/2023" / "2019 – Present" → { start, end, current }. */
+export function parsePeriod(period) {
+  const parts = String(period || "").split(/\s*(?:–|—|\bto\b)\s*|\s+-\s+|(?<=\d{4})-(?=\s*\d)/i);
+  const start = datePart(parts[0]);
+  const end = datePart(parts[1]);
+  return { start: start?.current ? null : start, end: end?.current ? null : end, current: !!end?.current };
+}
+
+const optionFor = (field, test) => field.options?.find((o) => test(String(o.label).toLowerCase().trim()));
+
+function monthAnswer(field, month) {
+  if (month == null) return null;
+  if (field.options?.length) {
+    const n = String(month + 1);
+    const opt = optionFor(field, (l) => l.startsWith(MONTHS[month].slice(0, 3)) || l === n || l === n.padStart(2, "0"));
+    return opt ? opt.value : null;
+  }
+  return MONTHS[month][0].toUpperCase() + MONTHS[month].slice(1);
+}
+
+function yearAnswer(field, year) {
+  if (!year) return null;
+  if (field.options?.length) return optionFor(field, (l) => l.includes(year))?.value ?? null;
+  return year;
+}
+
+/**
+ * Answer for a field inside employment block `field.entry.index`, from that job in the resume.
+ * Returns an answer, null (a known field to leave empty – e.g. end date of a current job), or
+ * undefined (not a field the rules know – the AI answers it, told which job it belongs to).
+ */
+export function employmentAnswer(field, resume) {
+  const job = (resume?.experience || [])[field.entry.index];
+  if (!job) return null;
+  const label = field.label.toLowerCase();
+  const { start, end, current } = parsePeriod(job.period);
+  const answer = (v) => (v == null || v === "" ? null : { value: String(v), source: "resume", confidence: "high" });
+  if (/current|present|currently/.test(label)) {
+    if (!current) return null;
+    return field.options?.length ? answer((yes(field.options) || field.options[0]).value) : null;
+  }
+  if (/company|employer|organi[sz]ation/.test(label)) return answer(job.company);
+  if (/title|role|position|designation/.test(label)) return answer(job.role);
+  if (/location|city/.test(label)) return answer(job.location);
+  const which = /\b(start|from|join)/.test(label) ? start : /\b(end|to|until|leav|reliev)/.test(label) ? (current ? null : end) : undefined;
+  if (which === undefined) return undefined;
+  if (!which) return null;
+  if (/month/.test(label)) return answer(monthAnswer(field, which.month));
+  if (/year/.test(label)) return answer(yearAnswer(field, which.year));
+  if (/date/.test(label)) return answer(which.month != null ? `${String(which.month + 1).padStart(2, "0")}/${which.year || ""}` : which.year);
+  return undefined;
+}
+
 function resumeText(resume) {
   if (!resume) return "";
   const lines = [resume.name, resume.title, resume.contact, resume.summary];
@@ -230,6 +300,16 @@ export async function fillForm({ fields, profile = {}, resume = null, job = {} }
       const ack = acknowledgementAnswer(field, profile);
       if (ack) answers[field.id] = ack;
       else needsYou.push({ id: field.id, reason: SIGNATURE.test(field.label) ? "Type your name to sign" : "Needs your own acknowledgement" });
+      continue;
+    }
+    if (field.entry?.kind === "employment") {
+      const own = employmentAnswer(field, resume);
+      if (own) answers[field.id] = own;
+      else if (own === null) answers[field.id] = { value: null, source: "resume", blank: true }; // e.g. end date of a current job
+      if (own !== undefined) continue;
+      // Not a field the rules know (e.g. a description): the AI answers it for that job.
+      const job = (resume?.experience || [])[field.entry.index] || {};
+      forAi.push({ ...field, label: `Job ${field.entry.index + 1} (${job.role || ""} at ${job.company || ""}) – ${field.label}` });
       continue;
     }
     const savedAnswer = saved[questionKey(field.label)];

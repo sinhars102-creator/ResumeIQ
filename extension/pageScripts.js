@@ -171,6 +171,30 @@ export async function readForm() {
   const singleUpload = [...document.querySelectorAll('input[type="file"]')].length === 1 &&
     /resume|\bcv\b|curriculum vitae/i.test(document.body.innerText.slice(0, 20000));
 
+  // Employment: each "Company" field marks one job block – the largest container around it that holds
+  // no other job and none of the form's other questions. Fields inside are tagged with the job's
+  // place on the page, so the engine fills block 1 from the first job in the resume, and so on.
+  const COMPANY = /^(current |previous )?(company|employer|organi[sz]ation)( name)?$/i;
+  const OUTSIDE = /first name|last name|given name|family name|e-?mail|phone|school|university|college|degree|resume|\bcv\b|linkedin/i;
+  const controls = [...document.querySelectorAll("input, select, textarea")].filter((el) => visible(el) && !["hidden", "file"].includes(el.type));
+  const companyFields = controls.filter((el) => COMPANY.test(labelOf(el)));
+  const jobBlocks = companyFields.map((anchor) => {
+    let block = anchor;
+    for (let up = block.parentElement; up && up !== document.body; up = up.parentElement) {
+      const inside = controls.filter((el) => up.contains(el));
+      if (inside.filter((el) => companyFields.includes(el)).length > 1 || inside.length > 14 || inside.some((el) => OUTSIDE.test(labelOf(el)))) break;
+      block = up;
+    }
+    return block;
+  }).filter((block) => {
+    const labels = controls.filter((el) => block.contains(el)).map(labelOf);
+    return labels.some((l) => /title|role|position|designation/i.test(l)) && labels.some((l) => /start|from|date|year/i.test(l));
+  });
+  const entryOf = (el) => {
+    const index = jobBlocks.findIndex((b) => b.contains(el));
+    return index < 0 ? undefined : { kind: "employment", index };
+  };
+
   const fields = [];
   const used = new Set();
   let n = 0;
@@ -179,7 +203,8 @@ export async function readForm() {
     if (used.has(id)) id = `${id}-${n++}`;
     used.add(id);
     el.setAttribute("data-riq-id", id);
-    fields.push({ ...field, id, section: "application" });
+    const entry = entryOf(el);
+    fields.push({ ...field, id, section: "application", ...(entry ? { entry } : {}) });
   };
 
   const groups = new Map(); // radio / checkbox groups by name
@@ -213,12 +238,21 @@ export async function readForm() {
       continue;
     }
     if (el.getAttribute("role") === "combobox" || el.getAttribute("aria-autocomplete") === "list") {
-      // Search-box dropdowns open on a mouse press; their options render next to the control.
+      // Search-box dropdowns open on a mouse press – or, where that's ignored (Greenhouse's newer
+      // forms), on a touch. Their options are in the list the box points to, else next to it.
       const control = el.closest('[class*="control"]') || el;
+      const menuOptions = () => {
+        const list = document.getElementById(el.getAttribute("aria-controls") || "");
+        if (list) return [...list.querySelectorAll('[role="option"]')];
+        return [...(control.parentElement || document).querySelectorAll('[role="option"], [class*="option"]')].filter(visible);
+      };
       control.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
       await new Promise((r) => setTimeout(r, 300));
-      const scope = control.parentElement || document;
-      const options = [...scope.querySelectorAll('[role="option"], [class*="option"]')].filter(visible).map((o) => clean(o.innerText)).filter(Boolean);
+      if (!menuOptions().length) {
+        control.dispatchEvent(new Event("touchend", { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      const options = menuOptions().map((o) => clean(o.innerText)).filter(Boolean);
       el.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
       el.blur();
       if (options.length) {
@@ -239,7 +273,7 @@ export async function readForm() {
     if (label) el.setAttribute("data-riq-manual", label);
   }
   for (const [key, els] of groups) {
-    const question = clean(els[0].closest("fieldset")?.querySelector("legend")?.innerText) || key;
+    const question = clean(els[0].closest("fieldset")?.querySelector("legend")?.innerText) || (els.length === 1 ? labelOf(els[0]) : "") || key;
     const options = els.map((el) => ({ value: el.value || labelOf(el), label: labelOf(el) }));
     els.forEach((el, i) => el.setAttribute("data-riq-option", options[i].value));
     const holder = els[0].closest("fieldset") || els[0].parentElement;
@@ -293,17 +327,20 @@ export async function fillForm({ fields, answers, needsYou, resume, coverLetter 
     }
   }
   if (attachedAny) await sleep(3000);
+  const flagged = []; // [element, label] of fields left for the user
   for (const field of fields) {
     const el = document.querySelector(`[data-riq-id="${CSS.escape(field.id)}"]`);
-    if (!el) continue;
+    if (!el || el.disabled) continue; // greyed out (e.g. end date of a current job)
     try {
       if (field.type === "file") continue; // attached above
       const answer = answers[field.id];
+      if (answer?.blank) continue; // deliberately empty (e.g. "Current role" for a past job)
       if (!answer || answer.value == null || answer.value === "") {
         // Only required fields are flagged on the page; optional ones are just listed.
         if (field.required) {
           mark(el, needsYou.find((x) => x.id === field.id)?.reason || "Needs your answer", false);
           skipped.push(field.label);
+          flagged.push([el, field.label]);
         } else optional.push(field.label);
         continue;
       }
@@ -313,6 +350,30 @@ export async function fillForm({ fields, answers, needsYou, resume, coverLetter 
           const box = el.querySelector(`[data-riq-option="${CSS.escape(String(v))}"]`);
           if (box && !box.checked) box.click();
         }
+      } else if (field.combobox && !field.autocomplete) {
+        // Open the list (mouse press, else touch – see readForm) and click the matching option.
+        const control = el.closest('[class*="control"]') || el;
+        const menuOptions = () => {
+          const list = document.getElementById(el.getAttribute("aria-controls") || "");
+          if (list) return [...list.querySelectorAll('[role="option"]')];
+          return [...(control.parentElement || document).querySelectorAll('[role="option"], [class*="option"]')].filter((o) => o.offsetWidth || o.offsetHeight);
+        };
+        control.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+        await sleep(300);
+        if (!menuOptions().length) {
+          control.dispatchEvent(new Event("touchend", { bubbles: true }));
+          await sleep(300);
+        }
+        const want = String(value).trim().toLowerCase();
+        const textOf = (o) => o.innerText.trim().toLowerCase();
+        const options = menuOptions();
+        const pick = options.find((o) => textOf(o) === want) || options.find((o) => textOf(o).startsWith(want)) || options.find((o) => textOf(o).includes(want));
+        if (!pick) {
+          el.blur();
+          throw new Error("option not offered");
+        }
+        pick.click();
+        await sleep(150);
       } else if (field.combobox) {
         const control = el.closest('[class*="control"]') || el;
         control.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
@@ -338,6 +399,12 @@ export async function fillForm({ fields, answers, needsYou, resume, coverLetter 
       skipped.push(field.label);
     }
   }
+  // Fields that became greyed out while filling (ticking "Current role" disables the end date) aren't asked of the user.
+  for (const [el, label] of flagged) {
+    if (!el.disabled) continue;
+    el.style.outline = "";
+    skipped.splice(skipped.indexOf(label), 1);
+  }
   // Dropdowns autofill can't operate yet (button-style): flag the ones still unanswered.
   for (const el of document.querySelectorAll("[data-riq-manual]")) {
     const shown = el.innerText.replace(/\s+/g, " ").trim();
@@ -346,6 +413,56 @@ export async function fillForm({ fields, answers, needsYou, resume, coverLetter 
     skipped.push(`${el.getAttribute("data-riq-manual")} (pick on the page)`);
   }
   return { filled, skipped, optional };
+}
+
+/**
+ * Make the form show `wanted` employment blocks by clicking its "Add another" / "Add" button in the
+ * employment section (only when at least one block is already there). Returns how many there are.
+ */
+export async function expandEmployment(wanted) {
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const clean = (t) => String(t || "").replace(/\s+/g, " ").replace(/\s*[*✱]\s*$/, "").trim();
+  const visible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const labelOf = (el) => {
+    const byFor = el.id && document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    const labelledBy = el.getAttribute("aria-labelledby")?.split(/\s+/).map((id) => document.getElementById(id)?.innerText).join(" ");
+    return clean(byFor?.innerText || el.labels?.[0]?.innerText || labelledBy || el.getAttribute("aria-label") || el.placeholder || el.name);
+  };
+  const COMPANY = /^(current |previous )?(company|employer|organi[sz]ation)( name)?$/i;
+  const EDUCATION = /school|university|college|institution|degree/i;
+  // A job block: the company field plus title and date fields close around it (a standalone
+  // "Current Company" question has neither).
+  const companies = () => [...document.querySelectorAll("input, select, textarea")].filter((el) => {
+    if (!visible(el) || !COMPANY.test(labelOf(el))) return false;
+    for (let node = el.parentElement, i = 0; node && node !== document.body && i < 6; node = node.parentElement, i += 1) {
+      const labels = [...node.querySelectorAll("input, select, textarea")].filter(visible).map(labelOf);
+      if (labels.filter((l) => COMPANY.test(l)).length > 1) return false;
+      if (labels.some((l) => /title|role|position|designation/i.test(l)) && labels.some((l) => /start|from|date|year/i.test(l))) return true;
+    }
+    return false;
+  });
+  let clicks = 0;
+  while (companies().length < wanted && clicks < 12) {
+    const list = companies();
+    if (!list.length) break;
+    // The nearest "Add" button around the last job block, not reaching into the education section.
+    let button = null;
+    for (let node = list[list.length - 1].parentElement, i = 0; node && node !== document.body && i < 12; node = node.parentElement, i += 1) {
+      if ([...node.querySelectorAll("input, select, textarea")].some((el) => EDUCATION.test(labelOf(el)))) break;
+      button = [...node.querySelectorAll('button, a, [role="button"]')].filter(visible).find((b) => {
+        const text = clean(b.innerText || b.getAttribute("aria-label"));
+        return /^\+?\s*add\b/i.test(text) && !/education|school|degree|skill|language|certif|link|website|question/i.test(text);
+      });
+      if (button) break;
+    }
+    if (!button) break;
+    const before = list.length;
+    button.click();
+    clicks += 1;
+    for (let t = 0; t < 20 && companies().length === before; t += 1) await sleep(150);
+    if (companies().length === before) break; // the button didn't add a block
+  }
+  return { count: companies().length, clicks };
 }
 
 /** Attach a file to one tagged upload field (used to re-attach an edited cover letter). */

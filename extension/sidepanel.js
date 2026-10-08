@@ -1,4 +1,4 @@
-import { extractJob, readForm, fillForm, attachFile, formSignal } from "./pageScripts.js";
+import { extractJob, readForm, fillForm, attachFile, formSignal, expandEmployment } from "./pageScripts.js";
 
 const $ = (id) => document.getElementById(id);
 const api = (path, options) => chrome.runtime.sendMessage({ type: "api", path, options });
@@ -228,7 +228,18 @@ $("autofill").addEventListener("click", async () => {
   showAttached();
   try {
     status($("applyStatus"), "Reading the form…");
-    const form = await runInPage(readForm);
+    let form = await runInPage(readForm);
+    // Employment: one block per job in your resume – "Add another" is clicked as needed, then the form is read again.
+    const shownJobs = new Set((form?.fields || []).filter((f) => f.entry?.kind === "employment").map((f) => f.entry.index)).size;
+    if (shownJobs) {
+      const me = await api("/api/ext/me");
+      const jobs = me.ok ? me.data.experienceCount || 0 : 0;
+      if (jobs > shownJobs) {
+        status($("applyStatus"), `Adding your other ${jobs - shownJobs} job${jobs - shownJobs === 1 ? "" : "s"} to the form…`);
+        await runInPage(expandEmployment, [jobs]);
+        form = await runInPage(readForm);
+      }
+    }
     if (!form?.fields?.length && !form?.manual) {
       status($("applyStatus"), "No application form found on this page. Open the job's Apply page and try again.", "err");
       return;

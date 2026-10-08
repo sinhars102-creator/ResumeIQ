@@ -136,7 +136,7 @@ export function registerExtensionRoutes(app, { userFromRequest }) {
 
   app.get("/api/ext/me", withUser(async (req, res, user) => {
     const profile = await getProfile(user.id);
-    return res.json({ email: user.email, profileReady: !!(profile?.first_name && profile?.email), hasResume: !!profile?.resume });
+    return res.json({ email: user.email, profileReady: !!(profile?.first_name && profile?.email), hasResume: !!profile?.resume, experienceCount: (profile?.resume?.experience || []).length });
   }));
 
   app.post("/api/ext/jobs", withUser(async (req, res, user) => {
