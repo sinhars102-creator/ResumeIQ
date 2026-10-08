@@ -63,8 +63,8 @@ Status: ✅ done · 🔍 built, needs checking on real pages · 🚧 in progress
 - Merge `tailoring-assistant` → `main` (deploys the site and turns on the daily job collection)
 
 ## Backlog – extension (after Phases 1–3)
-- One-click "Apply with ResumeIQ" from the job posting: clicks Apply, waits for the form, fills it and attaches resume + cover letter, steps through multi-page forms ❓ stop at Review for the user to submit (A) or also submit (B). Greenhouse / Lever / Ashby first (one-page forms), Workday second
-- Workday sign-in: each company's Workday has its own account, so "Create Account" appears once per employer ❓ fill the email and leave the password to the user (a), or create the account with a stored password and handle email verification (b)
+- **Auto apply on any site** – one click from the posting fills every page with resume + cover letter and stops at Review; one generic engine, not one per platform. Full plan and decisions: [`AUTO_APPLY.md`](AUTO_APPLY.md) ❓ when to start (vs finishing Phase 1)
+- AI scores each of the user's resumes against the job and uses the best fit for Auto apply
 - Clearer error in "Resume to attach" when the resume list can't load (today: "Something went wrong")
 - #11 follow-ups: cache-aware match on every job view is done; deeper matching is #13
 - LinkedIn Easy Apply autofill – decided: not now (account-restriction risk)
