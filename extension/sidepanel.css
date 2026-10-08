@@ -35,3 +35,8 @@ body.on-application #jobCard { order: 2; }
 .job-summary::after { content: " · Show details"; color: var(--accent); font-weight: 600; }
 .job-summary[aria-expanded="true"]::after { content: " · Hide details"; }
 body.on-application .job-form.collapsed { display: none; }
+.resume-pick { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.resume-pick label { font-size: 12px; font-weight: 600; }
+.resume-pick select { font: inherit; padding: 8px 10px; border: 1px solid #D3CFC5; border-radius: 8px; background: var(--surface); color: var(--text); min-height: 38px; }
+.row-actions { display: flex; gap: 14px; flex-wrap: wrap; }
+.link.danger { color: var(--danger); }

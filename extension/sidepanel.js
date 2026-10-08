@@ -154,6 +154,7 @@ async function refresh() {
   $("easyApplyCard").hidden = !ghId;
   $("openEasyApply").onclick = () => chrome.tabs.create({ url: `${auth.appUrl}?easyApply=${encodeURIComponent(ghId)}` });
   if (auth.signedIn && /^https?:/.test(tab?.url || "")) {
+    loadResumes();
     await layoutForPage();
     await readJob();
   } else document.body.classList.remove("on-application");
@@ -216,7 +217,9 @@ $("autofill").addEventListener("click", async () => {
     coverFieldId = form.fields.find((f) => f.id === "cover_letter")?.id || form.fields.find((f) => f.id === "documents")?.id || null;
     const [answers, resume, cover] = await Promise.all([
       api("/api/ext/autofill", { method: "POST", body: { fields: form.fields, job: { title: jobInfo.title, company: jobInfo.company } } }),
-      form.fields.some((f) => f.id === "resume") ? api("/api/ext/resume") : Promise.resolve({ ok: true, data: null }),
+      form.fields.some((f) => f.id === "resume")
+        ? api(`/api/ext/resume${$("resumeSelect").value ? `?id=${encodeURIComponent($("resumeSelect").value)}` : ""}`)
+        : Promise.resolve({ ok: true, data: null }),
       coverFieldId ? api("/api/ext/cover-letter", { method: "POST", body: jobInfo }) : Promise.resolve({ ok: true, data: null }),
     ]);
     if (!answers.ok) {
@@ -277,6 +280,92 @@ $("tailor").addEventListener("click", async () => {
 });
 
 let coverFieldId = null; // the upload the cover letter went to on this page
+
+/* ---------- Your resumes: uploaded files, the one to attach ---------- */
+
+let resumes = [];
+const GENERATED = ""; // the select's value for "generated from your profile"
+
+async function loadResumes(keepSelection = true) {
+  const r = await api("/api/ext/resumes");
+  resumes = r.ok ? r.data.resumes : [];
+  const previous = keepSelection ? $("resumeSelect").value : null;
+  const options = resumes.map((f) => {
+    const o = document.createElement("option");
+    o.value = f.id;
+    o.textContent = `${f.name}${f.is_default ? " (default)" : ""} – ${f.file_name}`;
+    return o;
+  });
+  if (!resumes.length) options.push(Object.assign(document.createElement("option"), { value: GENERATED, textContent: "Generated from your ResumeIQ profile (upload yours for best results)" }));
+  $("resumeSelect").replaceChildren(...options);
+  const fallback = resumes.find((f) => f.is_default)?.id ?? GENERATED;
+  $("resumeSelect").value = previous && resumes.some((f) => f.id === previous) ? previous : fallback;
+  updateResumeActions();
+}
+
+function updateResumeActions() {
+  const chosen = resumes.find((f) => f.id === $("resumeSelect").value);
+  $("makeDefault").hidden = !chosen || chosen.is_default;
+  $("removeResume").hidden = !chosen;
+}
+
+$("resumeSelect").addEventListener("change", updateResumeActions);
+$("uploadResume").addEventListener("click", () => $("resumeFile").click());
+
+$("resumeFile").addEventListener("change", async () => {
+  const file = $("resumeFile").files[0];
+  $("resumeFile").value = "";
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) {
+    status($("resumeStatus"), "That file is over 10 MB.", "err");
+    return;
+  }
+  // Named after the file (pop-up prompts aren't reliable in side panels).
+  const name = file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim().slice(0, 60) || "My resume";
+  status($("resumeStatus"), "Uploading…");
+  const base64 = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1]);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+  const r = await api("/api/ext/resumes", { method: "POST", body: { name, fileName: file.name, mimeType: file.type, base64 } });
+  if (!r.ok) {
+    status($("resumeStatus"), r.data.error || "Upload failed", "err");
+    return;
+  }
+  await loadResumes(false);
+  $("resumeSelect").value = r.data.resume.id;
+  updateResumeActions();
+  status($("resumeStatus"), `Uploaded "${name}". It will be attached as ${file.name}.`, "ok");
+});
+
+$("makeDefault").addEventListener("click", async () => {
+  const id = $("resumeSelect").value;
+  const r = await api(`/api/ext/resumes/${encodeURIComponent(id)}/default`, { method: "POST", body: {} });
+  if (r.ok) await loadResumes();
+  status($("resumeStatus"), r.ok ? "Default updated." : r.data.error || "Couldn't update", r.ok ? "ok" : "err");
+});
+
+$("removeResume").addEventListener("click", async () => {
+  const chosen = resumes.find((f) => f.id === $("resumeSelect").value);
+  if (!chosen) return;
+  // Confirm with a second click (confirm() dialogs aren't reliable in side panels).
+  if ($("removeResume").dataset.armed !== chosen.id) {
+    $("removeResume").dataset.armed = chosen.id;
+    $("removeResume").textContent = "Click again to remove";
+    setTimeout(() => {
+      delete $("removeResume").dataset.armed;
+      $("removeResume").textContent = "Remove";
+    }, 4000);
+    return;
+  }
+  delete $("removeResume").dataset.armed;
+  $("removeResume").textContent = "Remove";
+  const r = await api(`/api/ext/resumes/${encodeURIComponent(chosen.id)}`, { method: "DELETE" });
+  if (r.ok) await loadResumes(false);
+  status($("resumeStatus"), r.ok ? "Removed." : r.data.error || "Couldn't remove", r.ok ? "ok" : "err");
+});
 
 $("reattachCover").addEventListener("click", async () => {
   if (!coverFieldId) return;

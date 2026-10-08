@@ -386,3 +386,65 @@ export async function getJobById(id) {
   if (error) throw new Error(`reading the role failed: ${error.message}`);
   return data ? fromRow(data) : null;
 }
+
+/* ---------- Resume files (private "resumes" bucket + public.resume_files) ---------- */
+
+const RESUME_BUCKET = "resumes";
+const RESUME_COLUMNS = "id, name, file_name, mime_type, size_bytes, is_default, created_at";
+
+export async function listResumeFiles(userId) {
+  const { data, error } = await db().from("resume_files").select(RESUME_COLUMNS).eq("user_id", userId).order("created_at", { ascending: false });
+  if (error) throw new Error(`reading your resumes failed: ${error.message}`);
+  return data || [];
+}
+
+/** Store an uploaded resume under <user>/<id>.<ext>; the first one becomes the default. */
+export async function addResumeFile(userId, { name, fileName, mimeType, bytes }) {
+  const id = crypto.randomUUID();
+  const ext = mimeType === "application/pdf" ? "pdf" : mimeType === "application/msword" ? "doc" : "docx";
+  const path = `${userId}/${id}.${ext}`;
+  const { error: upErr } = await db().storage.from(RESUME_BUCKET).upload(path, bytes, { contentType: mimeType, upsert: false });
+  if (upErr) throw new Error(`uploading the file failed: ${upErr.message}`);
+  const existing = await listResumeFiles(userId);
+  const { data, error } = await db()
+    .from("resume_files")
+    .insert({ id, user_id: userId, name, file_name: fileName, storage_path: path, mime_type: mimeType, size_bytes: bytes.length, is_default: existing.length === 0 })
+    .select(RESUME_COLUMNS)
+    .single();
+  if (error) {
+    await db().storage.from(RESUME_BUCKET).remove([path]);
+    throw new Error(`saving the file failed: ${error.message}`);
+  }
+  return data;
+}
+
+export async function setDefaultResumeFile(userId, id) {
+  const owned = (await listResumeFiles(userId)).some((f) => f.id === id);
+  if (!owned) throw Object.assign(new Error("That resume isn't yours"), { status: 404 });
+  const { error: clearErr } = await db().from("resume_files").update({ is_default: false }).eq("user_id", userId).eq("is_default", true);
+  if (clearErr) throw new Error(clearErr.message);
+  const { error } = await db().from("resume_files").update({ is_default: true }).eq("user_id", userId).eq("id", id);
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteResumeFile(userId, id) {
+  const { data: row } = await db().from("resume_files").select("storage_path, is_default").eq("user_id", userId).eq("id", id).maybeSingle();
+  if (!row) throw Object.assign(new Error("That resume isn't yours"), { status: 404 });
+  await db().storage.from(RESUME_BUCKET).remove([row.storage_path]);
+  await db().from("resume_files").delete().eq("user_id", userId).eq("id", id);
+  if (row.is_default) {
+    const [next] = await listResumeFiles(userId);
+    if (next) await setDefaultResumeFile(userId, next.id);
+  }
+}
+
+/** A user's resume file (the chosen one, else the default) as bytes, or null when they have none. */
+export async function getResumeFile(userId, id = null) {
+  let q = db().from("resume_files").select("storage_path, file_name, mime_type").eq("user_id", userId);
+  q = id ? q.eq("id", id) : q.eq("is_default", true);
+  const { data: row } = await q.maybeSingle();
+  if (!row) return null;
+  const { data, error } = await db().storage.from(RESUME_BUCKET).download(row.storage_path);
+  if (error) throw new Error(`downloading your resume failed: ${error.message}`);
+  return { fileName: row.file_name, mimeType: row.mime_type, bytes: Buffer.from(await data.arrayBuffer()) };
+}

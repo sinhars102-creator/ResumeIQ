@@ -5,7 +5,8 @@
  *   POST /api/ext/jobs      save the role on the page to "My jobs" (and the shared jobs table)
  *   POST /api/ext/match     fit score for a role, with what's holding it back
  *   POST /api/ext/autofill  answers for an application form read off any page
- *   GET  /api/ext/resume    the applicant's resume as a PDF (base64) to attach
+ *   GET  /api/ext/resume    the resume to attach: the chosen/default uploaded file as is, else a generated PDF
+ *   GET/POST/DELETE /api/ext/resumes[/:id[/default]]  the user's uploaded resume files
  *   POST /api/ext/cover-letter  a cover letter for the role (from the resume only), text + PDF
  *   GET  /api/ext/me        who is signed in and whether their profile is ready
  */
@@ -14,7 +15,17 @@ import { callLLM } from "./llm.js";
 import { fillForm } from "./easyApplyFill.js";
 import { buildResumePdf } from "../src/resumePdf.js";
 import { jsPDF } from "jspdf";
-import { toRow, saveUserJob, setUserJobMatch, getProfile, listUserJobs } from "./jobStore.js";
+import {
+  toRow, saveUserJob, setUserJobMatch, getProfile, listUserJobs,
+  listResumeFiles, addResumeFile, setDefaultResumeFile, deleteResumeFile, getResumeFile,
+} from "./jobStore.js";
+
+const RESUME_TYPES = {
+  "application/pdf": /\.pdf$/i,
+  "application/msword": /\.doc$/i,
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": /\.docx$/i,
+};
+const MAX_RESUME_BYTES = 10 * 1024 * 1024;
 
 /**
  * Which source a job page belongs to, and the role's id there, from its URL. Ids follow the
@@ -178,12 +189,43 @@ export function registerExtensionRoutes(app, { userFromRequest }) {
     return res.json(await fillForm({ fields: fields.slice(0, 120), profile, resume: profile.resume, job: job || {} }));
   }));
 
+  // The resume to attach: an uploaded file exactly as uploaded (?id=, else the default); a PDF
+  // generated from the parsed resume only when the user has uploaded none.
   app.get("/api/ext/resume", withUser(async (req, res, user) => {
+    const file = await getResumeFile(user.id, req.query.id ? String(req.query.id) : null);
+    if (file) return res.json({ fileName: file.fileName, mimeType: file.mimeType, base64: file.bytes.toString("base64"), uploaded: true });
     const profile = await getProfile(user.id);
     if (!profile?.resume) return res.status(409).json({ error: "Upload your resume in ResumeIQ first" });
     const doc = buildResumePdf(profile.resume, null);
     const name = [profile.first_name, profile.last_name].filter(Boolean).join("_").replace(/[^A-Za-z0-9_-]+/g, "") || "Resume";
-    return res.json({ fileName: `${name}_Resume.pdf`, base64: Buffer.from(doc.output("arraybuffer")).toString("base64") });
+    return res.json({ fileName: `${name}_Resume.pdf`, mimeType: "application/pdf", base64: Buffer.from(doc.output("arraybuffer")).toString("base64"), uploaded: false });
+  }));
+
+  app.get("/api/ext/resumes", withUser(async (req, res, user) => res.json({ resumes: await listResumeFiles(user.id) })));
+
+  app.post("/api/ext/resumes", withUser(async (req, res, user) => {
+    const { name, fileName, mimeType, base64 } = req.body || {};
+    if (!RESUME_TYPES[mimeType] || !RESUME_TYPES[mimeType].test(String(fileName || ""))) {
+      return res.status(400).json({ error: "Upload a PDF or Word file (.pdf, .doc, .docx)" });
+    }
+    const bytes = Buffer.from(String(base64 || ""), "base64");
+    if (!bytes.length) return res.status(400).json({ error: "The file is empty" });
+    if (bytes.length > MAX_RESUME_BYTES) return res.status(400).json({ error: "The file is over 10 MB" });
+    // A PDF must really be one (starts with %PDF-); Word files start with their own signatures.
+    if (mimeType === "application/pdf" && bytes.subarray(0, 5).toString() !== "%PDF-") return res.status(400).json({ error: "That file isn't a valid PDF" });
+    const label = String(name || "").trim().slice(0, 60) || String(fileName).replace(/\.[^.]+$/, "").slice(0, 60);
+    const saved = await addResumeFile(user.id, { name: label, fileName: String(fileName).slice(0, 120), mimeType, bytes });
+    return res.json({ resume: saved });
+  }));
+
+  app.post("/api/ext/resumes/:id/default", withUser(async (req, res, user) => {
+    await setDefaultResumeFile(user.id, req.params.id);
+    return res.json({ ok: true });
+  }));
+
+  app.delete("/api/ext/resumes/:id", withUser(async (req, res, user) => {
+    await deleteResumeFile(user.id, req.params.id);
+    return res.json({ ok: true });
   }));
 
   // Write a cover letter (or render an edited one, when `text` is sent) and return it as a PDF to attach.

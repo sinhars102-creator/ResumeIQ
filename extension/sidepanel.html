@@ -65,6 +65,17 @@
       <h2 id="applyTitle">Application form</h2>
       <p id="applyHint" class="muted" hidden>No application form on this page yet. Click <strong>Apply</strong> on the page – autofill appears here when the form opens.</p>
       <p id="applyAbout" class="muted">Fills this page's form from your ResumeIQ profile – including your voluntary details and, if you turned it on, standard declarations – and attaches your resume. Review everything, then submit on the page yourself.</p>
+      <div id="resumePick" class="resume-pick">
+        <label for="resumeSelect">Resume to attach</label>
+        <select id="resumeSelect"></select>
+        <div class="row-actions">
+          <button id="uploadResume" class="link" type="button">Upload a resume</button>
+          <button id="makeDefault" class="link" type="button" hidden>Make default</button>
+          <button id="removeResume" class="link danger" type="button" hidden>Remove</button>
+        </div>
+        <input id="resumeFile" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+        <div id="resumeStatus" class="status" role="status"></div>
+      </div>
       <button id="autofill" class="btn primary" type="button">Autofill this application</button>
       <div id="applyStatus" class="status" role="status"></div>
       <ul id="skipped" class="list gaps"></ul>

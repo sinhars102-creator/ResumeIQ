@@ -101,7 +101,10 @@ const PORT = process.env.PORT || 3001;
 
 app.use(cors({ origin: true }));
 // 2 MB: resumes can carry an embedded photo (data URL) when exported to Reactive Resume.
-app.use(express.json({ limit: "2mb" }));
+// Resume uploads (up to 10 MB, sent base64) get a larger body limit than everything else.
+const jsonDefault = express.json({ limit: "2mb" });
+const jsonUpload = express.json({ limit: "15mb" });
+app.use((req, res, next) => (req.method === "POST" && req.path === "/api/ext/resumes" ? jsonUpload : jsonDefault)(req, res, next));
 
 const RAPIDAPI_HOST = "linkedin-job-search-api.p.rapidapi.com";
 

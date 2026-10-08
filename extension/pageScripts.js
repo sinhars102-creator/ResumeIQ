@@ -253,7 +253,7 @@ export async function fillForm({ fields, answers, needsYou, resume, coverLetter 
   const attach = (el, file) => {
     const bytes = Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0));
     const dt = new DataTransfer();
-    dt.items.add(new File([bytes], file.fileName, { type: "application/pdf" }));
+    dt.items.add(new File([bytes], file.fileName, { type: file.mimeType || "application/pdf" }));
     el.files = dt.files;
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
@@ -328,7 +328,7 @@ export function attachFile(fieldId, file) {
   if (!el) return false;
   const bytes = Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0));
   const dt = new DataTransfer();
-  dt.items.add(new File([bytes], file.fileName, { type: "application/pdf" }));
+  dt.items.add(new File([bytes], file.fileName, { type: file.mimeType || "application/pdf" }));
   el.files = dt.files;
   el.dispatchEvent(new Event("input", { bubbles: true }));
   el.dispatchEvent(new Event("change", { bubbles: true }));
