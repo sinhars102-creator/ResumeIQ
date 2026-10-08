@@ -105,7 +105,12 @@ async function readJob() {
   status($("jobStatus"), "");
   $("saveJob").textContent = "Add to ResumeIQ";
   try {
-    const job = await runInPage(extractJob);
+    let job = await runInPage(extractJob);
+    // LinkedIn sometimes fills the description in after the job appears: read once more.
+    if (job?.title && (job.description || "").length < 150) {
+      await new Promise((r) => setTimeout(r, 1500));
+      job = (await runInPage(extractJob)) || job;
+    }
     for (const key of ["title", "company", "location", "description"]) $(key).value = job?.[key] || "";
     $("jobForm").dataset.url = job?.url || "";
     if (!job?.title) status($("jobStatus"), "No job found on this page – fill in the details to save it anyway.");

@@ -62,10 +62,37 @@ export function extractJob() {
       '[class*="job-title"] h1', 'h1[class*="job-title"]', '[class*="top-card"] h1', '[class*="job-details"] h1', '[class*="job-details"] h2',
     ]);
     const company = (fromTitle && parts[1]) || firstText(['[class*="company-name"] a', '[class*="company-name"]', '[class*="top-card"] a[href*="/company/"]']);
-    const meta = firstText(['[class*="primary-description"]', '[class*="tertiary-description"]', '[class*="top-card"] [class*="description"]']);
-    const descEl = document.querySelector('#job-details, [class*="jobs-description__content"], [class*="jobs-box__html-content"]') ||
-      [...document.querySelectorAll("h2")].find((h) => /about the job/i.test(h.innerText))?.parentElement;
-    return { title, company, location: meta.split("·")[0].trim(), description: clean(descEl?.innerText).slice(0, 30000), url: location.href };
+    // Location: the line under the title, "Bengaluru, Karnataka, India · 1 week ago · Over 100 …".
+    const AGO = /·\s*(reposted\s+)?\d+\s+(second|minute|hour|day|week|month|year)s?\s+ago/i;
+    const metaLine = [...document.querySelectorAll("span, div, p")]
+      .filter((el) => !injected(el) && el.children.length < 12 && AGO.test(el.innerText || ""))
+      .map((el) => clean(el.innerText))
+      .filter((t) => /^[^·]{2,}·/.test(t)) // the place comes before the first "·"
+      .sort((a, b) => a.length - b.length)[0];
+    const meta = metaLine || firstText(['[class*="primary-description"]', '[class*="tertiary-description"]']);
+
+    // Description: the longest of LinkedIn's description containers, or the block that grows
+    // out of the "About the job" heading until it holds the text (the heading alone is ~13 chars).
+    // A block holding the title header (h1) is the whole job pane, not the description.
+    const usable = (el) => el && !injected(el) && !el.querySelector("h1");
+    const heading = [...document.querySelectorAll("h2, h3")].find((h) => /^about the job$/i.test(clean(h.innerText)) && !injected(h));
+    let aroundHeading = "";
+    for (let el = heading?.parentElement, i = 0; el && i < 6; el = el.parentElement, i += 1) {
+      if (!usable(el)) break;
+      const t = clean(el.innerText);
+      if (t.length > 200) {
+        aroundHeading = t;
+        break;
+      }
+    }
+    const fromContainers = [...document.querySelectorAll('#job-details, [class*="jobs-description"], [class*="job-details-module"], [class*="description__text"]')]
+      .filter(usable)
+      .map((el) => clean(el.innerText))
+      .filter((t) => t.length < 40000)
+      .sort((a, b) => b.length - a.length)[0] || "";
+    const best = aroundHeading.length >= fromContainers.length ? aroundHeading : fromContainers;
+    const description = best.replace(/^about the job\s*/i, "").slice(0, 30000);
+    return { title, company, location: meta.split("·")[0].trim(), description, url: location.href };
   }
 
   // 3) Fallback: the page's own sections, then its title ("Job Application for X at Company")
