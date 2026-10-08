@@ -40,6 +40,11 @@ Workday specifics to check:
 - [ ] Step 2 fills name/phone; "Select One" dropdowns (e.g. How did you hear about us, Phone device type)
   are outlined and listed as "(pick on the page)" – these stay manual for now.
 
+Employment section (Greenhouse forms with "Employment" and **Add another**):
+- [ ] Autofill adds one block per job in your resume and fills each in order – company, title, start/end month and year.
+- [ ] A current job: "Current role" ticked, end dates empty and greyed out, not listed as missing.
+- [ ] Month dropdowns show the month (not just typed text).
+
 ## D. Cover letter
 - [ ] On a form with a cover letter upload: a letter is written and attached; **View** opens it.
 - [ ] Edit the text → **Re-attach** → View shows the edited version.
@@ -52,5 +57,5 @@ Workday specifics to check:
 
 ## Known limits (not bugs for this checkpoint)
 - Workday's button dropdowns and "Add experience" sections aren't filled (Auto apply idea).
-- Greenhouse dropdowns: use **Easy Apply** from the panel.
+- Greenhouse dropdowns now open and fill in the extension (new) – Easy Apply stays available from the panel.
 - Workday asks for an account per company – sign in yourself.
