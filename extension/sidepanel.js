@@ -3,7 +3,6 @@ import { extractJob, readForm, fillForm } from "./pageScripts.js";
 const $ = (id) => document.getElementById(id);
 const api = (path, options) => chrome.runtime.sendMessage({ type: "api", path, options });
 let tabId = null;
-let savedJobId = null;
 
 async function activeTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -20,8 +19,75 @@ function status(el, text, kind = "") {
   el.className = `status ${kind}`;
 }
 
-function showMatch(m) {
+const MATCH_CACHE_DAYS = 7;
+let currentMatch = null; // the score shown for the job on this page
+let readSeq = 0; // drops results for a job the user has already moved away from
+
+/** One key per role: LinkedIn's job id, else the page address without its query. */
+function jobKey(url) {
+  try {
+    const u = new URL(url);
+    if (u.hostname.endsWith("linkedin.com")) {
+      const id = u.pathname.match(/\/jobs\/view\/(?:[^/]*-)?(\d{6,})/)?.[1] || u.searchParams.get("currentJobId");
+      if (id) return `linkedin:${id}`;
+    }
+    return `${u.origin}${u.pathname}`.replace(/\/+$/, "");
+  } catch {
+    return null;
+  }
+}
+
+async function cachedMatch(key) {
+  const { matches = {} } = await chrome.storage.local.get("matches");
+  const hit = matches[key];
+  return hit && Date.now() - hit.at < MATCH_CACHE_DAYS * 864e5 ? hit.match : null;
+}
+
+async function cacheMatch(key, match) {
+  const { matches = {} } = await chrome.storage.local.get("matches");
+  matches[key] = { at: Date.now(), match };
+  // Keep the newest 300.
+  const keep = Object.entries(matches).sort((a, b) => b[1].at - a[1].at).slice(0, 300);
+  await chrome.storage.local.set({ matches: Object.fromEntries(keep) });
+}
+
+function matchPending(text) {
   $("matchCard").hidden = false;
+  $("ring").style.setProperty("--pct", 0);
+  $("scoreValue").textContent = "…";
+  $("scoreLabel").textContent = "Your fit for this role";
+  $("scoreSummary").textContent = text;
+  $("matchDetails").hidden = true;
+  $("rematch").hidden = true;
+}
+
+/** Score the job on this page against the profile (cached per job), as soon as it's read. */
+async function runMatch(job, { force = false } = {}) {
+  const seq = readSeq;
+  const key = jobKey(job.url);
+  currentMatch = null;
+  const cached = !force && key && (await cachedMatch(key));
+  if (cached) {
+    showMatch(cached);
+    return;
+  }
+  matchPending("Checking your fit…");
+  const r = await api("/api/ext/match", { method: "POST", body: { title: job.title, company: job.company, description: job.description } });
+  if (seq !== readSeq) return; // the user moved to another job meanwhile
+  if (!r.ok) {
+    matchPending(r.data.error || "Couldn't check your fit.");
+    $("rematch").hidden = false;
+    return;
+  }
+  if (key) await cacheMatch(key, r.data);
+  showMatch(r.data);
+}
+
+function showMatch(m) {
+  currentMatch = m;
+  $("matchCard").hidden = false;
+  $("matchDetails").hidden = false;
+  $("rematch").hidden = true;
   const tier = m.score >= 75 ? ["Strong match", "#3F7D6E"] : m.score >= 55 ? ["Moderate match", "#B7862F"] : ["Needs alignment", "#B5534A"];
   $("ring").style.setProperty("--pct", m.score);
   $("ring").style.setProperty("--ring", tier[1]);
@@ -33,8 +99,9 @@ function showMatch(m) {
 }
 
 async function readJob() {
+  readSeq += 1;
   $("matchCard").hidden = true;
-  savedJobId = null;
+  currentMatch = null;
   status($("jobStatus"), "");
   $("saveJob").textContent = "Add to ResumeIQ";
   try {
@@ -42,6 +109,8 @@ async function readJob() {
     for (const key of ["title", "company", "location", "description"]) $(key).value = job?.[key] || "";
     $("jobForm").dataset.url = job?.url || "";
     if (!job?.title) status($("jobStatus"), "No job found on this page – fill in the details to save it anyway.");
+    // Enough of a description to judge fit: score it straight away.
+    else if ((job.description || "").length >= 150) runMatch(job);
   } catch (err) {
     status($("jobStatus"), `Can't read this page (${err.message})`, "err");
   }
@@ -83,21 +152,17 @@ $("jobForm").addEventListener("submit", async (e) => {
   $("saveJob").disabled = true;
   status($("jobStatus"), "Saving…");
   const job = { url: $("jobForm").dataset.url, title: $("title").value, company: $("company").value, location: $("location").value, description: $("description").value };
-  const saved = await api("/api/ext/jobs", { method: "POST", body: job });
+  const saved = await api("/api/ext/jobs", { method: "POST", body: { ...job, match: currentMatch } });
   if (!saved.ok) {
     status($("jobStatus"), saved.data.error || "Couldn't save", "err");
     $("saveJob").disabled = false;
     return;
   }
-  savedJobId = saved.data.jobId;
-  status($("jobStatus"), "Saved to your ResumeIQ jobs. Checking your fit…", "ok");
   $("saveJob").textContent = "Saved ✓";
-  const match = await api("/api/ext/match", { method: "POST", body: { jobId: savedJobId, ...job } });
   $("saveJob").disabled = false;
-  if (match.ok) {
-    showMatch(match.data);
-    status($("jobStatus"), "Saved to your ResumeIQ jobs.", "ok");
-  } else status($("jobStatus"), `Saved. Match score unavailable: ${match.data.error || "try again"}`, "err");
+  status($("jobStatus"), "Saved to your ResumeIQ jobs.", "ok");
+  // Not scored yet (short description, or the check failed): score it now, with what was saved.
+  if (!currentMatch && job.description.length >= 50) runMatch(job);
 });
 
 $("autofill").addEventListener("click", async () => {
@@ -136,7 +201,18 @@ $("autofill").addEventListener("click", async () => {
 });
 
 $("rescan").addEventListener("click", readJob);
+$("rematch").addEventListener("click", () =>
+  runMatch({ url: $("jobForm").dataset.url, title: $("title").value, company: $("company").value, description: $("description").value }, { force: true }));
 chrome.tabs.onActivated.addListener(refresh);
-chrome.tabs.onUpdated.addListener((id, info) => { if (id === tabId && info.status === "complete") refresh(); });
+// LinkedIn switches jobs without loading a new page (only the address changes): re-read after it renders.
+let urlTimer = null;
+chrome.tabs.onUpdated.addListener((id, info) => {
+  if (id !== tabId) return;
+  if (info.status === "complete") refresh();
+  else if (info.url) {
+    clearTimeout(urlTimer);
+    urlTimer = setTimeout(refresh, 1500);
+  }
+});
 chrome.runtime.onMessage.addListener((msg) => { if (msg.type === "auth:changed") refresh(); });
 refresh();

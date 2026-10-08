@@ -87,7 +87,7 @@ export function registerExtensionRoutes(app, { userFromRequest }) {
   }));
 
   app.post("/api/ext/jobs", withUser(async (req, res, user) => {
-    const { url, title, company, location, description } = req.body || {};
+    const { url, title, company, location, description, match } = req.body || {};
     const who = jobIdentity(url);
     if (!who) return res.status(400).json({ error: "This page has no usable address" });
     if (!String(title || "").trim() || !String(company || "").trim()) return res.status(400).json({ error: "Job title and company are required" });
@@ -96,6 +96,15 @@ export function registerExtensionRoutes(app, { userFromRequest }) {
       { board: who.board, raw: { savedBy: "extension", page: url } },
     );
     await saveUserJob(user.id, row, { addedFrom: url });
+    // The score the panel already showed is kept with the saved job.
+    if (match && Number.isFinite(Number(match.score))) {
+      await setUserJobMatch(user.id, row.id, {
+        score: Math.max(0, Math.min(100, Math.round(Number(match.score)))),
+        summary: String(match.summary || "").slice(0, 500),
+        matched: [].concat(match.matched || []).slice(0, 5).map(String),
+        gaps: [].concat(match.gaps || []).slice(0, 5).map(String),
+      });
+    }
     return res.json({ jobId: row.id, source: who.source });
   }));
 
