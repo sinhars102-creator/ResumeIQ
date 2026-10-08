@@ -42,13 +42,30 @@ export function extractJob() {
     }
   }
 
-  // 2) LinkedIn job view / search with a job open
+  // 2) LinkedIn (job page, or a search with a job open). Its class names change often, so: the
+  //    tab title first ("Senior PM - SyncOS | Botsync | LinkedIn"), then elements whose class
+  //    names mention job-title / company-name – never inside other extensions' injected cards.
   if (location.hostname.endsWith("linkedin.com")) {
-    const title = text(".job-details-jobs-unified-top-card__job-title, .jobs-unified-top-card__job-title, h1");
-    const company = text(".job-details-jobs-unified-top-card__company-name, .jobs-unified-top-card__company-name");
-    const meta = text(".job-details-jobs-unified-top-card__primary-description-container, .job-details-jobs-unified-top-card__tertiary-description-container");
-    const description = clean(document.querySelector("#job-details, .jobs-description__content, .jobs-box__html-content")?.innerText).slice(0, 30000);
-    return { title, company, location: meta.split("·")[0].trim(), description, url: location.href };
+    const injected = (el) => !!el.closest('[id*="jobright" i], [class*="jobright" i], [data-riq-skip]');
+    const firstText = (selectors) => {
+      for (const sel of selectors) {
+        for (const el of document.querySelectorAll(sel)) {
+          const t = clean(el.innerText);
+          if (t && !injected(el)) return t;
+        }
+      }
+      return "";
+    };
+    const parts = clean(document.title).replace(/^\(\d+\)\s*/, "").split(" | ").map((x) => x.trim());
+    const fromTitle = parts.length >= 3 && /linkedin/i.test(parts[parts.length - 1]) && !/^jobs?\b|\bjobs$|search/i.test(parts[0]);
+    const title = (fromTitle && parts[0]) || firstText([
+      '[class*="job-title"] h1', 'h1[class*="job-title"]', '[class*="top-card"] h1', '[class*="job-details"] h1', '[class*="job-details"] h2',
+    ]);
+    const company = (fromTitle && parts[1]) || firstText(['[class*="company-name"] a', '[class*="company-name"]', '[class*="top-card"] a[href*="/company/"]']);
+    const meta = firstText(['[class*="primary-description"]', '[class*="tertiary-description"]', '[class*="top-card"] [class*="description"]']);
+    const descEl = document.querySelector('#job-details, [class*="jobs-description__content"], [class*="jobs-box__html-content"]') ||
+      [...document.querySelectorAll("h2")].find((h) => /about the job/i.test(h.innerText))?.parentElement;
+    return { title, company, location: meta.split("·")[0].trim(), description: clean(descEl?.innerText).slice(0, 30000), url: location.href };
   }
 
   // 3) Fallback: the page's own sections, then its title ("Job Application for X at Company")

@@ -67,4 +67,25 @@ Track these items for future implementation.
 
 ---
 
+## 9. Every Greenhouse job posting in our job board
+**What:** All Greenhouse job postings (India scope) should come into the ResumeIQ jobs database, not only the ~70 boards we know about today.
+**Why:** Roles like [Eudia – 4333174009](https://job-boards.greenhouse.io/eudia/jobs/4333174009) appear on LinkedIn and Greenhouse but were missing from our Greenhouse list, because Eudia's board isn't one we collect.
+**Notes:**
+- Learn boards from job links: any URL naming a Greenhouse board (`job-boards.greenhouse.io/<board>/…`, `?gh_jid=…&for=<board>`), whether from LinkedIn "Apply" links, the Chrome extension or Easy Apply, adds that board to `public.companies` as active, with no name guessing.
+- The live "Company career pages" search should use every active board in the database, not the 29 hard-coded in `server/jobBoards.js`.
+- Finish discovery of the ~1,130 companies still waiting (500 per daily run today); consider running it more often.
+- Same approach later for Lever and Ashby.
+
+---
+
+## 10. Prefer the Greenhouse posting when a role is on both LinkedIn and Greenhouse
+**What:** When the same role exists on LinkedIn and on Greenhouse, show and use the Greenhouse version.
+**Why:** The Greenhouse posting has the full job description, the employer's own apply link, and works with Easy Apply; LinkedIn copies often don't.
+**Notes:**
+- Today `mergeJobs` collapses duplicates by company + title + city and keeps the longer description; it should keep the Greenhouse record (id, source, link) and treat the LinkedIn one as a duplicate.
+- Apply the same rule in the database: link LinkedIn rows to the matching Greenhouse row (e.g. a `duplicate_of` column) so searches return one card, Greenhouse first.
+- LinkedIn's "Apply" link often points at the Greenhouse posting – use it to match the two exactly when available.
+
+---
+
 *Add new items below as needed.*

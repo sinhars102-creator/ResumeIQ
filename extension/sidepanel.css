@@ -1,5 +1,6 @@
 :root { color-scheme: light; --bg: #F7F6F2; --surface: #FFFFFF; --border: #E6E3DC; --text: #1F2A2E; --text2: #5F6B6E; --accent: #3F7D6E; --warn: #B7862F; --danger: #B5534A; }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; } /* .card sets display:flex, which would otherwise override hidden */
 body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
 .top { display: flex; align-items: center; gap: 8px; padding: 12px 14px; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 0; }
 .logo { color: var(--accent); } .brand { font-weight: 700; } .who { margin-left: auto; font-size: 12px; color: var(--text2); max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
