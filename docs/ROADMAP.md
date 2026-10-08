@@ -22,7 +22,7 @@ Status: ✅ done · 🔍 built, needs checking on real pages · 🚧 in progress
 
 | # | Item | Status |
 |---|---|---|
-| 2.1 | "Improve my resume for this job" opens the Tailor step for that job, with the profile's resume | 🔍 |
+| 2.1 | "Improve my resume for this job" opens the Tailor step for that job, with the profile's resume (checked end to end 2026-10-08) | ✅ |
 | 2.2 | Coming back: after tailoring, the tailored resume becomes what autofill attaches, with a way back to the job page | ⏳ |
 
 ## Phase 3 – Resume editing flow (website, Tailor screen)
@@ -63,6 +63,7 @@ Status: ✅ done · 🔍 built, needs checking on real pages · 🚧 in progress
 - Merge `tailoring-assistant` → `main` (deploys the site and turns on the daily job collection)
 
 ## Backlog – extension (after Phases 1–3)
+- **Match card on LinkedIn job pages** (like Jobright's): a ResumeIQ card inside the LinkedIn job view – match-score gauge, "Add this job to view your Match Score and tailor your resume", one click to save / tailor – so users don't need to open the side panel
 - Clearer error in "Resume to attach" when the resume list can't load (today: "Something went wrong")
 - #11 follow-ups: cache-aware match on every job view is done; deeper matching is #13
 - LinkedIn Easy Apply autofill – decided: not now (account-restriction risk)
