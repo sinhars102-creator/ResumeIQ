@@ -70,3 +70,35 @@ the run reached Review.
 - AI scores each of the user's resumes against the job and uses the best fit (see Decisions).
 - Tailored resume per job as the attachment (needs Roadmap 2.2 and 3.2).
 - Reading verification codes from Gmail for site sign-ups.
+
+---
+
+## Idea: job-hunting agent
+*Not planned – an idea to build on later.*
+
+**What:** the user gives ResumeIQ their resume(s), preferences and permission once. An agent then works
+for them in the background, even when they aren't on the platform: it keeps finding roles that fit,
+asks for approval, and applies to the ones they approve.
+
+**How it could work:**
+1. **Brief, once:** roles, locations, salary floor, companies to avoid, minimum match score, how many
+   applications per week, and which resumes to use.
+2. **Find:** each day the agent searches the jobs repository (career boards, LinkedIn on demand) and
+   scores new roles against the user's resumes (the "AI picks the best resume" idea).
+3. **Approve:** it sends a short daily list (email / WhatsApp / in the app): role, company, match score,
+   the resume it would use, why it fits. The user taps Approve or Skip; skips teach it what not to send.
+4. **Apply:** approved roles are applied to by a server worker running the Auto apply engine: the
+   resume, a cover letter when asked, the answer bank for questions. Anything it can't answer
+   goes back to the user as a question.
+5. **Report:** the applications list shows what was sent, with which documents, and any replies.
+
+**Things to work out:**
+- **Running without the user's browser:** today's Easy Apply already does this for Greenhouse on our
+  server. Sites that need an account (Workday, iCIMS) would need stored sign-ins, or would stay for the
+  user to finish – the agent prepares, the user signs in.
+- **Approval:** whether "approve" means "submit", or the agent fills and the user does a final check
+  (Auto apply stops at Review today).
+- **CAPTCHAs and site limits:** some sites will block automated submissions; how many per day is safe.
+- **Quality over volume:** a cap and a minimum match score so it never mass-applies.
+- **Cost:** AI calls per job scored and per application, and the worker server (Vercel can't run the
+  browser – already in "Going live").

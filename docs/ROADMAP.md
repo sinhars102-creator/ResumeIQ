@@ -63,9 +63,12 @@ Status: ✅ done · 🔍 built, needs checking on real pages · 🚧 in progress
 - Merge `tailoring-assistant` → `main` (deploys the site and turns on the daily job collection)
 
 ## Backlog – extension (after Phases 1–3)
-- **Auto apply on any site** – one click from the posting fills every page with resume + cover letter and stops at Review; one generic engine, not one per platform. Full plan and decisions: [`AUTO_APPLY.md`](AUTO_APPLY.md) ❓ when to start (vs finishing Phase 1)
-- AI scores each of the user's resumes against the job and uses the best fit for Auto apply
 - Clearer error in "Resume to attach" when the resume list can't load (today: "Something went wrong")
 - #11 follow-ups: cache-aware match on every job view is done; deeper matching is #13
 - LinkedIn Easy Apply autofill – decided: not now (account-restriction risk)
 - Chrome Web Store listing
+
+## Ideas – later (not planned yet)
+- **Auto apply on any site** – one click from the posting fills every page with resume + cover letter and stops at Review; one generic engine, not one per platform. Plan and agreed decisions: [`AUTO_APPLY.md`](AUTO_APPLY.md)
+- **AI picks the best resume** – scores each of the user's resumes against the job, shows the scores, and attaches the best fit
+- **Job-hunting agent** – works for the user while they're away: keeps looking for roles that match, asks for approval, and applies to the approved ones. Notes in [`AUTO_APPLY.md`](AUTO_APPLY.md#idea-job-hunting-agent)
