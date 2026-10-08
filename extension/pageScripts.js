@@ -159,6 +159,18 @@ export async function readForm() {
     return "";
   };
 
+  /** Text a little further out (up to 8 levels, short containers only) – the upload's section heading. */
+  const widerText = (el) => {
+    for (let node = el.parentElement, i = 0; node && i < 8; node = node.parentElement, i += 1) {
+      const t = clean(node.innerText);
+      if (t.length > 400) break;
+      if (/resume|\bcv\b|curriculum|cover(ing)? letter/i.test(t)) return t.slice(0, 200);
+    }
+    return "";
+  };
+  const singleUpload = [...document.querySelectorAll('input[type="file"]')].length === 1 &&
+    /resume|\bcv\b|curriculum vitae/i.test(document.body.innerText.slice(0, 20000));
+
   const fields = [];
   const used = new Set();
   let n = 0;
@@ -191,11 +203,12 @@ export async function readForm() {
       continue;
     }
     if (el.type === "file") {
-      const around = `${label} ${contextText(el)} ${el.id} ${el.name}`;
+      const around = `${label} ${contextText(el)} ${el.id} ${el.name} ${el.getAttribute("data-automation-id") || ""} ${widerText(el)}`;
       let id;
       if (/resume|\bcv\b|curriculum/i.test(around) && !used.has("resume")) id = "resume";
       else if (/cover(ing)? letter/i.test(around) && !used.has("cover_letter")) id = "cover_letter";
       else if (/additional|attachment|other documents|supporting/i.test(around) && !used.has("cover_letter") && !used.has("documents")) id = "documents";
+      else if (singleUpload && !used.has("resume")) id = "resume"; // the page's only upload, on a page about a resume/CV
       add(el, { id, label: clean(label).slice(0, 120), type: "file", required: required(el, label) });
       continue;
     }
@@ -219,6 +232,12 @@ export async function readForm() {
     const type = el.tagName === "TEXTAREA" ? "textarea" : el.type === "email" ? "email" : el.type === "tel" ? "phone" : el.type === "url" ? "url" : "text";
     add(el, { id: canonical(label, el) || undefined, label, type, required: required(el, label) });
   }
+  // Button-style dropdowns (Workday) can't be filled yet: tagged so fillForm flags the empty ones.
+  for (const el of document.querySelectorAll('button[aria-haspopup="listbox"]')) {
+    if (!visible(el) || el.closest("[data-riq-skip]")) continue;
+    const label = labelOf(el) || clean(el.getAttribute("aria-label"));
+    if (label) el.setAttribute("data-riq-manual", label);
+  }
   for (const [key, els] of groups) {
     const question = clean(els[0].closest("fieldset")?.querySelector("legend")?.innerText) || key;
     const options = els.map((el) => ({ value: el.value || labelOf(el), label: labelOf(el) }));
@@ -226,7 +245,7 @@ export async function readForm() {
     const holder = els[0].closest("fieldset") || els[0].parentElement;
     add(holder, { label: question, type: els[0].type === "radio" ? "select" : options.length === 1 ? "checkbox" : "multiselect", required: els.some((e) => e.required), options, group: true });
   }
-  return { fields, url: location.href, title: document.title };
+  return { fields, manual: document.querySelectorAll("[data-riq-manual]").length, url: location.href, title: document.title };
 }
 
 /**
@@ -319,6 +338,13 @@ export async function fillForm({ fields, answers, needsYou, resume, coverLetter 
       skipped.push(field.label);
     }
   }
+  // Dropdowns autofill can't operate yet (button-style): flag the ones still unanswered.
+  for (const el of document.querySelectorAll("[data-riq-manual]")) {
+    const shown = el.innerText.replace(/\s+/g, " ").trim();
+    if (shown && !/^(select|choose|--|please select)/i.test(shown)) continue;
+    mark(el, "Pick this one on the page", false);
+    skipped.push(`${el.getAttribute("data-riq-manual")} (pick on the page)`);
+  }
   return { filled, skipped, optional };
 }
 
@@ -343,8 +369,21 @@ export function formSignal() {
   const visible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
   const inputs = [...document.querySelectorAll("input, textarea, select")].filter((el) =>
     !["hidden", "submit", "button", "search", "image", "reset", "password"].includes(el.type) && !el.disabled && (visible(el) || el.type === "file"));
-  const hasEmail = inputs.some((el) => el.type === "email" || /e-?mail/i.test(`${el.name} ${el.id} ${el.placeholder} ${el.getAttribute("aria-label") || ""}`));
+  // Button-style dropdowns (Workday's "Select One") are questions too.
+  const pickers = [...document.querySelectorAll('button[aria-haspopup="listbox"]')].filter(visible);
+  const about = (el) => `${el.name} ${el.id} ${el.placeholder} ${el.getAttribute("aria-label") || ""} ${el.labels?.[0]?.innerText || ""}`;
+  const hasEmail = inputs.some((el) => el.type === "email" || /e-?mail/i.test(about(el)));
   const hasFile = inputs.some((el) => el.type === "file");
-  const hasName = inputs.some((el) => /name/i.test(`${el.name} ${el.id} ${el.placeholder} ${el.getAttribute("aria-label") || ""}`));
-  return { fields: inputs.length, isApplication: inputs.length >= 3 && (hasEmail || hasFile) && (hasName || hasFile || hasEmail) };
+  const hasName = inputs.some((el) => /name/i.test(about(el)));
+  const hasPhone = inputs.some((el) => el.type === "tel" || /phone|mobile/i.test(about(el)));
+  const fields = inputs.length + pickers.length;
+  // Application steps live under an apply address on most platforms (Workday /apply/…, Lever /apply,
+  // Greenhouse job_app); there, any question at all counts – some steps have only an upload.
+  const onApplyPath = /\/apply(\/|$)|applyManually|autofillWithResume|job_app|\/application(s)?(\/|$)/i.test(location.pathname + location.search);
+  const resumeUpload = hasFile && /resume|\bcv\b|curriculum vitae/i.test(document.body.innerText.slice(0, 20000));
+  const isApplication = (onApplyPath && fields >= 1) || resumeUpload || (fields >= 3 && (hasEmail || hasFile || hasName || hasPhone));
+  // Identifies the step on multi-page forms: the current step, else the page heading.
+  const step = document.querySelector('[aria-current="step"], [data-automation-id="progressBarActiveStep"]')?.innerText ||
+    [...document.querySelectorAll("h1, h2")].find(visible)?.innerText || "";
+  return { fields, isApplication, step: `${location.pathname}|${step.replace(/\s+/g, " ").trim().slice(0, 80)}` };
 }

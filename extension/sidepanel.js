@@ -143,6 +143,11 @@ function greenhouseJobId(url) {
 
 async function refresh() {
   const tab = await activeTab();
+  if (tab?.id !== tabId) {
+    // Another tab: the last page's autofill results don't belong to it.
+    clearAutofillResults();
+    lastStep = null;
+  }
   tabId = tab?.id;
   const auth = await chrome.runtime.sendMessage({ type: "auth:get" });
   $("who").textContent = auth.signedIn ? auth.email || "Signed in" : "";
@@ -198,6 +203,19 @@ $("jobForm").addEventListener("submit", async (e) => {
   if (!currentMatch && job.description.length >= 50) runMatch(job);
 });
 
+/** Clear the last page's autofill results (a new page or a new step of the same form). */
+function clearAutofillResults() {
+  status($("applyStatus"), "");
+  $("skipped").replaceChildren();
+  $("optional").replaceChildren();
+  $("optionalHead").hidden = true;
+  $("coverBox").hidden = true;
+  status($("coverStatus"), "");
+  attached.resume = null;
+  attached.cover = null;
+  showAttached();
+}
+
 $("autofill").addEventListener("click", async () => {
   $("autofill").disabled = true;
   $("skipped").replaceChildren();
@@ -211,15 +229,17 @@ $("autofill").addEventListener("click", async () => {
   try {
     status($("applyStatus"), "Reading the form…");
     const form = await runInPage(readForm);
-    if (!form?.fields?.length) {
+    if (!form?.fields?.length && !form?.manual) {
       status($("applyStatus"), "No application form found on this page. Open the job's Apply page and try again.", "err");
       return;
     }
-    status($("applyStatus"), `Found ${form.fields.length} fields. Working out your answers…`);
+    status($("applyStatus"), `Found ${form.fields.length + form.manual} fields. Working out your answers…`);
     const jobInfo = { title: $("title").value, company: $("company").value, description: $("description").value };
     coverFieldId = form.fields.find((f) => f.id === "cover_letter")?.id || form.fields.find((f) => f.id === "documents")?.id || null;
     const [answers, resume, cover] = await Promise.all([
-      api("/api/ext/autofill", { method: "POST", body: { fields: form.fields, job: { title: jobInfo.title, company: jobInfo.company } } }),
+      form.fields.length
+        ? api("/api/ext/autofill", { method: "POST", body: { fields: form.fields, job: { title: jobInfo.title, company: jobInfo.company } } })
+        : Promise.resolve({ ok: true, data: { answers: {}, needsYou: [] } }),
       form.fields.some((f) => f.id === "resume")
         ? api(`/api/ext/resume${$("resumeSelect").value ? `?id=${encodeURIComponent($("resumeSelect").value)}` : ""}`)
         : Promise.resolve({ ok: true, data: null }),
@@ -446,13 +466,22 @@ chrome.tabs.onUpdated.addListener((id, info) => {
   }
 });
 chrome.runtime.onMessage.addListener((msg) => { if (msg.type === "auth:changed") refresh(); });
-// Some sites open the form on the same page when Apply is clicked: re-check while none is shown.
+// Some sites open the form on the same page when Apply is clicked, and multi-page forms (Workday)
+// move between steps without a new address: keep checking, and start each new step afresh.
+let lastStep = null;
 setInterval(async () => {
-  if (!tabId || document.body.classList.contains("on-application") || $("jobCard").hidden || document.hidden) return;
+  if (!tabId || $("jobCard").hidden || document.hidden || $("autofill").disabled) return;
   try {
-    if ((await runInPage(formSignal))?.isApplication) await layoutForPage();
+    const signal = await runInPage(formSignal);
+    const onApplication = document.body.classList.contains("on-application");
+    if (!!signal?.isApplication !== onApplication) await layoutForPage();
+    if (signal?.isApplication && lastStep && signal.step !== lastStep) {
+      clearAutofillResults();
+      status($("applyStatus"), "New page of the form – click Autofill this application again.");
+    }
+    lastStep = signal?.isApplication ? signal.step : null;
   } catch {
     // page not readable
   }
-}, 4000);
+}, 2500);
 refresh();
