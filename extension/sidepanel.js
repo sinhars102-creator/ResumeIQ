@@ -205,6 +205,9 @@ $("autofill").addEventListener("click", async () => {
   $("optionalHead").hidden = true;
   $("coverBox").hidden = true;
   status($("coverStatus"), "");
+  attached.resume = null;
+  attached.cover = null;
+  showAttached();
   try {
     status($("applyStatus"), "Reading the form…");
     const form = await runInPage(readForm);
@@ -231,6 +234,9 @@ $("autofill").addEventListener("click", async () => {
       fields: form.fields, answers: answers.data.answers, needsYou: answers.data.needsYou,
       resume: resume.ok ? resume.data : null, coverLetter: cover.ok ? cover.data : null,
     }]);
+    attached.resume = resume.ok && resume.data && form.fields.some((f) => f.id === "resume") ? { ...resume.data, id: $("resumeSelect").value } : null;
+    attached.cover = cover.ok && cover.data && coverFieldId ? { fileName: cover.data.fileName, base64: cover.data.base64, mimeType: "application/pdf" } : null;
+    showAttached();
     if (cover.ok && cover.data) {
       $("coverText").value = cover.data.text;
       $("coverBox").hidden = false;
@@ -280,6 +286,36 @@ $("tailor").addEventListener("click", async () => {
 });
 
 let coverFieldId = null; // the upload the cover letter went to on this page
+
+/* ---------- What was attached on this page (shown after autofill, viewable) ---------- */
+
+const attached = { resume: null, cover: null };
+
+/** Open an attached file in a new tab – exactly the bytes that went into the form. */
+function viewFile(file) {
+  if (!file?.base64) return;
+  const bytes = Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0));
+  const url = URL.createObjectURL(new Blob([bytes], { type: file.mimeType || "application/pdf" }));
+  chrome.tabs.create({ url });
+}
+
+function showAttached() {
+  const r = attached.resume;
+  const c = attached.cover;
+  $("attachedBox").hidden = !r && !c;
+  if (r) {
+    const label = resumes.find((f) => f.id === r.id)?.name;
+    $("attachedResume").textContent = r.uploaded === false
+      ? `generated from your profile · ${r.fileName}`
+      : [label, r.fileName].filter(Boolean).join(" · ");
+  }
+  $("viewResume").hidden = !r;
+  $("attachedCoverRow").hidden = !c;
+  if (c) $("attachedCover").textContent = c.fileName;
+}
+
+$("viewResume").addEventListener("click", () => viewFile(attached.resume));
+$("viewCover").addEventListener("click", () => viewFile(attached.cover));
 
 /* ---------- Your resumes: uploaded files, the one to attach ---------- */
 
@@ -378,6 +414,10 @@ $("reattachCover").addEventListener("click", async () => {
     return;
   }
   const ok = await runInPage(attachFile, [coverFieldId, { fileName: r.data.fileName, base64: r.data.base64 }]);
+  if (ok) {
+    attached.cover = { fileName: r.data.fileName, base64: r.data.base64, mimeType: "application/pdf" };
+    showAttached();
+  }
   status($("coverStatus"), ok ? "Edited letter attached." : "The upload box is gone – autofill the page again.", ok ? "ok" : "err");
 });
 
