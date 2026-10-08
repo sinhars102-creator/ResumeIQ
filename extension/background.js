@@ -59,16 +59,22 @@ async function accessToken() {
   return null;
 }
 
-/** Bring a ResumeIQ tab forward (it renews the sign-in when shown), or open one to sign in. */
+/**
+ * Bring a ResumeIQ tab forward if it's signed in (it renews the session when shown); otherwise
+ * show the site's sign-in box – in that tab, or a new one.
+ */
 async function openApp() {
   const origin = new URL(CONFIG.appUrl).origin;
+  const signInUrl = `${CONFIG.appUrl}?signin=1`;
   const [tab] = await chrome.tabs.query({ url: `${origin}/*` }).catch(() => []);
-  if (tab) {
-    await chrome.tabs.update(tab.id, { active: true });
-    await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
-  } else {
-    await chrome.tabs.create({ url: `${CONFIG.appUrl}?signin=1` });
+  if (!tab) {
+    await chrome.tabs.create({ url: signInUrl });
+    return;
   }
+  const session = await sessionFromOpenApp();
+  // A session that's merely expired is renewed by the site once shown; none at all needs signing in.
+  await chrome.tabs.update(tab.id, session?.refresh_token ? { active: true } : { active: true, url: signInUrl });
+  await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
 }
 
 async function api(path, { method = "GET", body } = {}) {
