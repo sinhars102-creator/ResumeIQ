@@ -15,6 +15,20 @@ const questionKey = (label) => String(label || "").toLowerCase().replace(/[^a-z0
 // Fields whose answer is the same for every employer, kept as profile columns rather than saved answers.
 const PROFILE_FIELD = { first_name: "first_name", last_name: "last_name", email: "email", phone: "phone", location: "city" };
 
+/** A self-identification answer given on a form → the profile column it belongs in (by option label). */
+function selfIdFromAnswer(field, value) {
+  const label = String(field.label).toLowerCase();
+  const chosen = [].concat(value).map((v) => field.options?.find((o) => o.value === String(v))?.label || String(v))[0] || "";
+  const c = chosen.toLowerCase();
+  const declined = /decline|prefer not|do(n't| not) wish|rather not/.test(c);
+  if (/pronoun/.test(label)) return { pronouns: declined ? "decline" : chosen };
+  if (/\bgender\b/.test(label)) return { gender: declined ? "decline" : /^(male|man)\b/.test(c) ? "male" : /^(female|woman)\b/.test(c) ? "female" : /non.?binary/.test(c) ? "non_binary" : null };
+  if (/race|ethnic/.test(label)) return { race_ethnicity: declined ? "decline" : chosen };
+  if (/veteran/.test(label)) return { veteran_status: declined ? "decline" : /not/.test(c) ? "not_veteran" : "veteran" };
+  if (/disabilit/.test(label)) return { disability_status: declined ? "decline" : /^no|do(n't| not) have/.test(c) ? "no" : "yes" };
+  return null;
+}
+
 /** "linkedin.com/in/x" → "https://linkedin.com/in/x"; empty stays empty. */
 const withScheme = (url) => {
   const u = String(url || "").trim();
@@ -123,6 +137,14 @@ function ProfileStep({ initial, onSave, onCancel }) {
     }
   };
 
+  const choice = (key, label, options) => (
+    <label className="ea-field">
+      <span>{label}</span>
+      <select value={p[key] ?? ""} onChange={(e) => setP((prev) => ({ ...prev, [key]: e.target.value || null }))}>
+        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    </label>
+  );
   const text = (key, label, type = "text", extra = {}) => (
     <label className="ea-field">
       <span>{label}</span>
@@ -159,6 +181,23 @@ function ProfileStep({ initial, onSave, onCancel }) {
           <span>I need visa sponsorship</span>
         </label>
       </div>
+
+      <h4 className="ea-subhead">Voluntary details</h4>
+      <p>Optional. Many forms ask these (often in a "U.S. Equal Employment Opportunity" section); answer once here and they're filled for you.</p>
+      <div className="ea-grid">
+        {choice("pronouns", "Pronouns", [["", "Not set"], ["He/him", "He/him"], ["She/her", "She/her"], ["They/them", "They/them"], ["decline", "Prefer not to say"]])}
+        {choice("gender", "Gender", [["", "Not set"], ["male", "Male"], ["female", "Female"], ["non_binary", "Non-binary"], ["decline", "Prefer not to say"]])}
+        {text("race_ethnicity", "Race / ethnicity (e.g. Asian)", "text", { placeholder: "Asian · or leave blank" })}
+        {choice("veteran_status", "Veteran status", [["", "Not set"], ["not_veteran", "Not a veteran"], ["veteran", "Veteran"], ["decline", "Prefer not to say"]])}
+        {choice("disability_status", "Disability", [["", "Not set"], ["no", "No disability"], ["yes", "Have a disability"], ["decline", "Prefer not to say"]])}
+      </div>
+      <label className="ea-field ea-check ea-consent">
+        <input type="checkbox" checked={!!p.auto_acknowledge} onChange={(e) => setP((prev) => ({ ...prev, auto_acknowledge: e.target.checked }))} />
+        <span>
+          Confirm standard declarations for me – that my information is accurate, privacy notices and terms. Forms that ask
+          you to type your name as a signature are still left to you.
+        </span>
+      </label>
       {error && <div className="ea-error" role="alert">{error}</div>}
       <div className="ea-profile-actions">
         {onCancel && <button type="button" className="ea-btn" onClick={onCancel}>Cancel</button>}
@@ -388,7 +427,14 @@ export default function EasyApplyPanel({ job, resume: appResume, getResumePdf, a
     const saved = { ...(profile?.saved_answers || {}) };
     for (const f of form.fields) {
       const v = values[f.id];
-      if (v == null || v === "" || f.type === "file" || f.section === "voluntary") continue;
+      if (v == null || v === "" || f.type === "file") continue;
+      const own = selfIdFromAnswer(f, v);
+      if (own) {
+        // An answer that doesn't map to a known value leaves the profile's value as it is.
+        for (const [key, val] of Object.entries(own)) if (val) patch[key] = val;
+        continue;
+      }
+      if (f.section === "voluntary") continue;
       if (PROFILE_FIELD[f.id]) patch[PROFILE_FIELD[f.id]] = v;
       else if (f.type === "url" && /linkedin/i.test(f.label)) patch.linkedin_url = withScheme(v);
       else if (f.type === "url" && /website|portfolio/i.test(f.label)) patch.website_url = withScheme(v);

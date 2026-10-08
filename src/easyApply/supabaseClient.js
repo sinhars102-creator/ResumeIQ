@@ -13,6 +13,7 @@ const PROFILE_COLUMNS = [
   "first_name", "last_name", "preferred_name", "email", "phone", "linkedin_url", "website_url", "city", "country",
   "current_ctc_lpa", "expected_ctc_lpa", "notice_period_days", "authorized_to_work", "needs_sponsorship",
   "highest_education", "resume", "saved_answers",
+  "pronouns", "gender", "race_ethnicity", "veteran_status", "disability_status", "auto_acknowledge",
 ];
 
 export async function loadProfile(userId) {

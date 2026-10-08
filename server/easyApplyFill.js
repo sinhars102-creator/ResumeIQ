@@ -14,11 +14,79 @@
 import { callLLM } from "./llm.js";
 
 const DIVERSITY = /\b(gender|race|ethnic|veteran|disabilit|sexual orientation|pronoun|hispanic|latino|equal (employment )?opportunity|eeo)\b/i;
-const ACKNOWLEDGE = /\b(privacy (policy|notice)|attest\w*|acknowledg\w*|consent\w*|agreement|arbitrat\w*|waiver|i (have read|agree|certify|confirm)|terms (and|&) conditions|terms of (use|service)|declaration|signature)\b/i;
+const ACKNOWLEDGE = /\b(privacy (policy|notice)|attest\w*|acknowledg\w*|consent\w*|agreement|arbitrat\w*|waiver|i (have read|agree|certify|confirm)|terms (and|&) conditions|terms of (use|service)|declaration|signature|(confirm|certify|declare)[^?]{0,80}(accurate|true|complete|correct))\b/i;
 // An answer that commits the applicant ("I understand and agree…", "I acknowledge…") is theirs to give.
 const AGREEING_OPTION = /^\s*(yes,? )?i (understand|agree|acknowledge|accept|consent|certify|confirm|have read)\b/i;
 const isAcknowledgement = (field) =>
   ACKNOWLEDGE.test(field.label) || field.type === "checkbox" || (field.options || []).some((o) => AGREEING_OPTION.test(o.label));
+
+/* ---------- Voluntary self-identification and standing consent (from the profile) ---------- */
+
+const DECLINE = /decline|prefer not|do(n't| not) wish|choose not|rather not|not to (say|answer|disclose|self.?identify)/i;
+
+/** Which self-identification question a label asks, matching the profile column. */
+function selfIdKind(label) {
+  const l = String(label).toLowerCase();
+  if (/pronoun/.test(l)) return "pronouns";
+  if (/\bgender\b|\bsex\b/.test(l)) return "gender";
+  if (/race|ethnic|hispanic|latino/.test(l)) return "race_ethnicity";
+  if (/veteran/.test(l)) return "veteran_status";
+  if (/disabilit/.test(l)) return "disability_status";
+  return null;
+}
+
+/** Does an option label express the stored self-identification value? */
+function selfIdOptionMatches(kind, stored, label) {
+  const v = String(stored || "").toLowerCase().trim();
+  const o = String(label).toLowerCase().trim();
+  if (v === "decline") return DECLINE.test(o);
+  if (DECLINE.test(o)) return false;
+  switch (kind) {
+    case "gender":
+      if (v === "male") return /^(male|man)\b|cis.?gender man|^he\b/.test(o);
+      if (v === "female") return /^(female|woman)\b|cis.?gender woman|^she\b/.test(o);
+      if (v === "non_binary") return /non.?binary/.test(o);
+      return o === v;
+    case "pronouns": {
+      const norm = (t) => t.replace(/\s+/g, "").replace(/\\/g, "/");
+      return norm(o) === norm(v) || norm(o).startsWith(norm(v));
+    }
+    case "veteran_status":
+      if (v === "not_veteran") return /not a (protected )?veteran|i am not|^no\b/.test(o);
+      if (v === "veteran") return !/\bnot\b/.test(o) && /veteran|^yes\b/.test(o);
+      return false;
+    case "disability_status":
+      if (v === "no") return /^no\b|do(n't| not) have/.test(o);
+      if (v === "yes") return /^yes\b|have a disability/.test(o);
+      return false;
+    default:
+      return o === v || o.startsWith(v) || o.includes(v);
+  }
+}
+
+/** Answer a self-identification question from the profile, or null when not stored / no option fits. */
+function selfIdAnswer(field, profile) {
+  const kind = selfIdKind(field.label);
+  const stored = kind && profile[kind];
+  if (!stored) return null;
+  if (!field.options?.length) return kind === "pronouns" || kind === "race_ethnicity" ? { value: String(stored), source: "profile", confidence: "high" } : null;
+  const hits = field.options.filter((o) => selfIdOptionMatches(kind, stored, o.label));
+  if (!hits.length) return null;
+  const value = field.type === "multiselect" ? [hits[0].value] : hits[0].value;
+  return { value, source: "profile", confidence: "high" };
+}
+
+// A typed full-name signature is the applicant's own act, even with standing consent.
+const SIGNATURE = /signature|typ(e|ing) (in )?your (full |legal )?name|sign(ed)? (by|below)/i;
+
+/** With the applicant's standing consent, pick the agreeing option of a declaration. */
+function acknowledgementAnswer(field, profile) {
+  if (!profile.auto_acknowledge || SIGNATURE.test(field.label) || (field.type !== "select" && field.type !== "checkbox" && field.type !== "multiselect")) return null;
+  const opts = field.options || [];
+  const agree = opts.find((o) => AGREEING_OPTION.test(o.label)) || opts.find((o) => /^\s*(yes|i agree|agree|accept|acknowledge)/i.test(o.label)) || (opts.length === 1 ? opts[0] : null);
+  if (!agree) return null;
+  return { value: field.type === "select" ? agree.value : [agree.value], source: "profile", confidence: "high", reason: "Confirmed with your standing consent" };
+}
 
 /** Normalised form of a question, used to reuse saved answers across employers. */
 export function questionKey(label) {
@@ -152,12 +220,16 @@ export async function fillForm({ fields, profile = {}, resume = null, job = {} }
       if (field.id === "resume") answers[field.id] = { value: "resume", source: "resume", confidence: "high" };
       continue; // cover letter stays optional
     }
-    if (field.section === "voluntary" || DIVERSITY.test(field.label)) {
-      needsYou.push({ id: field.id, reason: "Voluntary – your choice to answer" });
+    if (field.section === "voluntary" || DIVERSITY.test(field.label) || selfIdKind(field.label)) {
+      const own = selfIdAnswer(field, profile);
+      if (own) answers[field.id] = own;
+      else needsYou.push({ id: field.id, reason: field.required ? "Add it in your profile (voluntary details)" : "Optional – left blank" });
       continue;
     }
     if (isAcknowledgement(field)) {
-      needsYou.push({ id: field.id, reason: "Needs your own acknowledgement" });
+      const ack = acknowledgementAnswer(field, profile);
+      if (ack) answers[field.id] = ack;
+      else needsYou.push({ id: field.id, reason: SIGNATURE.test(field.label) ? "Type your name to sign" : "Needs your own acknowledgement" });
       continue;
     }
     const savedAnswer = saved[questionKey(field.label)];

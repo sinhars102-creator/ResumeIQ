@@ -39,4 +39,5 @@ export default [
   "Reliance Jio", "Tata Digital", "Airtel", "HDFC Bank", "ICICI Bank", "Axis Bank", "Kotak Mahindra Bank",
   "Bajaj Finserv", "Aditya Birla Group", "Mahindra Group", "Godrej", "Hindustan Unilever", "ITC", "Asian Paints",
   "Ather Energy", "Ola Electric", "Tata Motors", "Maruti Suzuki", "InMobi", "Truecaller", "PayPay India",
+  "Greenlight",
 ];

@@ -88,4 +88,14 @@ Track these items for future implementation.
 
 ---
 
+## 11. Match and tailor straight from any job page (Chrome extension)
+**What:** As soon as the extension sees a job opening, it matches it against the user's profile and shows the match percentage (with what's holding it back) in the side panel – without having to "Add to ResumeIQ" first – and offers an option to edit/tailor the resume for that role.
+**Why:** The fit is the first thing a job seeker wants to know on a posting; tailoring should be one click from there.
+**Notes:**
+- Today the match score appears only after "Add to ResumeIQ" (POST /api/ext/match runs after saving).
+- Run the match when the panel reads a job (cache per job so revisiting doesn't re-run the AI); keep "Add to ResumeIQ" as a separate save.
+- "Edit resume" opens ResumeIQ's tailoring flow for that job (the role saved or passed through, like `/app?easyApply=…`), and the tailored resume is what autofill / Easy Apply attach.
+
+---
+
 *Add new items below as needed.*

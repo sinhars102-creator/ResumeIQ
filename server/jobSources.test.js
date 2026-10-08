@@ -401,3 +401,26 @@ test("extension identifies roles by their page address", async () => {
   assert.equal(web.source, "web");
   assert.equal(web.id, jobIdentity("https://careers.example.com/jobs/pm").id);
 });
+
+test("Easy Apply fills self-identification and, with consent, declarations from the profile", async () => {
+  const { fillForm } = await import("./easyApplyFill.js");
+  const opts = (labels) => labels.map((label, i) => ({ value: String(i), label }));
+  const fields = [
+    { id: "pr", label: "Pronouns", type: "multiselect", required: false, section: "application", options: opts(["He/him", "She/her", "They/them"]) },
+    { id: "g", label: "Gender", type: "select", required: false, section: "voluntary", options: opts(["Male", "Female", "Decline to self-identify"]) },
+    { id: "v", label: "Veteran status", type: "select", required: false, section: "voluntary", options: opts(["I am a protected veteran", "I am not a protected veteran", "I don't wish to answer"]) },
+    { id: "acc", label: "Do you confirm that the information provided is accurate and complete?", type: "select", required: true, section: "application", options: opts(["Yes", "No"]) },
+    { id: "sig", label: "Please review the NDA and indicate your agreement by typing your full name below", type: "text", required: true, section: "application" },
+    { id: "r", label: "Race", type: "select", required: false, section: "voluntary", options: opts(["Asian", "White"]) },
+  ];
+  const profile = { pronouns: "He/him", gender: "male", veteran_status: "not_veteran", auto_acknowledge: true };
+  const { answers, needsYou } = await fillForm({ fields, profile });
+  assert.deepEqual(answers.pr.value, ["0"]);
+  assert.equal(answers.g.value, "0");
+  assert.equal(answers.v.value, "1");
+  assert.equal(answers.acc.value, "0");
+  assert.ok(!answers.sig && needsYou.find((n) => n.id === "sig").reason === "Type your name to sign");
+  assert.equal(needsYou.find((n) => n.id === "r").reason, "Optional – left blank");
+  const off = await fillForm({ fields, profile: { ...profile, auto_acknowledge: false } });
+  assert.ok(!off.answers.acc);
+});

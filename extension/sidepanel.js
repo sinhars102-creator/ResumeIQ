@@ -103,6 +103,8 @@ $("jobForm").addEventListener("submit", async (e) => {
 $("autofill").addEventListener("click", async () => {
   $("autofill").disabled = true;
   $("skipped").replaceChildren();
+  $("optional").replaceChildren();
+  $("optionalHead").hidden = true;
   try {
     status($("applyStatus"), "Reading the form…");
     const form = await runInPage(readForm);
@@ -122,8 +124,10 @@ $("autofill").addEventListener("click", async () => {
     status($("applyStatus"), "Filling the form…");
     const result = await runInPage(fillForm, [{ fields: form.fields, answers: answers.data.answers, needsYou: answers.data.needsYou, resume: resume.ok ? resume.data : null }]);
     const left = result.skipped.length;
-    status($("applyStatus"), `Filled ${result.filled} field${result.filled === 1 ? "" : "s"}${left ? ` · ${left} left for you (outlined in amber on the page)` : ""}. Review the page, then submit it yourself.`, "ok");
+    status($("applyStatus"), `Filled ${result.filled} field${result.filled === 1 ? "" : "s"}${left ? ` · ${left} required left for you (outlined in amber on the page)` : ""}. Review the page, then submit it yourself.`, "ok");
     $("skipped").replaceChildren(...result.skipped.map((s) => Object.assign(document.createElement("li"), { textContent: s })));
+    $("optional").replaceChildren(...(result.optional || []).map((s) => Object.assign(document.createElement("li"), { textContent: s })));
+    $("optionalHead").hidden = !(result.optional || []).length;
   } catch (err) {
     status($("applyStatus"), `Couldn't fill this page (${err.message})`, "err");
   } finally {

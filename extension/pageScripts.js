@@ -193,6 +193,7 @@ export async function fillForm({ fields, answers, needsYou, resume }) {
 
   let filled = 0;
   const skipped = [];
+  const optional = [];
   for (const field of fields) {
     const el = document.querySelector(`[data-riq-id="${CSS.escape(field.id)}"]`);
     if (!el) continue;
@@ -211,11 +212,11 @@ export async function fillForm({ fields, answers, needsYou, resume }) {
       }
       const answer = answers[field.id];
       if (!answer || answer.value == null || answer.value === "") {
-        const need = needsYou.find((x) => x.id === field.id);
-        if (need || field.required) {
-          mark(el, need?.reason || "Needs your answer", false);
+        // Only required fields are flagged on the page; optional ones are just listed.
+        if (field.required) {
+          mark(el, needsYou.find((x) => x.id === field.id)?.reason || "Needs your answer", false);
           skipped.push(field.label);
-        }
+        } else optional.push(field.label);
         continue;
       }
       const value = answer.value;
@@ -249,5 +250,5 @@ export async function fillForm({ fields, answers, needsYou, resume }) {
       skipped.push(field.label);
     }
   }
-  return { filled, skipped };
+  return { filled, skipped, optional };
 }
