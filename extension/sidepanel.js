@@ -342,9 +342,18 @@ $("viewCover").addEventListener("click", () => viewFile(attached.cover));
 let resumes = [];
 const GENERATED = ""; // the select's value for "generated from your profile"
 
+/** What went wrong with a resume action, in words that say what failed and what to do. */
+function resumeError(action, r) {
+  if (r.status === 0) return `Couldn't ${action}: ResumeIQ can't be reached. Check your connection and try again.`;
+  if (r.status === 400 || r.status === 401 || r.status === 409) return r.data.error || `Couldn't ${action}.`;
+  return `Couldn't ${action}: something failed on ResumeIQ's side. Please try again in a minute.`;
+}
+
 async function loadResumes(keepSelection = true) {
   const r = await api("/api/ext/resumes");
   resumes = r.ok ? r.data.resumes : [];
+  if (!r.ok) status($("resumeStatus"), `${resumeError("load your uploaded resumes", r)} Until then, autofill attaches the resume generated from your profile.`, "err");
+  else if ($("resumeStatus").classList.contains("err")) status($("resumeStatus"), "");
   const previous = keepSelection ? $("resumeSelect").value : null;
   const options = resumes.map((f) => {
     const o = document.createElement("option");
@@ -387,7 +396,7 @@ $("resumeFile").addEventListener("change", async () => {
   });
   const r = await api("/api/ext/resumes", { method: "POST", body: { name, fileName: file.name, mimeType: file.type, base64 } });
   if (!r.ok) {
-    status($("resumeStatus"), r.data.error || "Upload failed", "err");
+    status($("resumeStatus"), resumeError(`upload "${file.name}"`, r), "err");
     return;
   }
   await loadResumes(false);
@@ -400,7 +409,7 @@ $("makeDefault").addEventListener("click", async () => {
   const id = $("resumeSelect").value;
   const r = await api(`/api/ext/resumes/${encodeURIComponent(id)}/default`, { method: "POST", body: {} });
   if (r.ok) await loadResumes();
-  status($("resumeStatus"), r.ok ? "Default updated." : r.data.error || "Couldn't update", r.ok ? "ok" : "err");
+  status($("resumeStatus"), r.ok ? "Default updated." : resumeError("change the default", r), r.ok ? "ok" : "err");
 });
 
 $("removeResume").addEventListener("click", async () => {
@@ -420,7 +429,7 @@ $("removeResume").addEventListener("click", async () => {
   $("removeResume").textContent = "Remove";
   const r = await api(`/api/ext/resumes/${encodeURIComponent(chosen.id)}`, { method: "DELETE" });
   if (r.ok) await loadResumes(false);
-  status($("resumeStatus"), r.ok ? "Removed." : r.data.error || "Couldn't remove", r.ok ? "ok" : "err");
+  status($("resumeStatus"), r.ok ? "Removed." : resumeError("remove it", r), r.ok ? "ok" : "err");
 });
 
 $("reattachCover").addEventListener("click", async () => {
