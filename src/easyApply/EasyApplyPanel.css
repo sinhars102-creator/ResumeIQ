@@ -88,3 +88,6 @@
 .ea-subhead { margin: 12px 0 0; font-size: 15px; font-weight: 700; color: var(--rq-text); }
 .ea-consent { align-items: flex-start; margin-top: 8px; font-size: 13px; line-height: 1.5; }
 .ea-consent input { margin-top: 2px; }
+/* Sign-in dialog opened from the extension: a centred card rather than a full-height panel. */
+.ea-overlay:has(.ea-signin-dialog) { justify-content: center; align-items: center; padding: 16px; }
+.ea-signin-dialog { height: auto; max-height: 90vh; width: min(520px, 100%); border-radius: 16px; }

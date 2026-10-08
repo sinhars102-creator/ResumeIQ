@@ -147,7 +147,7 @@ async function refresh() {
   const auth = await chrome.runtime.sendMessage({ type: "auth:get" });
   $("who").textContent = auth.signedIn ? auth.email || "Signed in" : "";
   $("signedOut").hidden = auth.signedIn;
-  $("openApp").onclick = () => chrome.tabs.create({ url: auth.appUrl });
+  $("openApp").onclick = () => chrome.runtime.sendMessage({ type: "app:open" });
   for (const id of ["jobCard", "applyCard"]) $(id).hidden = !auth.signedIn;
   // Greenhouse's dropdowns ignore extension input, so its applications go through Easy Apply.
   const ghId = auth.signedIn ? greenhouseJobId(tab?.url || "") : null;

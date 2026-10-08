@@ -55,7 +55,7 @@ function profileFromResume(resume, email) {
   };
 }
 
-function SignIn() {
+export function SignIn() {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [sent, setSent] = useState(false);

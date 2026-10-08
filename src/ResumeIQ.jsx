@@ -4,7 +4,7 @@ import * as pdfjsLib from "pdfjs-dist";
 // PDF.js worker: bundle via Vite so production gets a valid asset URL (fixes "load failed" on Vercel)
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { track, bucket } from "./analytics.js";
-import EasyApplyPanel from "./easyApply/EasyApplyPanel.jsx";
+import EasyApplyPanel, { SignIn } from "./easyApply/EasyApplyPanel.jsx";
 import { supabase as supabaseClient, loadProfile } from "./easyApply/supabaseClient.js";
 import {
   MAX_BULLETS_PER_EXPERIENCE, PHOTO_WIDTH_MM, PHOTO_HEIGHT_MM, DEFAULT_SECTION_ORDER, DEFAULT_PDF_FORMAT, buildResumePdf,
@@ -3159,6 +3159,21 @@ export default function ResumeIQ() {
   const [easyApplyJob, setEasyApplyJob] = useState(null);
   const [easyApplyOnly, setEasyApplyOnly] = useState(false);
 
+  // "/app?signin=1" (from the Chrome extension's "Open ResumeIQ"): sign in, or confirm the
+  // extension is connected when already signed in.
+  const [signInPrompt, setSignInPrompt] = useState(null); // null | "signin" | "connected"
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("signin") !== "1" || !supabaseClient) return undefined;
+    params.delete("signin");
+    window.history.replaceState({}, "", `${window.location.pathname}${params.size ? `?${params}` : ""}`);
+    supabaseClient.auth.getSession().then(({ data }) => setSignInPrompt(data.session ? "connected" : "signin"));
+    const { data } = supabaseClient.auth.onAuthStateChange((_e, session) => {
+      if (session) setSignInPrompt((p) => (p === "signin" ? "connected" : p));
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
+
   // "/app?easyApply=gh-<board>-<id>" (from the Chrome extension) opens Easy Apply for that role.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -4629,6 +4644,28 @@ body {
               </div>
               </div>
             </section>
+          )}
+
+          {signInPrompt && (
+            <div className="ea-overlay" onClick={() => setSignInPrompt(null)}>
+              <section className="ea-panel ea-signin-dialog" role="dialog" aria-modal="true" aria-label="Sign in to ResumeIQ" onClick={(e) => e.stopPropagation()}>
+                <header className="ea-header">
+                  <h2>{signInPrompt === "connected" ? "You're signed in" : "Sign in to ResumeIQ"}</h2>
+                  <button type="button" className="ea-close" onClick={() => setSignInPrompt(null)} aria-label="Close">✕</button>
+                </header>
+                <div className="ea-body">
+                  {signInPrompt === "connected" ? (
+                    <div className="ea-outcome ea-outcome-ok" role="status">
+                      <h3>Connected</h3>
+                      <p>The ResumeIQ Chrome extension can use your account now. You can go back to the job page.</p>
+                      <button type="button" className="ea-btn ea-btn-primary" onClick={() => setSignInPrompt(null)}>Done</button>
+                    </div>
+                  ) : (
+                    <SignIn />
+                  )}
+                </div>
+              </section>
+            </div>
           )}
 
           {easyApplyJob && (

@@ -42,7 +42,12 @@ async function sessionFromOpenApp() {
   return null;
 }
 
-/** A valid access token: the stored one, the website's current one, or a refreshed one. */
+/**
+ * A valid access token: the stored one, else the website's current one from an open ResumeIQ
+ * tab. The extension never refreshes the session itself: it shares the website's sign-in, and
+ * Supabase signs a session out everywhere if an already-replaced refresh token is reused – so
+ * only the website (which refreshes automatically while open) renews it.
+ */
 async function accessToken() {
   const session = await getSession();
   if (fresh(session)) return session.access_token;
@@ -51,26 +56,19 @@ async function accessToken() {
     await setSession(fromApp);
     return fromApp.access_token;
   }
-  if (!session && !fromApp) return null;
-  const refreshToken = fromApp?.refresh_token || session.refresh_token;
-  const r = await fetch(`${CONFIG.supabaseUrl}/auth/v1/token?grant_type=refresh_token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", apikey: CONFIG.supabaseAnonKey },
-    body: JSON.stringify({ refresh_token: refreshToken }),
-  });
-  if (!r.ok) {
-    // The website may have refreshed in the meantime: one last look before signing out.
-    const again = await sessionFromOpenApp();
-    if (fresh(again)) {
-      await setSession(again);
-      return again.access_token;
-    }
-    await setSession(null);
-    return null;
+  return null;
+}
+
+/** Bring a ResumeIQ tab forward (it renews the sign-in when shown), or open one to sign in. */
+async function openApp() {
+  const origin = new URL(CONFIG.appUrl).origin;
+  const [tab] = await chrome.tabs.query({ url: `${origin}/*` }).catch(() => []);
+  if (tab) {
+    await chrome.tabs.update(tab.id, { active: true });
+    await chrome.windows.update(tab.windowId, { focused: true }).catch(() => {});
+  } else {
+    await chrome.tabs.create({ url: `${CONFIG.appUrl}?signin=1` });
   }
-  const d = await r.json();
-  await setSession({ access_token: d.access_token, refresh_token: d.refresh_token, expires_at: d.expires_at, email: d.user?.email || session?.email || fromApp?.email });
-  return d.access_token;
 }
 
 async function api(path, { method = "GET", body } = {}) {
@@ -98,11 +96,15 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     return false;
   }
   if (msg.type === "auth:get") {
-    // Refreshes (or picks up the website's session) when the stored one has expired.
-    accessToken().then(async () => {
+    // Picks up the website's session when the stored one has expired.
+    accessToken().then(async (token) => {
       const s = await getSession();
-      reply({ signedIn: !!s, email: s?.email, appUrl: CONFIG.appUrl });
+      reply({ signedIn: !!token, email: s?.email, appUrl: CONFIG.appUrl });
     });
+    return true;
+  }
+  if (msg.type === "app:open") {
+    openApp().then(() => reply(true));
     return true;
   }
   if (msg.type === "api") {

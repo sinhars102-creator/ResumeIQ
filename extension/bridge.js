@@ -18,5 +18,7 @@
   };
   send();
   window.addEventListener("storage", send);
+  // The site renews the session when it's shown again: pass the new one on straight away.
+  document.addEventListener("visibilitychange", () => setTimeout(send, 1500));
   setInterval(send, 5000); // sign-in / sign-out in this same tab doesn't fire "storage"
 })();
