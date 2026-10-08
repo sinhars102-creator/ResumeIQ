@@ -15,7 +15,7 @@ Status: ✅ done · 🔍 built, needs checking on real pages · 🚧 in progress
 |---|---|---|
 | 1.1 | Stays signed in: the extension only reads the ResumeIQ website's sign-in (never renews it – reusing a replaced token signs the session out everywhere); "Open ResumeIQ" focuses or opens the site, which shows a sign-in box when needed | ✅ |
 | 1.2 | Autofill is visible and obvious: on an application page the panel leads with "Autofill this application", not below the job details | 🔍 |
-| 1.3 | Attach the resume you choose: upload your own resume file(s) to your profile, pick one when applying | 🚧 |
+| 1.3 | Attach the resume you choose: upload your own resume file(s) to your profile, pick one when applying; see and view the file that was attached | 🔍 |
 | 1.4 | Fix the generated-PDF fallback: the ₹ symbol (breaks the text) and hyphen spacing ("Day - 7") | ⏳ |
 
 ## Phase 2 – Extension → website flows
