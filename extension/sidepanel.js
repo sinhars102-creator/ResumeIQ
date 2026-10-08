@@ -1,4 +1,4 @@
-import { extractJob, readForm, fillForm } from "./pageScripts.js";
+import { extractJob, readForm, fillForm, attachFile } from "./pageScripts.js";
 
 const $ = (id) => document.getElementById(id);
 const api = (path, options) => chrome.runtime.sendMessage({ type: "api", path, options });
@@ -178,6 +178,8 @@ $("autofill").addEventListener("click", async () => {
   $("skipped").replaceChildren();
   $("optional").replaceChildren();
   $("optionalHead").hidden = true;
+  $("coverBox").hidden = true;
+  status($("coverStatus"), "");
   try {
     status($("applyStatus"), "Reading the form…");
     const form = await runInPage(readForm);
@@ -186,16 +188,26 @@ $("autofill").addEventListener("click", async () => {
       return;
     }
     status($("applyStatus"), `Found ${form.fields.length} fields. Working out your answers…`);
-    const [answers, resume] = await Promise.all([
-      api("/api/ext/autofill", { method: "POST", body: { fields: form.fields, job: { title: $("title").value, company: $("company").value } } }),
+    const jobInfo = { title: $("title").value, company: $("company").value, description: $("description").value };
+    coverFieldId = form.fields.find((f) => f.id === "cover_letter")?.id || form.fields.find((f) => f.id === "documents")?.id || null;
+    const [answers, resume, cover] = await Promise.all([
+      api("/api/ext/autofill", { method: "POST", body: { fields: form.fields, job: { title: jobInfo.title, company: jobInfo.company } } }),
       form.fields.some((f) => f.id === "resume") ? api("/api/ext/resume") : Promise.resolve({ ok: true, data: null }),
+      coverFieldId ? api("/api/ext/cover-letter", { method: "POST", body: jobInfo }) : Promise.resolve({ ok: true, data: null }),
     ]);
     if (!answers.ok) {
       status($("applyStatus"), answers.data.error || "Couldn't work out answers", "err");
       return;
     }
     status($("applyStatus"), "Filling the form…");
-    const result = await runInPage(fillForm, [{ fields: form.fields, answers: answers.data.answers, needsYou: answers.data.needsYou, resume: resume.ok ? resume.data : null }]);
+    const result = await runInPage(fillForm, [{
+      fields: form.fields, answers: answers.data.answers, needsYou: answers.data.needsYou,
+      resume: resume.ok ? resume.data : null, coverLetter: cover.ok ? cover.data : null,
+    }]);
+    if (cover.ok && cover.data) {
+      $("coverText").value = cover.data.text;
+      $("coverBox").hidden = false;
+    } else if (coverFieldId && !cover.ok) status($("coverStatus"), cover.data.error || "Couldn't write a cover letter", "err");
     const left = result.skipped.length;
     status($("applyStatus"), `Filled ${result.filled} field${result.filled === 1 ? "" : "s"}${left ? ` · ${left} required left for you (outlined in amber on the page)` : ""}. Review the page, then submit it yourself.`, "ok");
     $("skipped").replaceChildren(...result.skipped.map((s) => Object.assign(document.createElement("li"), { textContent: s })));
@@ -223,6 +235,22 @@ $("tailor").addEventListener("click", async () => {
   const { appUrl } = await chrome.runtime.sendMessage({ type: "auth:get" });
   chrome.tabs.create({ url: `${appUrl}?tailor=${encodeURIComponent(saved.data.jobId)}` });
   status($("tailorStatus"), "Opened in a new tab – your suggested edits will target the gaps above.", "ok");
+});
+
+let coverFieldId = null; // the upload the cover letter went to on this page
+
+$("reattachCover").addEventListener("click", async () => {
+  if (!coverFieldId) return;
+  $("reattachCover").disabled = true;
+  status($("coverStatus"), "Re-attaching…");
+  const r = await api("/api/ext/cover-letter", { method: "POST", body: { text: $("coverText").value } });
+  $("reattachCover").disabled = false;
+  if (!r.ok) {
+    status($("coverStatus"), r.data.error || "Couldn't make the PDF", "err");
+    return;
+  }
+  const ok = await runInPage(attachFile, [coverFieldId, { fileName: r.data.fileName, base64: r.data.base64 }]);
+  status($("coverStatus"), ok ? "Edited letter attached." : "The upload box is gone – autofill the page again.", ok ? "ok" : "err");
 });
 
 $("rescan").addEventListener("click", readJob);

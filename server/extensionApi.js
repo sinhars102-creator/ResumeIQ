@@ -6,12 +6,14 @@
  *   POST /api/ext/match     fit score for a role, with what's holding it back
  *   POST /api/ext/autofill  answers for an application form read off any page
  *   GET  /api/ext/resume    the applicant's resume as a PDF (base64) to attach
+ *   POST /api/ext/cover-letter  a cover letter for the role (from the resume only), text + PDF
  *   GET  /api/ext/me        who is signed in and whether their profile is ready
  */
 import { createHash } from "crypto";
 import { callLLM } from "./llm.js";
 import { fillForm } from "./easyApplyFill.js";
 import { buildResumePdf } from "../src/resumePdf.js";
+import { jsPDF } from "jspdf";
 import { toRow, saveUserJob, setUserJobMatch, getProfile, listUserJobs } from "./jobStore.js";
 
 /**
@@ -67,6 +69,45 @@ function resumeText(resume) {
   for (const e of resume.education || []) out.push(typeof e === "string" ? e : [e.degree, e.school, e.period].filter(Boolean).join(", "));
   if (resume.skills) out.push(`Skills: ${[].concat(resume.skills).join(", ")}`);
   return out.filter(Boolean).join("\n").slice(0, 10000);
+}
+
+const COVER_PROMPT = `You write a job application cover letter for the candidate.
+Use ONLY facts from the candidate's resume – never invent employers, numbers, skills or achievements.
+Connect 2-3 of their real strengths to what the job asks for; don't claim experience the resume doesn't show.
+Describe facts exactly as the resume does – don't add qualifiers (e.g. "consumer", "large-scale") it doesn't state.
+No generic self-praise ("quick learner", "proven track record", "passionate") unless the resume shows it.
+Plain, confident Indian business English, 180-250 words, 3-4 short paragraphs, first person.
+Start with "Dear Hiring Team," and end with "Regards," then the candidate's name. No address block, no date, no placeholders.
+Return JSON: {"letter": "<the full letter text with \\n\\n between paragraphs>"}`;
+
+/** A one-page PDF of the letter: name and contact at the top, then the text. */
+export function coverLetterPdf(text, { name = "", contact = "" } = {}) {
+  const doc = new jsPDF({ format: "a4", unit: "mm" });
+  const margin = 20;
+  const width = doc.internal.pageSize.getWidth() - margin * 2;
+  let y = margin;
+  if (name) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(15);
+    doc.text(name, margin, y);
+    y += 6;
+  }
+  if (contact) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(90, 90, 90);
+    doc.text(doc.splitTextToSize(contact, width), margin, y);
+    y += 8;
+    doc.setTextColor(0, 0, 0);
+  }
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(10.5);
+  for (const para of String(text).split(/\n\s*\n/)) {
+    const lines = doc.splitTextToSize(para.trim(), width);
+    doc.text(lines, margin, y);
+    y += lines.length * 5 + 4;
+  }
+  return Buffer.from(doc.output("arraybuffer")).toString("base64");
 }
 
 export function registerExtensionRoutes(app, { userFromRequest }) {
@@ -143,6 +184,28 @@ export function registerExtensionRoutes(app, { userFromRequest }) {
     const doc = buildResumePdf(profile.resume, null);
     const name = [profile.first_name, profile.last_name].filter(Boolean).join("_").replace(/[^A-Za-z0-9_-]+/g, "") || "Resume";
     return res.json({ fileName: `${name}_Resume.pdf`, base64: Buffer.from(doc.output("arraybuffer")).toString("base64") });
+  }));
+
+  // Write a cover letter (or render an edited one, when `text` is sent) and return it as a PDF to attach.
+  app.post("/api/ext/cover-letter", withUser(async (req, res, user) => {
+    const { title, company, description, text } = req.body || {};
+    const profile = await getProfile(user.id);
+    if (!profile?.resume) return res.status(409).json({ error: "Upload your resume in ResumeIQ first" });
+    let letter = String(text || "").trim().slice(0, 6000);
+    if (!letter) {
+      const raw = await callLLM({
+        system: COVER_PROMPT,
+        user: JSON.stringify({ job: { title, company, description: String(description || "").slice(0, 10000) }, candidate: { name: [profile.first_name, profile.last_name].filter(Boolean).join(" "), resume: resumeText(profile.resume) } }),
+        maxTokens: 900,
+        json: true,
+      });
+      letter = String(JSON.parse(String(raw).replace(/```json|```/g, "").trim()).letter || "").trim();
+      if (!letter) throw Object.assign(new Error("Couldn't write a cover letter – try again"), { status: 502 });
+    }
+    const name = [profile.first_name, profile.last_name].filter(Boolean).join(" ");
+    const contact = [profile.email, profile.phone, profile.linkedin_url].filter(Boolean).join("  ·  ");
+    const file = name.replace(/[^A-Za-z0-9]+/g, "_") || "Cover";
+    return res.json({ text: letter, fileName: `${file}_Cover_Letter.pdf`, base64: coverLetterPdf(letter, { name, contact }) });
   }));
 
   app.get("/api/ext/jobs", withUser(async (req, res, user) => res.json({ jobs: await listUserJobs(user.id) })));

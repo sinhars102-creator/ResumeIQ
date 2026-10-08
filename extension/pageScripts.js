@@ -135,6 +135,15 @@ export async function readForm() {
   };
   const required = (el, label) => el.required || el.getAttribute("aria-required") === "true" || /[*✱]\s*$/.test(el.labels?.[0]?.innerText || label);
 
+  /** Text of the nearest container around an element (for unlabelled upload boxes). */
+  const contextText = (el) => {
+    for (let node = el.parentElement, i = 0; node && i < 4; node = node.parentElement, i += 1) {
+      const t = clean(node.innerText);
+      if (t) return t.slice(0, 160);
+    }
+    return "";
+  };
+
   const fields = [];
   const used = new Set();
   let n = 0;
@@ -151,7 +160,8 @@ export async function readForm() {
     if (!visible(el) && el.type !== "file") continue;
     if (el.disabled || ["hidden", "submit", "button", "search", "image", "reset", "password"].includes(el.type)) continue;
     if (el.closest("[data-riq-skip]")) continue;
-    const label = labelOf(el);
+    // Upload boxes are often a drop zone with no label: use the text around the hidden file input.
+    const label = labelOf(el) || (el.type === "file" ? contextText(el) : "");
     if (!label) continue;
 
     if (el.type === "radio" || el.type === "checkbox") {
@@ -166,8 +176,12 @@ export async function readForm() {
       continue;
     }
     if (el.type === "file") {
-      const isResume = /resume|cv\b/i.test(label) || /resume/i.test(el.id + el.name);
-      add(el, { id: isResume ? "resume" : undefined, label, type: "file", required: required(el, label) });
+      const around = `${label} ${contextText(el)} ${el.id} ${el.name}`;
+      let id;
+      if (/resume|\bcv\b|curriculum/i.test(around) && !used.has("resume")) id = "resume";
+      else if (/cover(ing)? letter/i.test(around) && !used.has("cover_letter")) id = "cover_letter";
+      else if (/additional|attachment|other documents|supporting/i.test(around) && !used.has("cover_letter") && !used.has("documents")) id = "documents";
+      add(el, { id, label: clean(label).slice(0, 120), type: "file", required: required(el, label) });
       continue;
     }
     if (el.getAttribute("role") === "combobox" || el.getAttribute("aria-autocomplete") === "list") {
@@ -202,9 +216,9 @@ export async function readForm() {
 
 /**
  * Fill the fields readForm tagged. answers: { id: { value } }; needsYou: [{ id, reason }];
- * resume: { fileName, base64 } to attach. Returns counts and what couldn't be filled.
+ * resume / coverLetter: { fileName, base64 } to attach. Returns counts and what couldn't be filled.
  */
-export async function fillForm({ fields, answers, needsYou, resume }) {
+export async function fillForm({ fields, answers, needsYou, resume, coverLetter }) {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const setNative = (el, value) => {
     const proto = el.tagName === "TEXTAREA" ? HTMLTextAreaElement.prototype : el.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
@@ -221,22 +235,35 @@ export async function fillForm({ fields, answers, needsYou, resume }) {
   let filled = 0;
   const skipped = [];
   const optional = [];
+  const attach = (el, file) => {
+    const bytes = Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0));
+    const dt = new DataTransfer();
+    dt.items.add(new File([bytes], file.fileName, { type: "application/pdf" }));
+    el.files = dt.files;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  // Files first: some sites read an uploaded resume and fill the form from it, which would
+  // overwrite answers filled before it.
+  let attachedAny = false;
+  for (const field of fields.filter((f) => f.type === "file")) {
+    const el = document.querySelector(`[data-riq-id="${CSS.escape(field.id)}"]`);
+    const file = field.id === "resume" ? resume : field.id === "cover_letter" || field.id === "documents" ? coverLetter : null;
+    if (!el || !file?.base64) continue;
+    try {
+      attach(el, file);
+      filled += 1;
+      attachedAny = true;
+    } catch {
+      skipped.push(field.label);
+    }
+  }
+  if (attachedAny) await sleep(3000);
   for (const field of fields) {
     const el = document.querySelector(`[data-riq-id="${CSS.escape(field.id)}"]`);
     if (!el) continue;
     try {
-      if (field.type === "file") {
-        if (field.id === "resume" && resume?.base64) {
-          const bytes = Uint8Array.from(atob(resume.base64), (c) => c.charCodeAt(0));
-          const dt = new DataTransfer();
-          dt.items.add(new File([bytes], resume.fileName, { type: "application/pdf" }));
-          el.files = dt.files;
-          el.dispatchEvent(new Event("input", { bubbles: true }));
-          el.dispatchEvent(new Event("change", { bubbles: true }));
-          filled += 1;
-        }
-        continue;
-      }
+      if (field.type === "file") continue; // attached above
       const answer = answers[field.id];
       if (!answer || answer.value == null || answer.value === "") {
         // Only required fields are flagged on the page; optional ones are just listed.
@@ -278,4 +305,17 @@ export async function fillForm({ fields, answers, needsYou, resume }) {
     }
   }
   return { filled, skipped, optional };
+}
+
+/** Attach a file to one tagged upload field (used to re-attach an edited cover letter). */
+export function attachFile(fieldId, file) {
+  const el = document.querySelector(`[data-riq-id="${CSS.escape(fieldId)}"]`);
+  if (!el) return false;
+  const bytes = Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0));
+  const dt = new DataTransfer();
+  dt.items.add(new File([bytes], file.fileName, { type: "application/pdf" }));
+  el.files = dt.files;
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+  return true;
 }
