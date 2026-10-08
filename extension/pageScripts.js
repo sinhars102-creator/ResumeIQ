@@ -98,9 +98,24 @@ export function extractJob() {
   // 3) Fallback: the page's own sections, then its title ("Job Application for X at Company")
   const pageTitle = clean(document.title);
   const title = text("h1") || clean(document.querySelector('meta[property="og:title"]')?.content) || pageTitle;
+  // Company: "… at Company" in the tab title, the site name, the tab title's other part
+  // ("Eloelo - Careers"), the logo's alt text, then the web address (eloelo.keka.com,
+  // careers.eloelo.com → "Eloelo").
+  const fromAddress = () => {
+    const generic = new Set(["www", "careers", "career", "jobs", "job", "apply", "hire", "hiring", "recruit", "talent", "work", "join",
+      "keka", "greenhouse", "lever", "ashbyhq", "workable", "myworkdayjobs", "workday", "smartrecruiters", "darwinbox", "zohorecruit",
+      "freshteam", "breezy", "recruitee", "bamboohr", "com", "co", "in", "io", "ai", "net", "org", "app"]);
+    const label = location.hostname.toLowerCase().split(".").find((p) => !generic.has(p) && p.length > 1);
+    return label ? label.charAt(0).toUpperCase() + label.slice(1) : "";
+  };
+  const titleParts = pageTitle.split(/\s+[|–—-]\s+/).map(clean).filter(Boolean);
+  const titleCompany = titleParts.find((p) => !/careers?|jobs?|apply|opening|position|hiring/i.test(p) && p.toLowerCase() !== text("h1").toLowerCase());
+  const logoAlt = clean([...document.querySelectorAll("header img[alt], nav img[alt], img[alt*='logo' i]")].map((i) => i.alt).find((a) => a && a.length < 40))
+    .replace(/\s*logo\s*/i, "");
   const company =
     pageTitle.match(/\bat\s+(.+?)(?:\s*[|–-].*)?$/i)?.[1] ||
-    clean(document.querySelector('meta[property="og:site_name"]')?.content) || "";
+    clean(document.querySelector('meta[property="og:site_name"]')?.content) ||
+    titleCompany || logoAlt || fromAddress();
   const where = text('.job__location, [class*="job-location"], [class*="jobLocation"], .location');
   const body = document.querySelector('.job__description, [class*="job-description"], [class*="jobDescription"], #content, main, article, [role=main]') || document.body;
   return { title, company: clean(company), location: where, description: clean(body.innerText).slice(0, 15000), url: location.href };

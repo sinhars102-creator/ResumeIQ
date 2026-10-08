@@ -221,7 +221,22 @@ $("autofill").addEventListener("click", async () => {
 });
 
 /** Save the job (with its score) and open ResumeIQ's tailoring step for it. */
+/** Saving needs a title and company: point the user at whichever is empty instead of failing. */
+function missingJobDetail() {
+  const empty = ["title", "company"].find((id) => !$(id).value.trim());
+  if (!empty) return false;
+  $("jobCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  $(empty).focus();
+  $(empty).classList.add("needs");
+  return empty === "title" ? "Add the job title below, then try again." : "Add the company name below, then try again.";
+}
+
 $("tailor").addEventListener("click", async () => {
+  const missing = missingJobDetail();
+  if (missing) {
+    status($("tailorStatus"), missing, "err");
+    return;
+  }
   $("tailor").disabled = true;
   status($("tailorStatus"), "Opening ResumeIQ…");
   const job = { url: $("jobForm").dataset.url, title: $("title").value, company: $("company").value, location: $("location").value, description: $("description").value };
@@ -252,6 +267,8 @@ $("reattachCover").addEventListener("click", async () => {
   const ok = await runInPage(attachFile, [coverFieldId, { fileName: r.data.fileName, base64: r.data.base64 }]);
   status($("coverStatus"), ok ? "Edited letter attached." : "The upload box is gone – autofill the page again.", ok ? "ok" : "err");
 });
+
+for (const id of ["title", "company"]) $(id).addEventListener("input", () => $(id).classList.remove("needs"));
 
 $("rescan").addEventListener("click", readJob);
 $("rematch").addEventListener("click", () =>
