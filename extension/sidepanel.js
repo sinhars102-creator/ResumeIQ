@@ -53,6 +53,7 @@ async function cacheMatch(key, match) {
 
 function matchPending(text) {
   $("matchCard").hidden = false;
+  $("tailor").hidden = true;
   $("ring").style.setProperty("--pct", 0);
   $("scoreValue").textContent = "…";
   $("scoreLabel").textContent = "Your fit for this role";
@@ -88,6 +89,8 @@ function showMatch(m) {
   $("matchCard").hidden = false;
   $("matchDetails").hidden = false;
   $("rematch").hidden = true;
+  $("tailor").hidden = false;
+  status($("tailorStatus"), "");
   const tier = m.score >= 75 ? ["Strong match", "#3F7D6E"] : m.score >= 55 ? ["Moderate match", "#B7862F"] : ["Needs alignment", "#B5534A"];
   $("ring").style.setProperty("--pct", m.score);
   $("ring").style.setProperty("--ring", tier[1]);
@@ -203,6 +206,23 @@ $("autofill").addEventListener("click", async () => {
   } finally {
     $("autofill").disabled = false;
   }
+});
+
+/** Save the job (with its score) and open ResumeIQ's tailoring step for it. */
+$("tailor").addEventListener("click", async () => {
+  $("tailor").disabled = true;
+  status($("tailorStatus"), "Opening ResumeIQ…");
+  const job = { url: $("jobForm").dataset.url, title: $("title").value, company: $("company").value, location: $("location").value, description: $("description").value };
+  const saved = await api("/api/ext/jobs", { method: "POST", body: { ...job, match: currentMatch } });
+  $("tailor").disabled = false;
+  if (!saved.ok) {
+    status($("tailorStatus"), saved.data.error || "Couldn't save the job", "err");
+    return;
+  }
+  $("saveJob").textContent = "Saved ✓";
+  const { appUrl } = await chrome.runtime.sendMessage({ type: "auth:get" });
+  chrome.tabs.create({ url: `${appUrl}?tailor=${encodeURIComponent(saved.data.jobId)}` });
+  status($("tailorStatus"), "Opened in a new tab – your suggested edits will target the gaps above.", "ok");
 });
 
 $("rescan").addEventListener("click", readJob);

@@ -108,4 +108,14 @@ Track these items for future implementation.
 
 ---
 
+## 13. Deeper matching in the extension (must-haves weigh more)
+**What:** The extension's match score is a light, one-pass AI comparison. It should weigh a job's must-have requirements properly, so a missing must-have pulls the score down a lot.
+**Why:** Example: a role where video streaming experience is a must got a modest drop for missing it, when it should be a major one – the score overstates fit.
+**Notes:**
+- Extract the job's requirements first (must-have vs nice-to-have, years, domain, location/work mode) – the same structuring as the AI structuring of jobs discussed for filters – then score against the resume with weights, and cap the score when a must-have is missing.
+- Keep the explanation: list the missing must-haves first in "Holding your match back".
+- Reuse the same scoring in the app's Job Matches so both show the same number.
+
+---
+
 *Add new items below as needed.*

@@ -13,7 +13,7 @@ import { saveJobs, findJobs, repositorySize } from "./jobRepository.js";
 import { htmlToText, normalizeJob, fetchJobsApify, fetchJobsValig } from "./linkedinJobs.js";
 import {
   jobStoreConfigured, toRow, inScope, upsertJobs, findStoredJobs, recordDemand, markDemandCollected, linkedInJobsForQuery,
-  userFromToken, recordApplication, updateApplication,
+  userFromToken, recordApplication, updateApplication, getJobById,
 } from "./jobStore.js";
 import { normalizeQuery, FRESH_HOURS } from "./searchDemand.js";
 import { fetchEasyApplyForm, easyApplyTarget } from "./easyApply.js";
@@ -251,6 +251,19 @@ app.post("/api/assistant", async (req, res) => {
  * Saved roles from earlier live searches that match this one – returns
  * instantly so the job grid isn't empty while /api/linkedin-jobs scrapes.
  */
+/** One stored role by id – used when the extension opens the app to tailor a resume for it. */
+app.get("/api/jobs/by-id", async (req, res) => {
+  const id = String(req.query.id || "").slice(0, 200);
+  if (!id || !jobStoreConfigured()) return res.status(400).json({ error: "id is required" });
+  try {
+    const job = await getJobById(id);
+    return job ? res.json({ job }) : res.status(404).json({ error: "That job isn't in ResumeIQ" });
+  } catch (err) {
+    console.warn("[jobs-db] by-id failed:", err.message);
+    return res.status(502).json({ error: "Couldn't load the job" });
+  }
+});
+
 app.get("/api/jobs/saved", async (req, res) => {
   const keywords = (req.query.keywords || "").trim();
   const location = (req.query.location || "").trim();

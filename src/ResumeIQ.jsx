@@ -5,6 +5,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { track, bucket } from "./analytics.js";
 import EasyApplyPanel from "./easyApply/EasyApplyPanel.jsx";
+import { supabase as supabaseClient, loadProfile } from "./easyApply/supabaseClient.js";
 import {
   MAX_BULLETS_PER_EXPERIENCE, PHOTO_WIDTH_MM, PHOTO_HEIGHT_MM, DEFAULT_SECTION_ORDER, DEFAULT_PDF_FORMAT, buildResumePdf,
 } from "./resumePdf.js";
@@ -3327,6 +3328,42 @@ export default function ResumeIQ() {
     scoreAgainstJob(job);
   };
 
+  // (Declared after the resume state and handleJobAnalyzeClick, which these effects use.)
+  // "/app?tailor=<job id>" (from the Chrome extension) opens tailoring for that role, with the
+  // resume from the signed-in user's profile – or after they upload one, if there's none.
+  const [pendingTailorJob, setPendingTailorJob] = useState(null);
+  const [tailorNotice, setTailorNotice] = useState("");
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const jobId = params.get("tailor");
+    if (!jobId) return;
+    params.delete("tailor");
+    window.history.replaceState({}, "", `${window.location.pathname}${params.size ? `?${params}` : ""}`);
+    (async () => {
+      const r = await fetch(`${API_BASE.replace(/\/$/, "")}/api/jobs/by-id?id=${encodeURIComponent(jobId)}`).catch(() => null);
+      const job = r?.ok ? (await r.json()).job : null;
+      if (!job) {
+        setTailorNotice("Couldn't load that job – try Add to ResumeIQ in the extension again.");
+        return;
+      }
+      setJobs((prev) => (prev.some((j) => j.id === job.id) ? prev : [job, ...prev]));
+      setPendingTailorJob(job);
+      const session = supabaseClient ? (await supabaseClient.auth.getSession()).data.session : null;
+      const profile = session ? await loadProfile(session.user.id).catch(() => null) : null;
+      if (profile?.resume) setResume(profile.resume);
+      else setTailorNotice(`Upload your resume to tailor it for ${job.role} at ${job.company}.`);
+    })();
+  }, []);
+  useEffect(() => {
+    if (!pendingTailorJob || !resume) return;
+    const job = pendingTailorJob;
+    setPendingTailorJob(null);
+    setTailorNotice("");
+    track("tailor_from_extension");
+    handleJobAnalyzeClick(job);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the resume is available
+  }, [pendingTailorJob, resume]);
+
   const handleExtractJob = async () => {
     if (!linkedInText.trim()) return;
     setExtracting(true);
@@ -4096,6 +4133,11 @@ body {
         </header>
 
         <main className="rq-main-card" style={styles.mainCard}>
+          {step === "upload" && tailorNotice && (
+            <div role="status" style={{ marginBottom: 16, padding: "10px 14px", borderRadius: 10, fontSize: 14, background: "color-mix(in srgb, var(--rq-accent) 10%, transparent)", color: "var(--rq-text)" }}>
+              {tailorNotice}
+            </div>
+          )}
           {step === "upload" && (
             <UploadStep
               homeHref={HOME_URL}

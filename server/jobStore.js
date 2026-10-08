@@ -379,3 +379,10 @@ export async function listUserJobs(userId, limit = 200) {
   if (error) throw new Error(`reading your jobs failed: ${error.message}`);
   return (data || []).filter((r) => r.job).map((r) => ({ ...fromRow(r.job), savedAt: r.created_at, matchScore: r.match_score, match: r.match, status: r.status }));
 }
+
+/** One stored role by its id ("linkedin:4471500043", "greenhouse:7654321"), in the app's job shape. */
+export async function getJobById(id) {
+  const { data, error } = await db().from("jobs").select(READ_COLUMNS).eq("id", id).maybeSingle();
+  if (error) throw new Error(`reading the role failed: ${error.message}`);
+  return data ? fromRow(data) : null;
+}
