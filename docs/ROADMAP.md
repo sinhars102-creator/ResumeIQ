@@ -14,7 +14,7 @@ Status: ✅ done · 🔍 built, needs checking on real pages · 🚧 in progress
 | # | Item | Status |
 |---|---|---|
 | 1.1 | Stays signed in: shares the ResumeIQ website's sign-in; picks up the site's current session from an open ResumeIQ tab instead of signing out | 🔍 |
-| 1.2 | Autofill is visible and obvious: on an application page the panel leads with "Autofill this application", not below the job details | 🚧 |
+| 1.2 | Autofill is visible and obvious: on an application page the panel leads with "Autofill this application", not below the job details | 🔍 |
 | 1.3 | Attach the resume you choose: upload your own resume file(s) to your profile, pick one when applying | ⏳ |
 | 1.4 | Fix the generated-PDF fallback: the ₹ symbol (breaks the text) and hyphen spacing ("Day - 7") | ⏳ |
 

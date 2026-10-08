@@ -50,8 +50,9 @@
         <h2>Job on this page</h2>
         <button id="rescan" class="link" type="button">Re-read page</button>
       </div>
+      <button id="jobSummary" class="job-summary" type="button" hidden aria-expanded="false"></button>
       <div id="jobStatus" class="status" role="status"></div>
-      <form id="jobForm">
+      <form id="jobForm" class="job-form">
         <label>Job title<input id="title" required></label>
         <label>Company<input id="company" required></label>
         <label>Location<input id="location"></label>
@@ -61,8 +62,9 @@
     </section>
 
     <section id="applyCard" class="card" hidden>
-      <h2>Application form</h2>
-      <p class="muted">Fills this page's form from your ResumeIQ profile – including your voluntary details and, if you turned it on, standard declarations – and attaches your resume. Review everything, then submit on the page yourself.</p>
+      <h2 id="applyTitle">Application form</h2>
+      <p id="applyHint" class="muted" hidden>No application form on this page yet. Click <strong>Apply</strong> on the page – autofill appears here when the form opens.</p>
+      <p id="applyAbout" class="muted">Fills this page's form from your ResumeIQ profile – including your voluntary details and, if you turned it on, standard declarations – and attaches your resume. Review everything, then submit on the page yourself.</p>
       <button id="autofill" class="btn primary" type="button">Autofill this application</button>
       <div id="applyStatus" class="status" role="status"></div>
       <ul id="skipped" class="list gaps"></ul>

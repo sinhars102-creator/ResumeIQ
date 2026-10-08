@@ -1,4 +1,4 @@
-import { extractJob, readForm, fillForm, attachFile } from "./pageScripts.js";
+import { extractJob, readForm, fillForm, attachFile, formSignal } from "./pageScripts.js";
 
 const $ = (id) => document.getElementById(id);
 const api = (path, options) => chrome.runtime.sendMessage({ type: "api", path, options });
@@ -116,6 +116,7 @@ async function readJob() {
     }
     for (const key of ["title", "company", "location", "description"]) $(key).value = job?.[key] || "";
     $("jobForm").dataset.url = job?.url || "";
+    $("jobSummary").textContent = [job?.title, job?.company].filter(Boolean).join(" · ") || "Job details";
     if (!job?.title) status($("jobStatus"), "No job found on this page – fill in the details to save it anyway.");
     // Enough of a description to judge fit: score it straight away.
     else if ((job.description || "").length >= 150) runMatch(job);
@@ -152,7 +153,30 @@ async function refresh() {
   const ghId = auth.signedIn ? greenhouseJobId(tab?.url || "") : null;
   $("easyApplyCard").hidden = !ghId;
   $("openEasyApply").onclick = () => chrome.tabs.create({ url: `${auth.appUrl}?easyApply=${encodeURIComponent(ghId)}` });
-  if (auth.signedIn && /^https?:/.test(tab?.url || "")) await readJob();
+  if (auth.signedIn && /^https?:/.test(tab?.url || "")) {
+    await layoutForPage();
+    await readJob();
+  } else document.body.classList.remove("on-application");
+}
+
+/**
+ * Application page → autofill leads and the job details collapse to one line; job page → the
+ * match and job details lead, and the autofill card shrinks to a hint to click Apply.
+ */
+async function layoutForPage() {
+  let onApplication = false;
+  try {
+    onApplication = !!(await runInPage(formSignal))?.isApplication;
+  } catch {
+    onApplication = false; // page not readable (chrome:// pages, the store)
+  }
+  document.body.classList.toggle("on-application", onApplication);
+  $("applyTitle").textContent = onApplication ? "Autofill this application" : "Application form";
+  $("applyHint").hidden = onApplication;
+  for (const id of ["applyAbout", "autofill"]) $(id).hidden = !onApplication;
+  $("jobForm").classList.toggle("collapsed", onApplication);
+  $("jobSummary").hidden = !onApplication;
+  $("jobSummary").setAttribute("aria-expanded", "false");
 }
 
 $("jobForm").addEventListener("submit", async (e) => {
@@ -270,7 +294,15 @@ $("reattachCover").addEventListener("click", async () => {
 
 for (const id of ["title", "company"]) $(id).addEventListener("input", () => $(id).classList.remove("needs"));
 
-$("rescan").addEventListener("click", readJob);
+$("jobSummary").addEventListener("click", () => {
+  const open = $("jobForm").classList.toggle("collapsed") === false;
+  $("jobSummary").setAttribute("aria-expanded", String(open));
+});
+
+$("rescan").addEventListener("click", async () => {
+  await layoutForPage();
+  await readJob();
+});
 $("rematch").addEventListener("click", () =>
   runMatch({ url: $("jobForm").dataset.url, title: $("title").value, company: $("company").value, description: $("description").value }, { force: true }));
 chrome.tabs.onActivated.addListener(refresh);
@@ -285,4 +317,13 @@ chrome.tabs.onUpdated.addListener((id, info) => {
   }
 });
 chrome.runtime.onMessage.addListener((msg) => { if (msg.type === "auth:changed") refresh(); });
+// Some sites open the form on the same page when Apply is clicked: re-check while none is shown.
+setInterval(async () => {
+  if (!tabId || document.body.classList.contains("on-application") || $("jobCard").hidden || document.hidden) return;
+  try {
+    if ((await runInPage(formSignal))?.isApplication) await layoutForPage();
+  } catch {
+    // page not readable
+  }
+}, 4000);
 refresh();

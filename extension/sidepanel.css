@@ -26,3 +26,12 @@ textarea { resize: vertical; }
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .card.highlight { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(63, 125, 110, 0.12); }
 input.needs { border-color: var(--warn); box-shadow: 0 0 0 3px rgba(183, 134, 47, 0.18); }
+/* Application page: autofill leads, job details collapse to a one-line summary. */
+body.on-application #applyCard { order: -2; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(63, 125, 110, 0.12); }
+body.on-application #easyApplyCard { order: -3; }
+body.on-application #matchCard { order: 1; }
+body.on-application #jobCard { order: 2; }
+.job-summary { font: inherit; font-size: 13px; text-align: left; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 8px; background: var(--bg); color: var(--text); cursor: pointer; min-height: 38px; }
+.job-summary::after { content: " · Show details"; color: var(--accent); font-weight: 600; }
+.job-summary[aria-expanded="true"]::after { content: " · Hide details"; }
+body.on-application .job-form.collapsed { display: none; }

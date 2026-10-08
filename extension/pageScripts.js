@@ -334,3 +334,17 @@ export function attachFile(fieldId, file) {
   el.dispatchEvent(new Event("change", { bubbles: true }));
   return true;
 }
+
+/**
+ * Is there an application form on this page? Counts fillable fields and looks for the usual
+ * signs (an email box, a file upload). Cheap: runs on every page the panel looks at.
+ */
+export function formSignal() {
+  const visible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const inputs = [...document.querySelectorAll("input, textarea, select")].filter((el) =>
+    !["hidden", "submit", "button", "search", "image", "reset", "password"].includes(el.type) && !el.disabled && (visible(el) || el.type === "file"));
+  const hasEmail = inputs.some((el) => el.type === "email" || /e-?mail/i.test(`${el.name} ${el.id} ${el.placeholder} ${el.getAttribute("aria-label") || ""}`));
+  const hasFile = inputs.some((el) => el.type === "file");
+  const hasName = inputs.some((el) => /name/i.test(`${el.name} ${el.id} ${el.placeholder} ${el.getAttribute("aria-label") || ""}`));
+  return { fields: inputs.length, isApplication: inputs.length >= 3 && (hasEmail || hasFile) && (hasName || hasFile || hasEmail) };
+}
