@@ -63,6 +63,9 @@ Status: ✅ done · 🔍 built, needs checking on real pages · 🚧 in progress
 - Merge `tailoring-assistant` → `main` (deploys the site and turns on the daily job collection)
 
 ## Backlog – extension (after Phases 1–3)
+- One-click "Apply with ResumeIQ" from the job posting: clicks Apply, waits for the form, fills it and attaches resume + cover letter, steps through multi-page forms ❓ stop at Review for the user to submit (A) or also submit (B). Greenhouse / Lever / Ashby first (one-page forms), Workday second
+- Workday sign-in: each company's Workday has its own account, so "Create Account" appears once per employer ❓ fill the email and leave the password to the user (a), or create the account with a stored password and handle email verification (b)
+- Clearer error in "Resume to attach" when the resume list can't load (today: "Something went wrong")
 - #11 follow-ups: cache-aware match on every job view is done; deeper matching is #13
 - LinkedIn Easy Apply autofill – decided: not now (account-restriction risk)
 - Chrome Web Store listing
