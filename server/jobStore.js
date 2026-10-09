@@ -390,7 +390,7 @@ export async function getJobById(id) {
 /* ---------- Resume files (private "resumes" bucket + public.resume_files) ---------- */
 
 const RESUME_BUCKET = "resumes";
-const RESUME_COLUMNS = "id, name, file_name, mime_type, size_bytes, is_default, created_at";
+const RESUME_COLUMNS = "id, name, file_name, mime_type, size_bytes, is_default, created_at, source, job_id";
 
 export async function listResumeFiles(userId) {
   const { data, error } = await db().from("resume_files").select(RESUME_COLUMNS).eq("user_id", userId).order("created_at", { ascending: false });
@@ -399,7 +399,7 @@ export async function listResumeFiles(userId) {
 }
 
 /** Store an uploaded resume under <user>/<id>.<ext>; the first one becomes the default. */
-export async function addResumeFile(userId, { name, fileName, mimeType, bytes }) {
+export async function addResumeFile(userId, { name, fileName, mimeType, bytes, source = "upload", jobId = null, rxResumeId = null }) {
   const id = crypto.randomUUID();
   const ext = mimeType === "application/pdf" ? "pdf" : mimeType === "application/msword" ? "doc" : "docx";
   const path = `${userId}/${id}.${ext}`;
@@ -408,7 +408,11 @@ export async function addResumeFile(userId, { name, fileName, mimeType, bytes })
   const existing = await listResumeFiles(userId);
   const { data, error } = await db()
     .from("resume_files")
-    .insert({ id, user_id: userId, name, file_name: fileName, storage_path: path, mime_type: mimeType, size_bytes: bytes.length, is_default: existing.length === 0 })
+    .insert({
+      id, user_id: userId, name, file_name: fileName, storage_path: path, mime_type: mimeType, size_bytes: bytes.length, is_default: existing.length === 0,
+      // Only uploads carry the new columns' non-default values, so uploads still work before the tailored-resumes migration.
+      ...(source !== "upload" ? { source, job_id: jobId, rx_resume_id: rxResumeId } : {}),
+    })
     .select(RESUME_COLUMNS)
     .single();
   if (error) {
@@ -436,6 +440,33 @@ export async function deleteResumeFile(userId, id) {
     const [next] = await listResumeFiles(userId);
     if (next) await setDefaultResumeFile(userId, next.id);
   }
+}
+
+/**
+ * Save the PDF made in the design editor as the user's tailored resume for a job, replacing the one
+ * saved for that job before (it stays the default if it was).
+ */
+export async function saveTailoredResumeFile(userId, { jobId, rxResumeId, name, fileName, bytes }) {
+  const { data: old } = await db().from("resume_files").select("id, is_default").eq("user_id", userId).eq("source", "tailored").eq("job_id", jobId).maybeSingle();
+  if (old) await deleteResumeFile(userId, old.id);
+  const saved = await addResumeFile(userId, { name, fileName, mimeType: "application/pdf", bytes, source: "tailored", jobId, rxResumeId });
+  if (old?.is_default && !saved.is_default) await setDefaultResumeFile(userId, saved.id);
+  return { ...saved, is_default: saved.is_default || !!old?.is_default };
+}
+
+/** The design-editor resume a user is tailoring for a job, or null. */
+export async function getTailorSession(userId, jobId) {
+  const { data, error } = await db().from("tailor_sessions").select("rx_resume_id, content_hash, updated_at").eq("user_id", userId).eq("job_id", jobId).maybeSingle();
+  if (error) throw new Error(`reading your tailoring session failed: ${error.message}`);
+  return data;
+}
+
+export async function saveTailorSession(userId, jobId, { rxResumeId, contentHash }) {
+  const { error } = await db().from("tailor_sessions").upsert(
+    { user_id: userId, job_id: jobId, rx_resume_id: rxResumeId, content_hash: contentHash, updated_at: new Date().toISOString() },
+    { onConflict: "user_id,job_id" },
+  );
+  if (error) throw new Error(`saving your tailoring session failed: ${error.message}`);
 }
 
 /** A user's resume file (the chosen one, else the default) as bytes, or null when they have none. */

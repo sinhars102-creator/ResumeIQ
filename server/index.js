@@ -6,6 +6,7 @@
 import express from "express";
 import cors from "cors";
 import { readFileSync, existsSync } from "fs";
+import { createHash } from "crypto";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import * as cheerio from "cheerio";
@@ -14,6 +15,7 @@ import { htmlToText, normalizeJob, fetchJobsApify, fetchJobsValig } from "./link
 import {
   jobStoreConfigured, toRow, inScope, upsertJobs, findStoredJobs, recordDemand, markDemandCollected, linkedInJobsForQuery,
   userFromToken, recordApplication, updateApplication, getJobById,
+  getTailorSession, saveTailorSession, saveTailoredResumeFile, getProfile,
 } from "./jobStore.js";
 import { normalizeQuery, FRESH_HOURS } from "./searchDemand.js";
 import { fetchEasyApplyForm, easyApplyTarget } from "./easyApply.js";
@@ -934,16 +936,51 @@ app.post("/api/rxresume/tailor-suggestions", async (req, res) => {
  * WYSIWYG editing, PDF export. We don't reimplement any of that; we just import
  * the data and point the user at Reactive Resume's own editor for it.
  */
+/** The signed-in ResumeIQ user from the request's bearer token, or null (signed out / no job store). */
+async function optionalUser(req) {
+  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  if (!token || !jobStoreConfigured()) return null;
+  return userFromToken(token).catch(() => null);
+}
+
+const builderReply = (resumeId, extra = {}) => ({
+  resumeId, builderUrl: `${RX_APP_URL}/builder/${resumeId}`, embeddable: RX_APP_URL !== "https://rxresu.me", ...extra,
+});
+
+/**
+ * Open the resume in the design editor. Signed in and tailoring a job: the editor resume made for
+ * that job before is reopened, so what the user changed in the editor stays. When ResumeIQ's copy has
+ * changed since (new accepted edits), the reply says so; with `refresh` the editor resume's content is
+ * replaced and its template and styling kept. Otherwise a new editor resume is made.
+ */
 app.post("/api/rxresume/open-in-builder", async (req, res) => {
   const key = getRxResumeKey();
   if (!key) {
     return res.status(400).json({ error: "RXRESUME_API_KEY not configured on the server (.env)." });
   }
-  const { resumeData, name } = req.body || {};
+  const { resumeData, name, jobId, refresh } = req.body || {};
   if (!resumeData) {
     return res.status(400).json({ error: "resumeData is required." });
   }
   try {
+    const user = jobId ? await optionalUser(req) : null;
+    const contentHash = createHash("sha256").update(JSON.stringify(resumeData)).digest("hex");
+    const session = user ? await getTailorSession(user.id, String(jobId)).catch((err) => (console.warn("[tailor] session lookup:", err.message), null)) : null;
+    if (session) {
+      const existing = await rxFetch(`/resumes/${session.rx_resume_id}`, { method: "GET" });
+      if (existing.ok && existing.data?.data) {
+        const changed = session.content_hash !== contentHash;
+        if (!changed || !refresh) return res.json(builderReply(session.rx_resume_id, { reused: true, contentChanged: changed }));
+        // New edits from ResumeIQ: replace the content, keep the template, layout and styling chosen in the editor.
+        const design = existing.data.data.metadata;
+        const data = { ...mapToRxResumeData(resumeData, design?.template), ...(design ? { metadata: design } : {}) };
+        const updated = await rxFetch(`/resumes/${session.rx_resume_id}`, { method: "PUT", body: JSON.stringify({ data }) });
+        if (!updated.ok) throw new Error(updated.data?.message || `Updating the editor resume failed (${updated.status})`);
+        await saveTailorSession(user.id, String(jobId), { rxResumeId: session.rx_resume_id, contentHash });
+        return res.json(builderReply(session.rx_resume_id, { reused: true, updated: true }));
+      }
+      // The editor resume was deleted in the editor: make a new one below.
+    }
     const { resumeId } = await importIntoRxResume(resumeData);
     // Imports get a random name ("Alone Brown Vulture"); label it after the candidate and job.
     const label = rxText(name).trim().slice(0, 120);
@@ -951,10 +988,41 @@ app.post("/api/rxresume/open-in-builder", async (req, res) => {
       const renamed = await rxFetch(`/resumes/${resumeId}`, { method: "PUT", body: JSON.stringify({ name: label }) });
       if (!renamed.ok) console.warn("Reactive Resume rename failed:", renamed.status, renamed.data?.message);
     }
-    return res.json({ resumeId, builderUrl: `${RX_APP_URL}/builder/${resumeId}`, embeddable: RX_APP_URL !== "https://rxresu.me" });
+    if (user) {
+      await saveTailorSession(user.id, String(jobId), { rxResumeId: resumeId, contentHash })
+        .catch((err) => console.warn("[tailor] saving the session failed:", err.message)); // the editor still opens
+    }
+    return res.json(builderReply(resumeId, { reused: false }));
   } catch (err) {
     console.error("Reactive Resume open-in-builder error:", err);
     return res.status(502).json({ error: "Failed to open resume in Reactive Resume", details: err.message });
+  }
+});
+
+/**
+ * "Use this resume for applying": the PDF of the job's editor resume, exactly as the editor renders it,
+ * saved as the user's tailored resume for that job (replacing the previous one). The Chrome extension
+ * attaches it on that job's application.
+ */
+app.post("/api/tailored/use", async (req, res) => {
+  const user = await optionalUser(req);
+  if (!user) return res.status(401).json({ error: "Sign in to ResumeIQ to save this resume for applying" });
+  const jobId = String(req.body?.jobId || "");
+  if (!jobId) return res.status(400).json({ error: "Which job is this resume for?" });
+  try {
+    const session = await getTailorSession(user.id, jobId);
+    if (!session) return res.status(404).json({ error: "Open this job's resume in the editor first" });
+    const pdf = await rxFetchBinary(`/resumes/${session.rx_resume_id}/pdf`);
+    if (pdf.subarray(0, 5).toString() !== "%PDF-") throw new Error("the editor didn't return a PDF");
+    const [job, profile] = await Promise.all([getJobById(jobId).catch(() => null), getProfile(user.id).catch(() => null)]);
+    const label = [job?.company, job?.role].filter(Boolean).join(" – ") || "Tailored resume";
+    const person = [profile?.first_name, profile?.last_name].filter(Boolean).join("_") || "Resume";
+    const fileName = `${person}_${job?.company || "tailored"}`.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/_+/g, "_").slice(0, 80) + ".pdf";
+    const resume = await saveTailoredResumeFile(user.id, { jobId, rxResumeId: session.rx_resume_id, name: `${label} (tailored)`.slice(0, 90), fileName, bytes: pdf });
+    return res.json({ resume, jobUrl: job?.url || null });
+  } catch (err) {
+    console.error("[tailor] saving the tailored resume failed:", err.message);
+    return res.status(502).json({ error: "Couldn't save the resume from the editor – please try again", details: err.message });
   }
 });
 
