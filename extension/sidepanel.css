@@ -42,3 +42,18 @@ body.on-application .job-form.collapsed { display: none; }
 .link.danger { color: var(--danger); }
 .attached { display: flex; flex-direction: column; gap: 4px; padding: 10px; border-radius: 10px; background: rgba(63, 125, 110, 0.08); font-size: 12.5px; }
 .attached .link { padding: 0 0 0 4px; }
+/* Generate resume: the reworded resume to review – changes in light blue, every line editable. */
+.gen-doc { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: #FFFFFF; font-size: 12.5px; }
+.gen-doc .gen-name { font-size: 15px; font-weight: 700; }
+.gen-doc h4 { margin: 6px 0 0; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text2); }
+.gen-doc .gen-role { font-weight: 600; }
+.gen-doc .gen-role span { font-weight: 400; color: var(--text2); }
+.gen-doc ul { margin: 2px 0 0; padding-left: 16px; display: flex; flex-direction: column; gap: 3px; }
+.gen-doc [contenteditable] { border-radius: 4px; outline: none; padding: 1px 2px; }
+.gen-doc [contenteditable]:hover { box-shadow: 0 0 0 1px #D3CFC5; }
+.gen-doc [contenteditable]:focus { box-shadow: 0 0 0 2px var(--accent); }
+.gen-doc .chg, .gen-key { background: #DCEBFA; color: inherit; border-radius: 3px; }
+.gen-skills { display: flex; flex-wrap: wrap; gap: 6px; }
+.gen-skills span { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; }
+.gen-gaps { display: flex; flex-direction: column; gap: 4px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
+.gen-actions .btn { flex: 1; }

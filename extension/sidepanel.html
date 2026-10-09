@@ -41,8 +41,34 @@
         <ul id="matched" class="list matched"></ul>
       </div>
       <button id="rematch" class="link" type="button" hidden>Try again</button>
-      <button id="tailor" class="btn primary" type="button" hidden>Improve my resume for this job</button>
+      <button id="generate" class="btn primary" type="button" hidden>Generate resume for this job</button>
+      <button id="tailor" class="btn" type="button" hidden>Improve my resume for this job</button>
       <div id="tailorStatus" class="status" role="status"></div>
+    </section>
+
+    <section id="genCard" class="card" hidden aria-live="polite">
+      <div class="row-between">
+        <h2>Your resume for this job</h2>
+        <button id="genClose" class="link" type="button">Close</button>
+      </div>
+      <div id="genStatus" class="status" role="status"></div>
+      <div id="genBody" hidden>
+        <p id="genIntro" class="muted"></p>
+        <div id="genGapsBox" class="gen-gaps" hidden>
+          <h3>Gaps to fix yourself</h3>
+          <p class="muted">Rewording can't close these – only experience you really have can.</p>
+          <ul id="genGaps" class="list gaps"></ul>
+          <button id="genAssistant" class="link" type="button">Work on these with the tailoring assistant</button>
+        </div>
+        <div id="genDoc" class="gen-doc"></div>
+        <p class="muted">Education and your other sections stay as they are. The PDF uses the Onyx template.</p>
+        <div class="row-actions gen-actions">
+          <button id="genPreview" class="btn" type="button">Preview PDF</button>
+          <button id="genUse" class="btn primary" type="button">Use for this job</button>
+        </div>
+        <div id="genUseStatus" class="status" role="status"></div>
+        <button id="genRedo" class="link" type="button">Generate again</button>
+      </div>
     </section>
 
     <section id="jobCard" class="card" hidden>

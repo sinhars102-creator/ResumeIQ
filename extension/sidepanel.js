@@ -54,6 +54,7 @@ async function cacheMatch(key, match) {
 function matchPending(text) {
   $("matchCard").hidden = false;
   $("tailor").hidden = true;
+  $("generate").hidden = true;
   $("ring").style.setProperty("--pct", 0);
   $("scoreValue").textContent = "…";
   $("scoreLabel").textContent = "Your fit for this role";
@@ -90,6 +91,8 @@ function showMatch(m) {
   $("matchDetails").hidden = false;
   $("rematch").hidden = true;
   $("tailor").hidden = false;
+  $("generate").hidden = false;
+  showGenerateLabel();
   status($("tailorStatus"), "");
   const tier = m.score >= 75 ? ["Strong match", "#3F7D6E"] : m.score >= 55 ? ["Moderate match", "#B7862F"] : ["Needs alignment", "#B5534A"];
   $("ring").style.setProperty("--pct", m.score);
@@ -116,6 +119,11 @@ async function readJob() {
     }
     for (const key of ["title", "company", "location", "description"]) $(key).value = job?.[key] || "";
     $("jobForm").dataset.url = job?.url || "";
+    // Another job: its generated resume isn't this one's. (The same job read again keeps the review open.)
+    if (draft && draft.key !== jobKey(job?.url || "")) {
+      draft = null;
+      $("genCard").hidden = true;
+    }
     $("jobSummary").textContent = [job?.title, job?.company].filter(Boolean).join(" · ") || "Job details";
     if (!job?.title) status($("jobStatus"), "No job found on this page – fill in the details to save it anyway.");
     // Enough of a description to judge fit: score it straight away.
@@ -149,6 +157,8 @@ async function refresh() {
     lastStep = null;
   }
   tabId = tab?.id;
+  if (tab?.url !== pageUrl) pickedByHand = null;
+  pageUrl = tab?.url || null;
   const auth = await chrome.runtime.sendMessage({ type: "auth:get" });
   $("who").textContent = auth.signedIn ? auth.email || "Signed in" : "";
   $("signedOut").hidden = auth.signedIn;
@@ -159,9 +169,11 @@ async function refresh() {
   $("easyApplyCard").hidden = !ghId;
   $("openEasyApply").onclick = () => chrome.tabs.create({ url: `${auth.appUrl}?easyApply=${encodeURIComponent(ghId)}` });
   if (auth.signedIn && /^https?:/.test(tab?.url || "")) {
-    loadResumes();
+    const loading = loadResumes();
     await layoutForPage();
     await readJob();
+    await loading;
+    if (document.body.classList.contains("on-application")) await pickGeneratedResume(tab.url);
   } else document.body.classList.remove("on-application");
 }
 
@@ -316,6 +328,265 @@ $("tailor").addEventListener("click", async () => {
   status($("tailorStatus"), "Opened in a new tab – your suggested edits will target the gaps above.", "ok");
 });
 
+/* ---------- Generate resume: reworded for this job, reviewed and edited here, used for its application ---------- */
+
+let draft = null; // { key, jobId, title, company, resume, changes, realGaps, saved } for the job on this page
+const DRAFTS_KEPT = 20;
+
+function jobOnPage() {
+  return { url: $("jobForm").dataset.url, title: $("title").value, company: $("company").value, location: $("location").value, description: $("description").value };
+}
+
+async function savedDraft(key) {
+  const { drafts = {} } = await chrome.storage.local.get("drafts");
+  return key ? drafts[key] || null : null;
+}
+
+/** Keep the draft (with the user's edits) so closing the panel doesn't lose it. */
+async function keepDraft() {
+  if (!draft?.key) return;
+  const { drafts = {} } = await chrome.storage.local.get("drafts");
+  drafts[draft.key] = { ...draft, at: Date.now() };
+  const keep = Object.entries(drafts).sort((a, b) => b[1].at - a[1].at).slice(0, DRAFTS_KEPT);
+  await chrome.storage.local.set({ drafts: Object.fromEntries(keep) });
+}
+
+let keepTimer = null;
+function keepDraftSoon() {
+  clearTimeout(keepTimer);
+  keepTimer = setTimeout(keepDraft, 600);
+}
+
+async function showGenerateLabel() {
+  const seq = readSeq;
+  const saved = await savedDraft(jobKey($("jobForm").dataset.url));
+  if (seq === readSeq) $("generate").textContent = saved ? "Open the resume you generated" : "Generate resume for this job";
+}
+
+const escapeHtml = (text) => String(text ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+/** An editable line: plain text in, plain text out (no line breaks, pasted formatting dropped). */
+function editable(tag, text, onEdit, { changed = null } = {}) {
+  const el = document.createElement(tag);
+  el.contentEditable = "true";
+  el.spellcheck = true;
+  el.textContent = text;
+  if (changed) {
+    el.classList.add("chg");
+    el.title = changed.type === "Addition" ? "Added for this job" : `Was: ${changed.original}`;
+  }
+  el.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); el.blur(); } });
+  el.addEventListener("paste", (e) => {
+    e.preventDefault();
+    document.execCommand("insertText", false, e.clipboardData.getData("text/plain").replace(/\s*\n\s*/g, " "));
+  });
+  el.addEventListener("input", () => onEdit(el.textContent.replace(/\s+/g, " ").trim()));
+  return el;
+}
+
+function edited() {
+  draft.saved = false;
+  status($("genUseStatus"), "");
+  keepDraftSoon();
+}
+
+/** The reworded resume, laid out like a document: changes in light blue, every line editable. */
+function renderDraft() {
+  const { resume, changes, realGaps } = draft;
+  $("genCard").hidden = false;
+  $("genBody").hidden = false;
+  status($("genStatus"), "");
+  $("genIntro").innerHTML = changes.length
+    ? `ResumeIQ made ${changes.length} change${changes.length === 1 ? "" : "s"} for this job, shown in <span class="gen-key">light blue</span> – hover one to see what it replaced. Click any line to edit it.`
+    : "Your resume already says what this job looks for in its words – there was nothing worth rewording. Click any line to edit it yourself.";
+  $("genGapsBox").hidden = !realGaps.length;
+  $("genGaps").replaceChildren(...realGaps.map((g) => Object.assign(document.createElement("li"), { textContent: g })));
+
+  const doc = [];
+  const head = document.createElement("div");
+  head.append(Object.assign(document.createElement("div"), { className: "gen-name", textContent: resume.name || "" }));
+  head.append(editable("div", resume.title || "", (t) => { resume.title = t; edited(); }));
+  doc.push(head);
+
+  if (resume.summary) {
+    doc.push(Object.assign(document.createElement("h4"), { textContent: "Summary" }));
+    const summary = editable("div", "", (t) => { resume.summary = t; edited(); });
+    // Changed sentences marked inside the summary; the rest is plain.
+    let html = escapeHtml(resume.summary);
+    for (const c of changes.filter((x) => x.section === "Summary")) {
+      const at = escapeHtml(c.proposed);
+      if (at && html.includes(at)) html = html.replace(at, `<mark class="chg" title="${escapeHtml(c.type === "Addition" ? "Added for this job" : `Was: ${c.original}`)}">${at}</mark>`);
+    }
+    summary.innerHTML = html;
+    doc.push(summary);
+  }
+
+  if ((resume.experience || []).length) doc.push(Object.assign(document.createElement("h4"), { textContent: "Experience" }));
+  (resume.experience || []).forEach((role, i) => {
+    const line = document.createElement("div");
+    line.className = "gen-role";
+    line.innerHTML = `${escapeHtml([role.role, role.company].filter(Boolean).join(" – "))} <span>${escapeHtml(role.period || "")}</span>`;
+    const list = document.createElement("ul");
+    (role.bullets || []).forEach((bullet, b) => {
+      const changed = changes.find((c) => c.section === "Experience" && c.experienceIndex === i && c.bulletIndex === b);
+      list.append(editable("li", bullet, (t) => { role.bullets[b] = t; edited(); }, { changed }));
+    });
+    doc.push(line, list);
+  });
+
+  if ((resume.skills || []).length) {
+    doc.push(Object.assign(document.createElement("h4"), { textContent: "Skills" }));
+    const skills = document.createElement("div");
+    skills.className = "gen-skills";
+    resume.skills.forEach((skill, k) => {
+      const changed = changes.find((c) => c.section === "Skills" && c.skillIndex === k);
+      skills.append(editable("span", skill, (t) => { resume.skills[k] = t; edited(); }, { changed }));
+    });
+    doc.push(skills);
+  }
+  $("genDoc").replaceChildren(...doc);
+  if (draft.saved) status($("genUseStatus"), "Saved as this job's resume – autofill attaches it when you apply.", "ok");
+}
+
+/** The resume to render: the draft, with skills or bullets the user emptied left out. */
+function reviewedResume() {
+  const resume = structuredClone(draft.resume);
+  resume.skills = (resume.skills || []).filter((s) => String(s).trim());
+  resume.experience = (resume.experience || []).map((e) => ({ ...e, bullets: (e.bullets || []).filter((b) => String(b).trim()) }));
+  return resume;
+}
+
+async function generate() {
+  const missing = missingJobDetail();
+  if (missing) {
+    status($("tailorStatus"), missing, "err");
+    return;
+  }
+  const seq = readSeq;
+  const job = jobOnPage();
+  $("generate").disabled = true;
+  $("genRedo").disabled = true;
+  $("genCard").hidden = false;
+  $("genBody").hidden = true;
+  status($("genStatus"), "Rewording your resume for this job – this can take up to a minute…");
+  $("genCard").scrollIntoView({ behavior: "smooth", block: "start" });
+  const r = await api("/api/ext/generate-resume", { method: "POST", body: job });
+  $("generate").disabled = false;
+  $("genRedo").disabled = false;
+  if (seq !== readSeq) return; // the user moved to another job meanwhile
+  if (!r.ok) {
+    status($("genStatus"), r.status === 0 ? "Couldn't reach ResumeIQ. Check your connection and try again." : r.data.error || "Couldn't generate the resume – please try again.", "err");
+    return;
+  }
+  $("saveJob").textContent = "Saved ✓";
+  draft = { key: jobKey(job.url), jobId: r.data.jobId, title: job.title, company: job.company, resume: r.data.resume, changes: r.data.changes, realGaps: r.data.realGaps, saved: false };
+  await keepDraft();
+  showGenerateLabel();
+  renderDraft();
+}
+
+$("generate").addEventListener("click", async () => {
+  const saved = await savedDraft(jobKey($("jobForm").dataset.url));
+  if (!saved) return generate();
+  draft = saved;
+  renderDraft();
+  $("genCard").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+$("genRedo").addEventListener("click", () => {
+  // Generating again replaces the draft and your edits: confirm with a second click.
+  if ($("genRedo").dataset.armed !== "1") {
+    $("genRedo").dataset.armed = "1";
+    $("genRedo").textContent = "Click again – this replaces your edits";
+    setTimeout(() => {
+      delete $("genRedo").dataset.armed;
+      $("genRedo").textContent = "Generate again";
+    }, 4000);
+    return;
+  }
+  delete $("genRedo").dataset.armed;
+  $("genRedo").textContent = "Generate again";
+  generate();
+});
+
+$("genClose").addEventListener("click", () => { $("genCard").hidden = true; });
+$("genAssistant").addEventListener("click", () => $("tailor").click());
+
+function generatedBody() {
+  return { jobId: draft.jobId, title: draft.title, company: draft.company, resume: reviewedResume() };
+}
+
+$("genPreview").addEventListener("click", async () => {
+  $("genPreview").disabled = true;
+  status($("genUseStatus"), "Making the PDF…");
+  const r = await api("/api/ext/generated-resume/pdf", { method: "POST", body: generatedBody() });
+  $("genPreview").disabled = false;
+  if (!r.ok) {
+    status($("genUseStatus"), resumeError("make the PDF", r), "err");
+    return;
+  }
+  status($("genUseStatus"), "");
+  viewFile(r.data);
+});
+
+$("genUse").addEventListener("click", async () => {
+  $("genUse").disabled = true;
+  status($("genUseStatus"), "Saving it as this job's resume…");
+  const r = await api("/api/ext/generated-resume/use", { method: "POST", body: generatedBody() });
+  $("genUse").disabled = false;
+  if (!r.ok) {
+    status($("genUseStatus"), resumeError("save it as this job's resume", r), "err");
+    return;
+  }
+  // Remembered so this job's application picks it, here or on the company's own site.
+  const { generated = [] } = await chrome.storage.local.get("generated");
+  const entry = { fileId: r.data.resume.id, jobKey: draft.key, company: draft.company, title: draft.title, at: Date.now() };
+  await chrome.storage.local.set({ generated: [entry, ...generated.filter((g) => g.jobKey !== draft.key)].slice(0, 50) });
+  draft.saved = true;
+  await keepDraft();
+  await loadResumes(false);
+  $("resumeSelect").value = entry.fileId;
+  updateResumeActions();
+  status($("genUseStatus"), "Saved as this job's resume – autofill attaches it when you apply.", "ok");
+});
+
+/* On an application page: preselect the resume generated for this job, unless the user picked one here. */
+
+let pageUrl = null; // the page the panel is showing
+let pickedByHand = null; // the page where the user chose a resume themselves
+
+const companyKey = (name) => String(name || "").toLowerCase()
+  .replace(/\b(private|pvt|limited|ltd|inc|llc|corp|corporation|technologies|technology|labs|india)\b/g, "")
+  .replace(/[^a-z0-9]/g, "");
+
+/** The generated resume for the job on this page: same page as the job, else the same company (by name or in the address). */
+async function generatedForPage(url) {
+  const { generated = [] } = await chrome.storage.local.get("generated");
+  const live = generated.filter((g) => resumes.some((f) => f.id === g.fileId));
+  const exact = live.find((g) => g.jobKey === jobKey(url));
+  if (exact) return exact;
+  const company = companyKey($("company").value);
+  let address = "";
+  try {
+    const u = new URL(url);
+    address = companyKey(u.hostname + u.pathname);
+  } catch {
+    // not a URL
+  }
+  return live
+    .filter((g) => companyKey(g.company).length >= 3 && (companyKey(g.company) === company || address.includes(companyKey(g.company))))
+    .sort((a, b) => b.at - a.at)[0] || null;
+}
+
+async function pickGeneratedResume(url) {
+  if (pickedByHand === url) return;
+  const match = await generatedForPage(url);
+  if (!match || $("resumeSelect").value === match.fileId) return;
+  $("resumeSelect").value = match.fileId;
+  updateResumeActions();
+  status($("resumeStatus"), `Using the resume you generated for ${[match.company, match.title].filter(Boolean).join(" – ")}.`, "ok");
+}
+
 let coverFieldId = null; // the upload the cover letter went to on this page
 
 /* ---------- What was attached on this page (shown after autofill, viewable) ---------- */
@@ -385,7 +656,10 @@ function updateResumeActions() {
   $("removeResume").hidden = !chosen;
 }
 
-$("resumeSelect").addEventListener("change", updateResumeActions);
+$("resumeSelect").addEventListener("change", () => {
+  pickedByHand = pageUrl;
+  updateResumeActions();
+});
 $("uploadResume").addEventListener("click", () => $("resumeFile").click());
 
 $("resumeFile").addEventListener("change", async () => {

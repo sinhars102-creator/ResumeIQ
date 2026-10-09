@@ -131,7 +131,7 @@ function resumeAsText(resume) {
 }
 
 /** The resume as the model sees it: indexed so edits can point at an exact role. */
-function formatResume(resume) {
+export function formatResume(resume) {
   const parts = [
     `Name: ${resume.name || ""}`,
     `Headline: ${resume.title || ""}`,
@@ -173,7 +173,7 @@ function similarity(a, b) {
 const DUPLICATE_THRESHOLD = 0.8;
 
 /** Returns a list of reasons the edit fails the objectivity rules (empty = valid). Fixes experienceIndex in place. */
-function checkEdit(edit, context) {
+export function checkEdit(edit, context) {
   const { resume, jd, candidateText } = context;
   const problems = [];
   if (!SECTIONS.has(edit.section)) problems.push(`section must be Summary, Experience or Skills (got "${edit.section}")`);

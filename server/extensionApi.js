@@ -9,15 +9,19 @@
  *   GET/POST/DELETE /api/ext/resumes[/:id[/default]]  the user's uploaded resume files
  *   POST /api/ext/cover-letter  a cover letter for the role (from the resume only), text + PDF
  *   GET  /api/ext/me        who is signed in and whether their profile is ready
+ *   POST /api/ext/generate-resume        the resume reworded for the role on the page, to review
+ *   POST /api/ext/generated-resume/pdf   that resume as a PDF in the fixed template (preview)
+ *   POST /api/ext/generated-resume/use   save that PDF as the resume for the role (autofill attaches it)
  */
 import { createHash } from "crypto";
 import { callLLM } from "./llm.js";
 import { fillForm } from "./easyApplyFill.js";
+import { generateResume } from "./generateResume.js";
 import { buildResumePdf, pdfSafeText } from "../src/resumePdf.js";
 import { jsPDF } from "jspdf";
 import {
   toRow, saveUserJob, setUserJobMatch, getProfile, listUserJobs,
-  listResumeFiles, addResumeFile, setDefaultResumeFile, deleteResumeFile, getResumeFile,
+  listResumeFiles, addResumeFile, setDefaultResumeFile, deleteResumeFile, getResumeFile, saveTailoredResumeFile,
 } from "./jobStore.js";
 
 const RESUME_TYPES = {
@@ -26,6 +30,8 @@ const RESUME_TYPES = {
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": /\.docx$/i,
 };
 const MAX_RESUME_BYTES = 10 * 1024 * 1024;
+// "Generate resume" always uses this editor template (its PDF is what gets attached).
+const GENERATED_TEMPLATE = "onyx";
 
 /**
  * Which source a job page belongs to, and the role's id there, from its URL. Ids follow the
@@ -122,7 +128,7 @@ export function coverLetterPdf(text, { name = "", contact = "" } = {}) {
   return Buffer.from(doc.output("arraybuffer")).toString("base64");
 }
 
-export function registerExtensionRoutes(app, { userFromRequest }) {
+export function registerExtensionRoutes(app, { userFromRequest, renderJobResumePdf }) {
   const withUser = (handler) => async (req, res) => {
     const user = await userFromRequest(req);
     if (!user) return res.status(401).json({ error: "Sign in on ResumeIQ to use the extension" });
@@ -139,16 +145,22 @@ export function registerExtensionRoutes(app, { userFromRequest }) {
     return res.json({ email: user.email, profileReady: !!(profile?.first_name && profile?.email), hasResume: !!profile?.resume, experienceCount: (profile?.resume?.experience || []).length });
   }));
 
-  app.post("/api/ext/jobs", withUser(async (req, res, user) => {
-    const { url, title, company, location, description, match } = req.body || {};
+  /** Save the role on the page to the user's jobs; returns the saved row and its source. */
+  async function saveJobFromPage(user, { url, title, company, location, description }) {
     const who = jobIdentity(url);
-    if (!who) return res.status(400).json({ error: "This page has no usable address" });
-    if (!String(title || "").trim() || !String(company || "").trim()) return res.status(400).json({ error: "Job title and company are required" });
+    if (!who) throw Object.assign(new Error("This page has no usable address"), { status: 400 });
+    if (!String(title || "").trim() || !String(company || "").trim()) throw Object.assign(new Error("Job title and company are required"), { status: 400 });
     const row = toRow(
       { id: who.id, source: who.source, role: String(title).trim().slice(0, 200), company: String(company).trim().slice(0, 200), location: String(location || "").slice(0, 200), jd: String(description || "").slice(0, 30000), url: who.url },
       { board: who.board, raw: { savedBy: "extension", page: url } },
     );
     await saveUserJob(user.id, row, { addedFrom: url });
+    return { row, who };
+  }
+
+  app.post("/api/ext/jobs", withUser(async (req, res, user) => {
+    const { match } = req.body || {};
+    const { row, who } = await saveJobFromPage(user, req.body || {});
     // The score the panel already showed is kept with the saved job.
     if (match && Number.isFinite(Number(match.score))) {
       await setUserJobMatch(user.id, row.id, {
@@ -249,6 +261,50 @@ export function registerExtensionRoutes(app, { userFromRequest }) {
     const contact = [profile.email, profile.phone, profile.linkedin_url].filter(Boolean).join("  ·  ");
     const file = name.replace(/[^A-Za-z0-9]+/g, "_") || "Cover";
     return res.json({ text: letter, fileName: `${file}_Cover_Letter.pdf`, base64: coverLetterPdf(letter, { name, contact }) });
+  }));
+
+  // Generate resume: save the role, then reword the profile resume for it (wording only).
+  app.post("/api/ext/generate-resume", withUser(async (req, res, user) => {
+    const { title, company, description } = req.body || {};
+    if (String(description || "").trim().length < 150) return res.status(400).json({ error: "This page doesn't show enough of the job description – open the full job post and try again" });
+    const profile = await getProfile(user.id);
+    if (!profile?.resume) return res.status(409).json({ error: "Upload your resume in ResumeIQ first" });
+    const { row } = await saveJobFromPage(user, req.body || {});
+    const generated = await generateResume({ resume: profile.resume, job: { role: title, company, jd: description } });
+    return res.json({ jobId: row.id, ...generated });
+  }));
+
+  /** The reviewed resume sent back by the panel: the user's own content, only sanity-checked. */
+  function reviewedResume(body) {
+    const resume = body?.resume;
+    if (!resume || typeof resume !== "object" || !Array.isArray(resume.experience)) throw Object.assign(new Error("The resume to save is missing"), { status: 400 });
+    if (JSON.stringify(resume).length > 200_000) throw Object.assign(new Error("That resume is too long"), { status: 400 });
+    const jobId = String(body.jobId || "");
+    if (!jobId) throw Object.assign(new Error("Which job is this resume for?"), { status: 400 });
+    return { resume, jobId };
+  }
+
+  async function generatedPdf(user, body) {
+    const { resume, jobId } = reviewedResume(body);
+    const profile = await getProfile(user.id);
+    const label = [body.company, body.title].filter(Boolean).join(" – ") || "Generated resume";
+    const { pdf, rxResumeId } = await renderJobResumePdf(user.id, jobId, resume, { template: GENERATED_TEMPLATE, name: `${label} (generated)` });
+    const person = [profile?.first_name, profile?.last_name].filter(Boolean).join("_") || "Resume";
+    const fileName = `${person}_${body.company || "Resume"}`.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/_+/g, "_").slice(0, 80) + ".pdf";
+    return { pdf, rxResumeId, jobId, label, fileName };
+  }
+
+  app.post("/api/ext/generated-resume/pdf", withUser(async (req, res, user) => {
+    const { pdf, fileName } = await generatedPdf(user, req.body);
+    return res.json({ fileName, mimeType: "application/pdf", base64: pdf.toString("base64") });
+  }));
+
+  // Use for this job: the PDF is saved as the role's resume (replacing an earlier one); the extension
+  // picks it on that role's application.
+  app.post("/api/ext/generated-resume/use", withUser(async (req, res, user) => {
+    const { pdf, rxResumeId, jobId, label, fileName } = await generatedPdf(user, req.body);
+    const resume = await saveTailoredResumeFile(user.id, { jobId, rxResumeId, name: `${label} (generated)`.slice(0, 90), fileName, bytes: pdf });
+    return res.json({ resume });
   }));
 
   app.get("/api/ext/jobs", withUser(async (req, res, user) => res.json({ jobs: await listUserJobs(user.id) })));

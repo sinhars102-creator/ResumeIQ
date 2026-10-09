@@ -1026,6 +1026,32 @@ app.post("/api/tailored/use", async (req, res) => {
   }
 });
 
+/**
+ * The job's editor resume, set to this content in `template` (made on first use, replaced after), and
+ * its PDF exactly as the editor renders it. Used by the extension's "Generate resume", which always
+ * uses one fixed template.
+ */
+async function renderJobResumePdf(userId, jobId, resumeData, { template, name }) {
+  if (!getRxResumeKey()) throw new Error("RXRESUME_API_KEY not configured on the server (.env)");
+  const session = await getTailorSession(userId, jobId);
+  let rxResumeId = null;
+  if (session) {
+    const updated = await rxFetch(`/resumes/${session.rx_resume_id}`, { method: "PUT", body: JSON.stringify({ data: mapToRxResumeData(resumeData, template) }) });
+    if (updated.ok) rxResumeId = session.rx_resume_id;
+    else console.warn("[generate] updating the editor resume failed, making a new one:", updated.status, updated.data?.message);
+  }
+  if (!rxResumeId) {
+    ({ resumeId: rxResumeId } = await importIntoRxResume(resumeData, template));
+    const label = rxText(name).trim().slice(0, 120);
+    if (label) await rxFetch(`/resumes/${rxResumeId}`, { method: "PUT", body: JSON.stringify({ name: label }) });
+  }
+  const contentHash = createHash("sha256").update(JSON.stringify(resumeData)).digest("hex");
+  await saveTailorSession(userId, jobId, { rxResumeId, contentHash });
+  const pdf = await rxFetchBinary(`/resumes/${rxResumeId}/pdf`);
+  if (pdf.subarray(0, 5).toString() !== "%PDF-") throw new Error("the editor didn't return a PDF");
+  return { pdf, rxResumeId };
+}
+
 app.get("/api/rxresume/templates", (_req, res) => res.json({ templates: RX_TEMPLATES }));
 
 /**
@@ -1093,6 +1119,7 @@ async function easyApplyUser(req, res) {
 registerExtensionRoutes(app, {
   userFromRequest: async (req) =>
     jobStoreConfigured() ? userFromToken(String(req.headers.authorization || "").replace(/^Bearer\s+/i, "")) : null,
+  renderJobResumePdf,
 });
 
 /** The form is fetched again here rather than trusted from the browser; answers are keyed by its field ids. */
