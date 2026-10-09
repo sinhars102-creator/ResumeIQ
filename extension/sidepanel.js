@@ -365,23 +365,98 @@ async function showGenerateLabel() {
 
 const escapeHtml = (text) => String(text ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 
-/** An editable line: plain text in, plain text out (no line breaks, pasted formatting dropped). */
-function editable(tag, text, onEdit, { changed = null } = {}) {
+/** Word-level changes from `before` to `after`: [{ kind: "same" | "added" | "removed", text }]. */
+function wordDiff(before, after) {
+  const a = String(before || "").split(/\s+/).filter(Boolean);
+  const b = String(after || "").split(/\s+/).filter(Boolean);
+  // Words that differ only in punctuation or case ("nudges," / "nudges") count as unchanged.
+  const key = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}%$₹+]/gu, "");
+  const same = (x, y) => key(x) === key(y);
+  const lcs = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) {
+    lcs[i][j] = same(a[i], b[j]) ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  }
+  const parts = [];
+  const push = (kind, word) => {
+    const last = parts[parts.length - 1];
+    if (last?.kind === kind) last.text += ` ${word}`;
+    else parts.push({ kind, text: word });
+  };
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && same(a[i], b[j])) {
+      push("same", b[j]); // as it reads now
+      i++;
+      j++;
+    } else if (i < a.length && (j === b.length || lcs[i + 1][j] >= lcs[i][j + 1])) push("removed", a[i++]); // removed words read first
+    else push("added", b[j++]);
+  }
+  return parts;
+}
+
+/** Show `el`'s text as track changes against `before`: new words in light blue, removed ones struck through. */
+function showChanges(el, before, after) {
+  if (before == null || before === after) {
+    el.textContent = after;
+    return;
+  }
+  el.replaceChildren();
+  wordDiff(before, after).forEach((part, n) => {
+    if (n) el.append(" ");
+    if (part.kind === "same") el.append(part.text);
+    else if (part.kind === "added") el.append(Object.assign(document.createElement("mark"), { className: "chg", textContent: part.text }));
+    else {
+      const gone = Object.assign(document.createElement("del"), { className: "gone", textContent: part.text });
+      gone.contentEditable = "false";
+      el.append(gone);
+    }
+  });
+}
+
+/** The line's text as it stands: what's on screen minus the struck-through words. */
+function liveText(el) {
+  const copy = el.cloneNode(true);
+  copy.querySelectorAll("del").forEach((d) => d.remove());
+  return copy.textContent.replace(/\s+/g, " ").trim();
+}
+
+/**
+ * An editable line, shown as changes against `before` (the line in your profile resume; null when
+ * unchanged). Plain text in and out: no line breaks, pasted formatting dropped. Changes are
+ * redrawn when you leave the line, so your own edits show up too.
+ */
+function editable(tag, text, onEdit, { before = null } = {}) {
   const el = document.createElement(tag);
   el.contentEditable = "true";
   el.spellcheck = true;
-  el.textContent = text;
-  if (changed) {
-    el.classList.add("chg");
-    el.title = changed.type === "Addition" ? "Added for this job" : `Was: ${changed.original}`;
-  }
+  showChanges(el, before, text);
   el.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); el.blur(); } });
   el.addEventListener("paste", (e) => {
     e.preventDefault();
     document.execCommand("insertText", false, e.clipboardData.getData("text/plain").replace(/\s*\n\s*/g, " "));
   });
-  el.addEventListener("input", () => onEdit(el.textContent.replace(/\s+/g, " ").trim()));
+  el.addEventListener("input", () => onEdit(liveText(el)));
+  el.addEventListener("blur", () => showChanges(el, before, liveText(el)));
   return el;
+}
+
+/**
+ * Each line as it was in the profile resume, worked out from the changes (kept with the draft):
+ * the summary, and by position every bullet and skill the generation changed ("" when it was added).
+ */
+function linesBefore({ resume, changes }) {
+  let summary = resume.summary || "";
+  for (const c of changes.filter((x) => x.section === "Summary")) {
+    summary = c.type === "Addition" ? summary.replace(c.proposed, "").trim() : summary.replace(c.proposed, c.original);
+  }
+  const bullets = {};
+  const skills = {};
+  for (const c of changes) {
+    if (c.section === "Experience") bullets[`${c.experienceIndex}:${c.bulletIndex}`] = c.type === "Addition" ? "" : c.original;
+    if (c.section === "Skills") skills[c.skillIndex] = c.type === "Addition" ? "" : c.original;
+  }
+  return { summary, bullets, skills };
 }
 
 function edited() {
@@ -396,8 +471,10 @@ function renderDraft() {
   $("genCard").hidden = false;
   $("genBody").hidden = false;
   status($("genStatus"), "");
+  draft.before ||= linesBefore(draft);
+  const before = draft.before;
   $("genIntro").innerHTML = changes.length
-    ? `ResumeIQ made ${changes.length} change${changes.length === 1 ? "" : "s"} for this job, shown in <span class="gen-key">light blue</span> – hover one to see what it replaced. Click any line to edit it.`
+    ? `ResumeIQ changed ${changes.length} line${changes.length === 1 ? "" : "s"} for this job: new words in <span class="gen-key">light blue</span>, removed words <del class="gone">struck through</del>. Click any line to edit it.`
     : "Your resume already says what this job looks for in its words – there was nothing worth rewording. Click any line to edit it yourself.";
   $("genGapsBox").hidden = !realGaps.length;
   $("genGaps").replaceChildren(...realGaps.map((g) => Object.assign(document.createElement("li"), { textContent: g })));
@@ -410,15 +487,7 @@ function renderDraft() {
 
   if (resume.summary) {
     doc.push(Object.assign(document.createElement("h4"), { textContent: "Summary" }));
-    const summary = editable("div", "", (t) => { resume.summary = t; edited(); });
-    // Changed sentences marked inside the summary; the rest is plain.
-    let html = escapeHtml(resume.summary);
-    for (const c of changes.filter((x) => x.section === "Summary")) {
-      const at = escapeHtml(c.proposed);
-      if (at && html.includes(at)) html = html.replace(at, `<mark class="chg" title="${escapeHtml(c.type === "Addition" ? "Added for this job" : `Was: ${c.original}`)}">${at}</mark>`);
-    }
-    summary.innerHTML = html;
-    doc.push(summary);
+    doc.push(editable("div", resume.summary, (t) => { resume.summary = t; edited(); }, { before: before.summary }));
   }
 
   if ((resume.experience || []).length) doc.push(Object.assign(document.createElement("h4"), { textContent: "Experience" }));
@@ -428,8 +497,7 @@ function renderDraft() {
     line.innerHTML = `${escapeHtml([role.role, role.company].filter(Boolean).join(" – "))} <span>${escapeHtml(role.period || "")}</span>`;
     const list = document.createElement("ul");
     (role.bullets || []).forEach((bullet, b) => {
-      const changed = changes.find((c) => c.section === "Experience" && c.experienceIndex === i && c.bulletIndex === b);
-      list.append(editable("li", bullet, (t) => { role.bullets[b] = t; edited(); }, { changed }));
+      list.append(editable("li", bullet, (t) => { role.bullets[b] = t; edited(); }, { before: before.bullets[`${i}:${b}`] ?? null }));
     });
     doc.push(line, list);
   });
@@ -439,8 +507,7 @@ function renderDraft() {
     const skills = document.createElement("div");
     skills.className = "gen-skills";
     resume.skills.forEach((skill, k) => {
-      const changed = changes.find((c) => c.section === "Skills" && c.skillIndex === k);
-      skills.append(editable("span", skill, (t) => { resume.skills[k] = t; edited(); }, { changed }));
+      skills.append(editable("span", skill, (t) => { resume.skills[k] = t; edited(); }, { before: before.skills[k] ?? null }));
     });
     doc.push(skills);
   }
@@ -480,6 +547,7 @@ async function generate() {
   }
   $("saveJob").textContent = "Saved ✓";
   draft = { key: jobKey(job.url), jobId: r.data.jobId, title: job.title, company: job.company, resume: r.data.resume, changes: r.data.changes, realGaps: r.data.realGaps, saved: false };
+  draft.before = linesBefore(draft);
   await keepDraft();
   showGenerateLabel();
   renderDraft();

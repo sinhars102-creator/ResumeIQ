@@ -20,6 +20,7 @@ Change wording only. The candidate can't answer questions now, so use only facts
 What to do:
 - Rewrite summary sentences, bullets and skills where the resume already shows what the job asks for but undersells it or uses different terms.
 - Every edit must bring its line closer to a specific requirement in the job description. Don't make edits that only fix spacing, punctuation or grammar.
+- Change the words that matter: swap in the JD's term for what the candidate did, or move the most relevant part first. Never tack on a vague clause that adds no fact, like "as part of the product roadmap", "aligning features with product strategy", "ensuring scalability" or "to drive business growth".
 - Make the edits with the most impact on this application, up to ${MAX_EDITS}. Leave lines that already fit alone. Fewer, meaningful edits beat many small ones.
 - Separately, list the real gaps: requirements the candidate lacks (years, certifications, domains, tools) that rewording can't fix. Never paper over a real gap in an edit.
 
@@ -57,6 +58,35 @@ function parse(text) {
   };
 }
 
+// Vague add-ons: clauses that name a JD theme without stating anything the candidate did.
+const VAGUE_ADDONS = [
+  /\bas (a )?part of\b/, /\balign(ing|ed|s)?\b[^.;]*\bwith\b/, /\bin (line|alignment|keeping) with\b/, /\bcontribut(e|es|ed|ing) to\b/,
+  /\bensur(e|es|ed|ing)\b/, /\bleverag(e|es|ed|ing)\b/, /\bto (drive|support|enable|fuel|deliver) (business|product|company|strategic|overall|long-term)\b/,
+  /\bstrategic(ally)?\b/, /\bholistic(ally)?\b/, /\bseamless(ly)?\b/, /\bkey (business|product) (goals|objectives|priorities)\b/,
+];
+
+/** Runs of words in `after` that aren't in `before` (word-level LCS), e.g. the clause an edit tacked on. */
+function addedRuns(before, after) {
+  const a = String(before || "").split(/\s+/).filter(Boolean);
+  const b = String(after || "").split(/\s+/).filter(Boolean);
+  const key = (w) => w.toLowerCase().replace(/[^a-z0-9%$₹+]/g, "");
+  const lcs = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) {
+    lcs[i][j] = key(a[i]) === key(b[j]) ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  }
+  const runs = [];
+  let run = [];
+  for (let i = 0, j = 0; j < b.length;) {
+    if (i < a.length && key(a[i]) === key(b[j])) {
+      if (run.length) runs.push(run.join(" ")), (run = []);
+      i++, j++;
+    } else if (i < a.length && lcs[i + 1][j] >= lcs[i][j + 1]) i++;
+    else run.push(b[j++]);
+  }
+  if (run.length) runs.push(run.join(" "));
+  return runs;
+}
+
 const words = (text) => String(text || "").toLowerCase().match(/[a-z0-9]+/g)?.join(" ") || "";
 
 /**
@@ -70,6 +100,10 @@ function problemsWith(edit, context) {
   const problems = checkEdit(edit, context);
   if (/\[[^\]]*\]/.test(String(edit.proposed || ""))) problems.push("uses a [placeholder] – use only facts in the resume, or skip this edit");
   if (edit.type === "Rewrite" && words(edit.original) === words(edit.proposed)) problems.push("only changes spacing or punctuation – make a change that targets the job, or skip this edit");
+  const added = (edit.type === "Rewrite" ? addedRuns(edit.original, edit.proposed) : [edit.proposed]).join(" … ").toLowerCase();
+  const original = String(edit.original || "").toLowerCase();
+  const vague = VAGUE_ADDONS.filter((re) => re.test(added) && !re.test(original));
+  if (vague.length) problems.push(`adds a vague clause that states no fact ("${added.slice(0, 80)}") – change the wording that matters, or skip this edit`);
   return problems;
 }
 

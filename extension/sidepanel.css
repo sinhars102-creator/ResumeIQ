@@ -52,7 +52,8 @@ body.on-application .job-form.collapsed { display: none; }
 .gen-doc [contenteditable] { border-radius: 4px; outline: none; padding: 1px 2px; }
 .gen-doc [contenteditable]:hover { box-shadow: 0 0 0 1px #D3CFC5; }
 .gen-doc [contenteditable]:focus { box-shadow: 0 0 0 2px var(--accent); }
-.gen-doc .chg, .gen-key { background: #DCEBFA; color: inherit; border-radius: 3px; }
+.gen-doc .chg, .gen-key { background: #DCEBFA; color: inherit; border-radius: 3px; padding: 0 2px; }
+del.gone { color: #8A9396; text-decoration: line-through; text-decoration-color: #B5534A; }
 .gen-skills { display: flex; flex-wrap: wrap; gap: 6px; }
 .gen-skills span { padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; }
 .gen-gaps { display: flex; flex-direction: column; gap: 4px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg); }
