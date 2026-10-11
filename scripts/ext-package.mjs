@@ -31,5 +31,6 @@ manifest.content_scripts = manifest.content_scripts
 writeFileSync(`${dir}/manifest.json`, `${JSON.stringify(manifest, null, 2)}\n`);
 rmSync(`${dir}/linkedinCard.js`);
 
-execFileSync("zip", ["-qr", "ResumeIQ-extension.zip", "ResumeIQ"], { cwd: out });
+// manifest.json at the zip's root, as the Chrome Web Store requires (unzipping makes a folder to load).
+execFileSync("zip", ["-qr", "../ResumeIQ-extension.zip", "."], { cwd: dir });
 console.log(`dist-extension/ResumeIQ-extension.zip – for ${site}`);

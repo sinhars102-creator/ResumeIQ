@@ -7,7 +7,8 @@
   "host_permissions": ["<all_urls>"],
   "background": { "service_worker": "background.js", "type": "module" },
   "side_panel": { "default_path": "sidepanel.html" },
-  "action": { "default_title": "Open ResumeIQ" },
+  "icons": { "16": "icons/icon16.png", "32": "icons/icon32.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "action": { "default_title": "Open ResumeIQ", "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png" } },
   "content_scripts": [
     {
       "matches": ["http://localhost:5173/*", "https://resume-iq-seven.vercel.app/*"],
