@@ -1,5 +1,6 @@
 import { extractJob, readForm, fillForm, attachFile, formSignal, expandEmployment } from "./pageScripts.js";
 import { jobKey, cachedMatch, cacheMatch } from "./matchCache.js";
+import { CONFIG } from "./config.js";
 
 const $ = (id) => document.getElementById(id);
 const api = (path, options) => chrome.runtime.sendMessage({ type: "api", path, options });
@@ -138,7 +139,7 @@ async function refresh() {
   for (const id of ["jobCard", "applyCard"]) $(id).hidden = !auth.signedIn;
   // Greenhouse's dropdowns ignore extension input, so its applications go through Easy Apply.
   const ghId = auth.signedIn ? greenhouseJobId(tab?.url || "") : null;
-  $("easyApplyCard").hidden = !ghId;
+  $("easyApplyCard").hidden = !ghId || CONFIG.features?.easyApply === false; // off in tester builds (needs the worker server)
   $("openEasyApply").onclick = () => chrome.tabs.create({ url: `${auth.appUrl}?easyApply=${encodeURIComponent(ghId)}` });
   if (auth.signedIn && /^https?:/.test(tab?.url || "")) {
     const loading = loadResumes();

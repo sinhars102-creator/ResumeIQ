@@ -19,6 +19,13 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 // API origin: VITE_API_URL if set; otherwise the local dev server, or the same origin in
 // production builds (the API is deployed alongside the frontend at /api on Vercel).
 const API_BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://localhost:3001" : "");
+// Unfinished features: on when running locally, off on the live site unless its env turns them on
+// (VITE_FEATURE_EASY_APPLY=1, VITE_FEATURE_AUTO_APPLY=1).
+const feature = (flag) => (flag ?? (import.meta.env.DEV ? "1" : "0")) === "1";
+const FEATURES = {
+  easyApply: feature(import.meta.env.VITE_FEATURE_EASY_APPLY), // submitting Greenhouse applications needs the worker server
+  autoApply: feature(import.meta.env.VITE_FEATURE_AUTO_APPLY), // "Apply with this resume" on Preview (RES-54, in progress)
+};
 
 // The marketing landing page, served by this app at "/" (the product lives at /app).
 const HOME_URL = "/";
@@ -3151,7 +3158,7 @@ export default function ResumeIQ() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const jobId = params.get("easyApply");
-    if (!jobId || !/^gh-[A-Za-z0-9_-]+-\d+$/.test(jobId)) return;
+    if (!FEATURES.easyApply || !jobId || !/^gh-[A-Za-z0-9_-]+-\d+$/.test(jobId)) return;
     params.delete("easyApply");
     window.history.replaceState({}, "", `${window.location.pathname}${params.size ? `?${params}` : ""}`);
     fetch(`${API_BASE.replace(/\/$/, "")}/api/easy-apply/form?jobId=${encodeURIComponent(jobId)}`)
@@ -4633,7 +4640,7 @@ body {
                               </div>
               </details>
 
-              {sortedJobs.length > 0 && (
+              {FEATURES.easyApply && sortedJobs.length > 0 && (
                 <div style={styles.jobFilterRow}>
                   <button
                     type="button"
@@ -4694,7 +4701,7 @@ body {
                           <div style={{ minWidth: 0, flex: 1 }}>
                             <div style={styles.jobTagRow}>
                               {posted && <span style={styles.jobTag}>{posted}</span>}
-                              {isEasyApplyJob(job) && <span style={styles.easyApplyTag}>Easy Apply</span>}
+                              {FEATURES.easyApply && isEasyApplyJob(job) && <span style={styles.easyApplyTag}>Easy Apply</span>}
                               {job.badge && <span style={styles.badgePill(job.badge)}>{job.badge}</span>}
                               {sourceLabel(job.source) && <span style={styles.sourcePill}>{sourceLabel(job.source)}</span>}
                             </div>
@@ -4764,7 +4771,7 @@ body {
                           >
                             Analyze my fit →
                           </button>
-                          {isEasyApplyJob(job) && (
+                          {FEATURES.easyApply && isEasyApplyJob(job) && (
                             <button
                               type="button"
                               style={styles.primaryButton}
@@ -5276,7 +5283,7 @@ body {
                   )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                  {selectedJob && (() => {
+                  {FEATURES.autoApply && selectedJob && (() => {
                     const busy = applyRun.jobId === selectedJob.id && (applyRun.status === "saving" || applyRun.status === "running");
                     const done = applyRun.jobId === selectedJob.id && applyRun.status === "submitted";
                     return (

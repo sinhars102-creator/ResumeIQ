@@ -37,3 +37,4 @@ server/data/
 
 # Chrome extension local config (generated from .env)
 extension/config.js
+dist-extension
