@@ -13,6 +13,11 @@
       "matches": ["http://localhost:5173/*", "https://resume-iq-seven.vercel.app/*"],
       "js": ["bridge.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://www.linkedin.com/*"],
+      "js": ["linkedinCard.js"],
+      "run_at": "document_idle"
     }
   ]
 }

@@ -2,6 +2,8 @@
 // and calls the ResumeIQ API for the side panel.
 import { CONFIG } from "./config.js";
 import { autoApply } from "./autoApply.js";
+import { extractJob } from "./pageScripts.js";
+import { jobKey, cachedMatch, cacheMatch } from "./matchCache.js";
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
@@ -95,6 +97,32 @@ async function api(path, { method = "GET", body } = {}) {
 
 const runs = new Map(); // job id → its auto apply's latest state (with the application's tab)
 
+/**
+ * The match card on a LinkedIn job page (linkedinCard.js): read the open job from the tab and score
+ * it – from the cache the side panel shares, else the API. { status: ok | waiting | signin | error }.
+ */
+async function cardMatch(tab, force) {
+  if (!(await accessToken())) return { status: "signin" };
+  let job;
+  try {
+    [{ result: job }] = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractJob });
+  } catch {
+    return { status: "waiting" };
+  }
+  if (!job?.title || (job.description || "").length < 150) return { status: "waiting" }; // still loading
+  const key = jobKey(job.url);
+  let match = !force && key ? await cachedMatch(key) : null;
+  if (!match) {
+    const r = await api("/api/ext/match", { method: "POST", body: { title: job.title, company: job.company, description: job.description } });
+    if (r.status === 401) return { status: "signin" };
+    if (!r.ok) return { status: "error", message: r.status === 0 ? "ResumeIQ can't be reached right now." : r.data.error || "Something went wrong." };
+    match = r.data;
+    if (key) await cacheMatch(key, match);
+  }
+  const { drafts = {} } = await chrome.storage.local.get("drafts");
+  return { status: "ok", match, hasDraft: !!(key && drafts[key]) };
+}
+
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   if (msg.type === "auth:set") {
     getSession().then((current) => {
@@ -119,6 +147,19 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   if (msg.type === "api") {
     api(msg.path, msg.options).then(reply);
     return true;
+  }
+  if (msg.type === "card:match" && _sender.tab) {
+    cardMatch(_sender.tab, !!msg.force).then(reply);
+    return true;
+  }
+  // A match card button: open the side panel (first – it must happen in response to the click), and
+  // tell it what to do: "generate" (Generate resume) or "details".
+  if (msg.type === "card:open" && _sender.tab) {
+    const tabId = _sender.tab.id;
+    chrome.sidePanel.open({ tabId }).catch(() => {});
+    const panelAction = { action: msg.action, tabId, at: Date.now() };
+    chrome.storage.session.set({ panelAction }).then(() => chrome.runtime.sendMessage({ type: "panel:action" }).catch(() => {}));
+    return false;
   }
   // Auto apply, started from the ResumeIQ website (via bridge.js); progress goes back to that tab.
   if (msg.type === "autoapply:start" && msg.job?.jobId) {

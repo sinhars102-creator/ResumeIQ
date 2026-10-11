@@ -1,4 +1,5 @@
 import { extractJob, readForm, fillForm, attachFile, formSignal, expandEmployment } from "./pageScripts.js";
+import { jobKey, cachedMatch, cacheMatch } from "./matchCache.js";
 
 const $ = (id) => document.getElementById(id);
 const api = (path, options) => chrome.runtime.sendMessage({ type: "api", path, options });
@@ -19,38 +20,8 @@ function status(el, text, kind = "") {
   el.className = `status ${kind}`;
 }
 
-const MATCH_CACHE_DAYS = 7;
-const MATCHES_KEY = "matches-v2"; // scores from the website's scorer (v1 used a different one)
 let currentMatch = null; // the score shown for the job on this page
 let readSeq = 0; // drops results for a job the user has already moved away from
-
-/** One key per role: LinkedIn's job id, else the page address without its query. */
-function jobKey(url) {
-  try {
-    const u = new URL(url);
-    if (u.hostname.endsWith("linkedin.com")) {
-      const id = u.pathname.match(/\/jobs\/view\/(?:[^/]*-)?(\d{6,})/)?.[1] || u.searchParams.get("currentJobId");
-      if (id) return `linkedin:${id}`;
-    }
-    return `${u.origin}${u.pathname}`.replace(/\/+$/, "");
-  } catch {
-    return null;
-  }
-}
-
-async function cachedMatch(key) {
-  const { [MATCHES_KEY]: matches = {} } = await chrome.storage.local.get(MATCHES_KEY);
-  const hit = matches[key];
-  return hit && Date.now() - hit.at < MATCH_CACHE_DAYS * 864e5 ? hit.match : null;
-}
-
-async function cacheMatch(key, match) {
-  const { [MATCHES_KEY]: matches = {} } = await chrome.storage.local.get(MATCHES_KEY);
-  matches[key] = { at: Date.now(), match };
-  // Keep the newest 300.
-  const keep = Object.entries(matches).sort((a, b) => b[1].at - a[1].at).slice(0, 300);
-  await chrome.storage.local.set({ [MATCHES_KEY]: Object.fromEntries(keep) });
-}
 
 function matchPending(text) {
   $("matchCard").hidden = false;
@@ -175,6 +146,7 @@ async function refresh() {
     await readJob();
     await loading;
     if (document.body.classList.contains("on-application")) await pickGeneratedResume(tab.url);
+    await runPanelAction();
   } else document.body.classList.remove("on-application");
 }
 
@@ -556,6 +528,7 @@ async function generate() {
   await keepDraft();
   showGenerateLabel();
   renderDraft();
+  if (tabId != null) chrome.tabs.sendMessage(tabId, { type: "card:refresh" }).catch(() => {}); // the LinkedIn card's button
 }
 
 $("generate").addEventListener("click", async () => {
@@ -832,7 +805,23 @@ chrome.tabs.onUpdated.addListener((id, info) => {
     urlTimer = setTimeout(refresh, 1500);
   }
 });
-chrome.runtime.onMessage.addListener((msg) => { if (msg.type === "auth:changed") refresh(); });
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === "auth:changed") refresh();
+  if (msg.type === "panel:action") runPanelAction();
+});
+
+/**
+ * A button on the LinkedIn match card opened the panel for this tab: "generate" runs Generate resume
+ * (or opens the one already made), "details" shows the match. Waits for the job to be read first.
+ */
+async function runPanelAction() {
+  const { panelAction } = await chrome.storage.session.get("panelAction");
+  if (!panelAction || panelAction.tabId !== tabId || Date.now() - panelAction.at > 60_000) return;
+  if ($("jobCard").hidden || !$("title").value) return; // not read yet: refresh() calls this again
+  await chrome.storage.session.remove("panelAction");
+  if (panelAction.action === "generate") $("generate").click();
+  else $("matchCard").scrollIntoView({ behavior: "smooth", block: "start" });
+}
 // Some sites open the form on the same page when Apply is clicked, and multi-page forms (Workday)
 // move between steps without a new address: keep checking, and start each new step afresh.
 let lastStep = null;
