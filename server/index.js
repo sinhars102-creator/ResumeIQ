@@ -32,6 +32,7 @@ function sendLLMError(res, err, tag) {
   return res.status(502).json({ error: "The AI service had a problem handling that request. Please try again." });
 }
 import { runAssistantTurn, listGaps } from "./assistant.js";
+import { generateResume } from "./generateResume.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootEnv = resolve(__dirname, "../.env");
@@ -220,6 +221,19 @@ app.post("/api/assistant/gaps", async (req, res) => {
     res.json(await listGaps({ resume, job }));
   } catch (err) {
     sendLLMError(res, err, "assistant-gaps");
+  }
+});
+
+// The Tailor step's wording pass: the resume reworded for the job (wording only), real gaps listed.
+app.post("/api/generate-resume", async (req, res) => {
+  const { resume, job } = req.body || {};
+  if (!resume || typeof resume !== "object" || !job?.jd) {
+    return res.status(400).json({ error: "resume and job (with jd) are required" });
+  }
+  try {
+    res.json(await generateResume({ resume, job: { role: job.role, company: job.company, jd: job.jd } }));
+  } catch (err) {
+    sendLLMError(res, err, "generate-resume");
   }
 });
 

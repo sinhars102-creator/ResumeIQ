@@ -477,8 +477,12 @@ function renderDraft() {
   $("genIntro").innerHTML = changes.length
     ? `ResumeIQ changed ${changes.length} line${changes.length === 1 ? "" : "s"} for this job: new words in <span class="gen-key">light blue</span>, removed words <del class="gone">struck through</del>. Click any line to edit it.`
     : "Your resume already says what this job looks for in its words – there was nothing worth rewording. Click any line to edit it yourself.";
-  $("genGapsBox").hidden = !realGaps.length;
-  $("genGaps").replaceChildren(...realGaps.map((g) => Object.assign(document.createElement("li"), { textContent: g })));
+  // Gaps are { text, mustHave } (drafts from before were plain text). The assistant is offered only
+  // when a must-have is missing; nice-to-haves are just listed.
+  const gaps = realGaps.map((g) => (typeof g === "string" ? { text: g, mustHave: false } : g));
+  $("genGapsBox").hidden = !gaps.length;
+  $("genGaps").replaceChildren(...gaps.map((g) => Object.assign(document.createElement("li"), { textContent: g.mustHave ? `Must-have: ${g.text}` : g.text })));
+  $("genAssistant").hidden = !gaps.some((g) => g.mustHave);
 
   const doc = [];
   const head = document.createElement("div");

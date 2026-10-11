@@ -24,7 +24,7 @@ What to do:
 - Every edit must bring its line closer to a specific requirement in the job description. Don't make edits that only fix spacing, punctuation or grammar.
 - Change the words that matter: swap in the JD's term for what the candidate did, or move the most relevant part first. Never tack on a vague clause that adds no fact, like "as part of the product roadmap", "aligning features with product strategy", "ensuring scalability" or "to drive business growth".
 - Make the edits with the most impact on this application, up to ${MAX_EDITS}. Leave lines that already fit alone. Fewer, meaningful edits beat many small ones.
-- Separately, list the real gaps: requirements the candidate lacks (years, certifications, domains, tools) that rewording can't fix. Never paper over a real gap in an edit.
+- Separately, list the real gaps: requirements the candidate lacks (years, certifications, domains, tools) that rewording can't fix. Never paper over a real gap in an edit. Mark each one mustHave: true when the JD states it as required (must-have, minimum, "you have"), false when it's preferred or a nice-to-have.
 
 Hard rules for every edit:
 1. "original" must be copied EXACTLY from the resume: the whole summary or one full sentence of it, one bullet, or for Skills one existing skill. For an Addition, original is "".
@@ -35,6 +35,7 @@ Hard rules for every edit:
 6. Mirror the JD's exact terminology only where the resume genuinely supports it.
 7. A Skills Addition must be a single skill the resume already shows evidence of. An Experience Addition must restate something the resume already shows for that role.
 8. One edit per original line.
+9. To add to the summary, rewrite one of its sentences – no Summary Additions.
 
 Respond with ONLY a JSON object:
 {
@@ -49,14 +50,18 @@ Respond with ONLY a JSON object:
       "why": "one sentence: the evidence-based reason"
     }
   ],
-  "realGaps": ["short and specific, e.g. 'Asks 8+ years in payments; your resume shows 5'", ...up to 5]
+  "realGaps": [{ "text": "short and specific, e.g. 'Asks 8+ years in payments; your resume shows 5'", "mustHave": true | false }, ...up to 5]
 }`;
 
 function parse(text) {
   const parsed = JSON.parse(String(text || "").replace(/```json|```/g, "").trim());
   return {
     edits: (Array.isArray(parsed.edits) ? parsed.edits : []).filter((e) => e && typeof e === "object").slice(0, MAX_EDITS),
-    realGaps: (Array.isArray(parsed.realGaps) ? parsed.realGaps : []).filter((g) => typeof g === "string" && g.trim()).slice(0, 5).map((g) => g.trim().slice(0, 200)),
+    realGaps: (Array.isArray(parsed.realGaps) ? parsed.realGaps : [])
+      .map((g) => (typeof g === "string" ? { text: g } : g))
+      .filter((g) => typeof g?.text === "string" && g.text.trim())
+      .slice(0, 5)
+      .map((g) => ({ text: g.text.trim().slice(0, 200), mustHave: g.mustHave === true })),
   };
 }
 
@@ -97,6 +102,7 @@ const words = (text) => String(text || "").toLowerCase().match(/[a-z0-9]+/g)?.jo
  */
 function problemsWith(edit, context) {
   if (edit.type === "Removal") return ["removals aren't allowed here – rewrite the line instead"];
+  if (edit.section === "Summary" && edit.type === "Addition") return ["add to the summary by rewriting one of its sentences instead"];
   // Models like non-breaking hyphens ("Day‑7"); the resume has plain ones, and checks compare text.
   edit.proposed = String(edit.proposed || "").replace(/[\u2010\u2011]/g, "-");
   const problems = checkEdit(edit, context);
@@ -184,10 +190,23 @@ function applyEdits(resume, edits) {
   return { resume: out, changes };
 }
 
+const SENTENCES = /(?<=[.!?])\s+(?=[A-Z])/;
+
+/** The untidied text a change replaces: the bullet, skill or summary (sentence) in the stored resume. */
+function rawLine(resume, change) {
+  if (change.type === "Addition") return "";
+  if (change.section === "Experience") return resume.experience?.[change.experienceIndex]?.bullets?.[change.bulletIndex] ?? change.original;
+  if (change.section === "Skills") return resume.skills?.[change.skillIndex] ?? change.original;
+  const summary = String(resume.summary || "");
+  if (tidy(summary) === change.original) return summary;
+  return summary.split(SENTENCES).find((sentence) => tidy(sentence) === change.original) ?? change.original;
+}
+
 /**
  * @param resume the candidate's parsed resume (profile.resume)
  * @param job    { role, company, jd }
- * @returns {{ resume, changes, realGaps }}
+ * @returns {{ resume, changes, realGaps }} – changes: { section, type, original, rawOriginal, proposed, why,
+ *   jdRequirement, experienceIndex?, bulletIndex?, skillIndex? }; realGaps: { text, mustHave }
  */
 export async function generateResume({ resume: original, job }) {
   const resume = tidyResume(original);
@@ -238,5 +257,9 @@ Return ONLY the JSON object.`;
       jdRequirement: String(edit.jdRequirement || "").trim(),
       why: String(edit.why || "").trim(),
     }));
-  return { ...applyEdits(resume, passing), realGaps: reply.realGaps };
+  const applied = applyEdits(resume, passing);
+  // The website applies and undoes changes on the resume as it stores it (before tidying), so each
+  // change also carries the line it replaces in that form.
+  for (const c of applied.changes) c.rawOriginal = rawLine(original, c);
+  return { ...applied, realGaps: reply.realGaps };
 }

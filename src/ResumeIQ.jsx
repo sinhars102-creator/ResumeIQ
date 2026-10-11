@@ -1694,7 +1694,11 @@ function applyApprovedChangesClientSide(resumeData, approvedSuggestions) {
 
     if (section === "Skills") {
       if (type === "Rewrite" && original && proposed) {
-        resume.skills = proposed.split(/[,·|]|\s+\|\s+/).map((x) => x.trim()).filter(Boolean);
+        // One skill rewritten (what the assistant and the wording pass propose); else the whole list.
+        const skills = resume.skills || [];
+        const idx = skills.findIndex((x) => typeof x === "string" && x.trim() === original.trim());
+        if (idx !== -1) skills[idx] = proposed.trim();
+        else resume.skills = proposed.split(/[,·|]|\s+\|\s+/).map((x) => x.trim()).filter(Boolean);
       } else if (type === "Addition" && proposed) {
         resume.skills = resume.skills || [];
         resume.skills.push(proposed.trim());
@@ -2679,6 +2683,227 @@ function DiffTextarea({ original, value, onChange }) {
   );
 }
 
+/** Word-level changes from `before` to `after` (punctuation/case-only differences count as unchanged). */
+function wordChanges(before, after) {
+  const a = String(before || "").split(/\s+/).filter(Boolean);
+  const b = String(after || "").split(/\s+/).filter(Boolean);
+  const key = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}%$₹+]/gu, "");
+  const lcs = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--) lcs[i][j] = key(a[i]) === key(b[j]) ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  const parts = [];
+  const push = (kind, word) => {
+    const last = parts[parts.length - 1];
+    if (last?.kind === kind) last.text += ` ${word}`;
+    else parts.push({ kind, text: word });
+  };
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && key(a[i]) === key(b[j])) {
+      push("same", b[j]);
+      i++;
+      j++;
+    } else if (i < a.length && (j === b.length || lcs[i + 1][j] >= lcs[i][j + 1])) push("removed", a[i++]); // removed words read first
+    else push("added", b[j++]);
+  }
+  return parts;
+}
+
+const changeAddedStyle = { background: "color-mix(in srgb, #3B82F6 18%, transparent)", borderRadius: 3, padding: "0 2px" };
+const changeRemovedStyle = { color: "var(--rq-text-2)", textDecoration: "line-through", textDecorationColor: "var(--rq-danger)" };
+
+/** `after` shown as track changes against `before`: new words in light blue, removed words struck through. */
+function TrackChanges({ before, after }) {
+  if (before == null || before === after) return after;
+  return wordChanges(before, after).map((part, k) => (
+    <span key={k}>
+      {k > 0 && " "}
+      {part.kind === "same" ? part.text : <span style={part.kind === "added" ? changeAddedStyle : changeRemovedStyle}>{part.text}</span>}
+    </span>
+  ));
+}
+
+/** A line shown as track changes; click to edit it as plain text (committed when you click away). */
+function ChangeableLine({ text, before, onCommit, as: Tag = "div", style }) {
+  const [editing, setEditing] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!editing || !ref.current) return;
+    ref.current.textContent = text;
+    ref.current.focus();
+    // Caret at the end.
+    const range = document.createRange();
+    range.selectNodeContents(ref.current);
+    range.collapse(false);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+  }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!editing) {
+    return (
+      <Tag className="rq-editable" style={{ ...style, cursor: "text" }} title="Click to edit" onClick={() => setEditing(true)}>
+        <TrackChanges before={before} after={text} />
+      </Tag>
+    );
+  }
+  return (
+    <Tag
+      ref={ref}
+      contentEditable
+      suppressContentEditableWarning
+      className="rq-editable"
+      style={style}
+      onBlur={(e) => {
+        setEditing(false);
+        const next = (e.currentTarget.textContent || "").replace(/\s+/g, " ").trim();
+        if (next && next !== text) onCommit(next);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
+        if (e.key === "Escape") setEditing(false);
+      }}
+    />
+  );
+}
+
+const undoButtonStyle = { border: "none", background: "none", padding: "0 2px", color: "var(--rq-accent)", fontSize: 11.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", textDecoration: "underline" };
+
+/**
+ * The Tailor step's resume: `working` (the resume with accepted edits) shown as track changes
+ * against `base` (the resume as uploaded). Every changed line has Undo; any summary, bullet or role
+ * title line can be clicked and edited – an edit becomes an accepted edit like the others.
+ * `edits` are the accepted suggestions: { id, section, type, original, displayOriginal?, proposed }.
+ */
+function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
+  if (!working) return null;
+  const summaryEdits = edits.filter((e) => e.section === "Summary");
+  // The summary as it was, with the wording pass's tidied text for the sentences it changed (so
+  // spacing fixes don't show as changes).
+  let summaryBefore = base?.summary || "";
+  for (const e of summaryEdits) if (e.displayOriginal && e.original) summaryBefore = summaryBefore.replace(e.original, e.displayOriginal);
+  const editFor = (section, text) => edits.find((e) => e.section === section && e.proposed === text);
+  const beforeOf = (e) => (e.type === "Addition" ? "" : e.displayOriginal ?? e.original);
+  const snippet = (text) => (text.length > 60 ? `${text.slice(0, 57)}…` : text);
+
+  return (
+    <div style={styles.resumePaper}>
+      <div style={styles.resumeHeaderRow}>
+        <div style={styles.resumeHeaderText}>
+          <div style={styles.resumeNameText}>{working.name}</div>
+          <div style={styles.resumeTitleText}>{working.title}</div>
+          <div style={styles.resumeContactText}>{working.contact}</div>
+        </div>
+      </div>
+      <hr style={styles.resumeHr} />
+      {working.summary && (
+        <>
+          <div style={styles.resumeSectionTitle}>Summary</div>
+          <ChangeableLine
+            text={working.summary}
+            before={summaryBefore}
+            style={styles.resumeBodyText}
+            onCommit={(next) => onEditLine({ section: "Summary", original: working.summary, proposed: next })}
+          />
+          {summaryEdits.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", marginTop: 4 }}>
+              {summaryEdits.map((e) => (
+                <button key={e.id} type="button" style={undoButtonStyle} title={`Put back: ${beforeOf(e)}`} onClick={() => onUndo(e.id)}>
+                  Undo “{snippet(e.proposed)}”
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      <div style={styles.resumeSectionTitle}>Experience</div>
+      {(working.experience || []).map((exp, idx) => (
+        <div key={idx}>
+          <div style={styles.resumeExpHeaderRow}>
+            <div style={styles.resumeExpTitle}>
+              {exp.role} · {exp.company}
+            </div>
+            <div style={styles.resumeExpPeriod}>{exp.period}</div>
+          </div>
+          <ul style={styles.resumeBullets}>
+            {(exp.bullets || []).map((b, i) => {
+              const edit = editFor("Experience", b);
+              return (
+                <li key={i} style={{ ...styles.resumeBullet }}>
+                  <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                    <ChangeableLine
+                      text={b}
+                      before={edit ? beforeOf(edit) : null}
+                      style={{ flex: 1 }}
+                      onCommit={(next) => onEditLine({ section: "Experience", experienceIndex: idx, original: b, proposed: next, edit })}
+                    />
+                    {edit && (
+                      <button type="button" style={undoButtonStyle} title={edit.type === "Addition" ? "Remove this added bullet" : `Put back: ${beforeOf(edit)}`} onClick={() => onUndo(edit.id)}>
+                        Undo
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+
+      <div style={styles.resumeSectionTitle}>Education</div>
+      {(working.education || []).map((ed, idx) => (
+        <div key={idx} style={styles.resumeEducationRow}>
+          <strong>{ed.degree}</strong> · {ed.school} · {ed.year}
+        </div>
+      ))}
+
+      {(working.skills || []).length > 0 && (
+        <>
+          <div style={styles.resumeSectionTitle}>Skills</div>
+          <div style={styles.resumeSkillsWrap}>
+            {working.skills.map((skill, idx) => {
+              const edit = editFor("Skills", skill);
+              return (
+                <div key={idx} style={{ ...styles.resumeSkillChip, ...(edit ? { display: "flex", alignItems: "center", gap: 4 } : {}) }}>
+                  <TrackChanges before={edit ? beforeOf(edit) : null} after={skill} />
+                  {edit && (
+                    <button type="button" style={{ ...undoButtonStyle, textDecoration: "none" }} title={edit.type === "Addition" ? "Remove this added skill" : `Put back: ${beforeOf(edit)}`} onClick={() => onUndo(edit.id)}>
+                      ×
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+      {(working.certifications || []).length > 0 && (
+        <>
+          <div style={styles.resumeSectionTitle}>Certifications</div>
+          <ul style={styles.resumeBullets}>
+            {working.certifications.map((c, idx) => (
+              <li key={idx} style={styles.resumeBullet}>{c}</li>
+            ))}
+          </ul>
+        </>
+      )}
+      {(working.achievements || []).length > 0 && (
+        <>
+          <div style={styles.resumeSectionTitle}>Achievements</div>
+          <ul style={styles.resumeBullets}>
+            {working.achievements.map((a, idx) => (
+              <li key={idx} style={styles.resumeBullet}>{a}</li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ResumeDocument({ resume, highlights = [], dim = false, afterMode = false, editable = false, onEdit }) {
   if (!resume || typeof resume !== "object") {
     return (
@@ -2959,6 +3184,11 @@ export default function ResumeIQ() {
   const [pdfFormat, setPdfFormat] = useState(() => ({ ...DEFAULT_PDF_FORMAT }));
   // Tailoring assistant conversation for the selected job: { messages, decisions }.
   const [assistantChat, setAssistantChat] = useState({ messages: [], decisions: [] });
+  // The Tailor step's wording pass for the open job: loading → done (with the gaps it can't fix) or error.
+  const [generation, setGeneration] = useState({ jobId: null, status: "idle", realGaps: [] });
+  // The assistant is offered only when a must-have is missing; shown once the user asks for it.
+  const [showAssistant, setShowAssistant] = useState(false);
+  const tailorJobRef = useRef(null); // the job the Tailor step shows (late wording-pass results for another job are dropped)
   const [openingInBuilder, setOpeningInBuilder] = useState(false);
   const [openInBuilderError, setOpenInBuilderError] = useState(null);
   // Reactive Resume builder embedded in the Updated Resume step: { builderUrl, embeddable }.
@@ -3065,7 +3295,10 @@ export default function ResumeIQ() {
     setSuggestions([]);
     setAssistantChat({ messages: [], decisions: [] });
     setApprovedIds(new Set());
+    setShowAssistant(false);
+    tailorJobRef.current = job.id;
     scoreAgainstJob(job);
+    rewordForJob(job);
   };
 
   // (Declared after the resume state and handleJobAnalyzeClick, which these effects use.)
@@ -3508,6 +3741,81 @@ export default function ResumeIQ() {
     setLoading(false);
     setLoadingMsg("");
     setApplyingChanges(false);
+  };
+
+  /**
+   * The wording pass: the resume reworded for this job (server/generateResume.js), applied as accepted
+   * edits the user can undo. Saved in the browser per (resume, job) so reopening the job doesn't redo it.
+   */
+  const rewordForJob = async (job) => {
+    if (!job?.jd || !resume) return;
+    const cacheKey = `rq-reworded-v1:${resumeHash}:${job.id}:${hashString(job.jd)}`;
+    const applyResult = (data) => {
+      if (tailorJobRef.current !== job.id) return; // the user opened another job meanwhile
+      const edits = (data.changes || []).map((c, i) => ({
+        id: `reworded-${job.id}-${i}`,
+        section: c.section,
+        type: c.type,
+        original: c.rawOriginal ?? c.original, // as the resume stores it, so applying and undoing find it
+        displayOriginal: c.original,
+        proposed: c.proposed,
+        experienceIndex: c.experienceIndex,
+        jdRequirement: c.jdRequirement,
+        why: c.why,
+        title: c.jdRequirement || "Reworded for this job",
+        reworded: true,
+      }));
+      setSuggestions((prev) => [...edits, ...prev.filter((x) => !x.reworded)]);
+      setApprovedIds((prev) => new Set([...prev, ...edits.map((e) => e.id)]));
+      setGeneration({ jobId: job.id, status: "done", realGaps: data.realGaps || [], changed: edits.length });
+    };
+    const cached = readCachedScore(cacheKey);
+    if (cached) return applyResult(cached);
+    setGeneration({ jobId: job.id, status: "loading", realGaps: [] });
+    try {
+      const response = await fetch(`${API_BASE.replace(/\/$/, "")}/api/generate-resume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resume: resumeForAI(resume), job: { role: job.role, company: job.company, jd: job.jd } }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || `the request failed (${response.status})`);
+      writeCachedScore(cacheKey, data);
+      applyResult(data);
+      track("resume_reworded", { changes: (data.changes || []).length, must_have_gaps: (data.realGaps || []).filter((g) => g.mustHave).length });
+    } catch (e) {
+      if (tailorJobRef.current === job.id) setGeneration({ jobId: job.id, status: "error", realGaps: [], error: e.message });
+    }
+  };
+
+  /** Undo one accepted edit: its line goes back to what it was. */
+  const undoEdit = (id) => {
+    setApprovedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+
+  /**
+   * The user edited a line on the Tailor step. A line already changed has that change updated (or
+   * undone, when edited back to the original); any other line gets a new accepted edit.
+   */
+  const editTailoredLine = ({ section, experienceIndex, original, proposed, edit }) => {
+    if (edit) {
+      if (proposed === edit.original || proposed === edit.displayOriginal) return undoEdit(edit.id);
+      setSuggestions((prev) => prev.map((x) => (x.id === edit.id ? { ...x, proposed } : x)));
+      return;
+    }
+    // Your own summary edit replaces your earlier one (it already includes it).
+    const mine = section === "Summary" ? suggestions.find((x) => x.byYou && x.section === "Summary" && approvedIds.has(x.id)) : null;
+    if (mine) {
+      setSuggestions((prev) => prev.map((x) => (x.id === mine.id ? { ...x, proposed } : x)));
+      return;
+    }
+    const id = `yours-${Date.now()}`;
+    setSuggestions((prev) => [...prev, { id, section, type: "Rewrite", original, proposed, experienceIndex, title: "Your edit", byYou: true }]);
+    setApprovedIds((prev) => new Set(prev).add(id));
   };
 
   const handleApplyChanges = async () => {
@@ -4554,8 +4862,8 @@ body {
               <div style={styles.sectionHeader}>
                 <h2 style={styles.sectionTitle}>Tailor your resume</h2>
                 <p style={styles.sectionSubtitle}>
-                  See how you fit this role, then work through the gaps with the
-                  assistant. Accepted edits appear in your resume on the left.
+                  ResumeIQ rewords your resume for this role and marks every change
+                  on the left. Undo any you don't want, or click a line to edit it.
                 </p>
               </div>
 
@@ -4647,11 +4955,7 @@ body {
                 return (
                   <div className="rq-two-col" style={{ ...styles.twoColumn, marginTop: 16 }}>
                     <div style={styles.colLeft}>
-                      <ResumeDocument
-                        resume={workingResume}
-                        highlights={acceptedEdits.map((e) => e.proposed).filter(Boolean)}
-                        afterMode
-                      />
+                      <TailoredResume base={resume} working={workingResume} edits={acceptedEdits} onUndo={undoEdit} onEditLine={editTailoredLine} />
                     </div>
                     <aside style={{ width: 460, maxWidth: "100%", flexShrink: 0, position: "sticky", top: 16, display: "flex", flexDirection: "column", gap: 12 }}>
                 {(() => {
@@ -4689,6 +4993,62 @@ body {
                     </div>
                   );
                 })()}
+                {(() => {
+                  // The wording pass's status, the gaps it can't fix, and – only when a must-have is
+                  // missing – the assistant.
+                  const gen = generation.jobId === selectedJob.id ? generation : { status: "loading", realGaps: [] };
+                  const mustHaves = gen.realGaps.filter((g) => g.mustHave);
+                  const niceToHaves = gen.realGaps.filter((g) => !g.mustHave);
+                  const undone = suggestions.filter((x) => x.reworded && !approvedIds.has(x.id)).length;
+                  const card = { border: "1px solid color-mix(in srgb, var(--rq-text) 10%, transparent)", borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8, background: "var(--rq-surface, transparent)" };
+                  const note = { fontSize: 13, lineHeight: 1.55, color: "var(--rq-text)" };
+                  const small = { fontSize: 12, color: "var(--rq-text-2)", lineHeight: 1.5 };
+                  if (gen.status === "loading") {
+                    return <div style={card}><span style={styles.monoStatus}>Rewording your resume for this job – this can take up to a minute…</span></div>;
+                  }
+                  if (gen.status === "error") {
+                    return (
+                      <div style={card}>
+                        <div style={note}>Couldn't reword your resume for this job ({gen.error}).</div>
+                        <div><button type="button" style={styles.ghostButton} onClick={() => rewordForJob(selectedJob)}>Try again</button></div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div style={card}>
+                      <div style={{ fontWeight: 600, fontSize: 13.5, color: "var(--rq-text)" }}>
+                        {gen.changed ? `${gen.changed} line${gen.changed === 1 ? "" : "s"} reworded for this job` : "Nothing needed rewording"}
+                      </div>
+                      <div style={small}>
+                        {gen.changed
+                          ? <>New words are <span style={changeAddedStyle}>highlighted</span>, removed ones <span style={changeRemovedStyle}>struck through</span>. Only wording changed – nothing you haven't done was added.</>
+                          : "Your resume already says what this job asks for, in its terms."}
+                        {undone > 0 && (
+                          <> {" "}<button type="button" style={undoButtonStyle} onClick={() => setApprovedIds((prev) => new Set([...prev, ...suggestions.filter((x) => x.reworded).map((x) => x.id)]))}>Put back {undone} undone change{undone === 1 ? "" : "s"}</button></>
+                        )}
+                      </div>
+                      {mustHaves.length > 0 && (
+                        <>
+                          <div style={{ ...styles.keyGapsTitle, marginTop: 4 }}>Must-haves your resume doesn't show</div>
+                          <ul style={styles.keyGapsList}>{mustHaves.map((g, i) => <li key={i}>⚠ {g.text}</li>)}</ul>
+                          {!showAssistant && (
+                            <div>
+                              <button type="button" style={styles.primaryButton} onClick={() => setShowAssistant(true)}>Work on these with the assistant</button>
+                            </div>
+                          )}
+                          <div style={small}>Rewording can't add these. If you have the experience, the assistant asks about it and adds it in your words.</div>
+                        </>
+                      )}
+                      {niceToHaves.length > 0 && (
+                        <>
+                          <div style={{ ...styles.keyGapsTitle, marginTop: 4 }}>Nice-to-haves you don't show</div>
+                          <ul style={{ ...styles.keyGapsList, color: "var(--rq-text-2)" }}>{niceToHaves.map((g, i) => <li key={i}>{g.text}</li>)}</ul>
+                        </>
+                      )}
+                    </div>
+                  );
+                })()}
+                {showAssistant && (
                 <TailoringAssistant
                   key={selectedJob.id}
                   job={selectedJob}
@@ -4702,6 +5062,7 @@ body {
                   onContinue={handleApplyChanges}
                   continueLabel={approvedCount ? `Continue with ${approvedCount} edit${approvedCount === 1 ? "" : "s"} →` : "Continue with original resume →"}
                 />
+                )}
                       <details style={{ border: "1px solid color-mix(in srgb, var(--rq-text) 8%, transparent)", borderRadius: 12, padding: "10px 14px", background: "color-mix(in srgb, var(--rq-text) 2%, transparent)" }}>
                         <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--rq-text-2)" }}>Job description</summary>
                         <div style={{ ...styles.jdScrollBox, marginTop: 10 }}>{selectedJob.jd || "No job description available."}</div>
