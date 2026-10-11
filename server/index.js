@@ -32,7 +32,7 @@ function sendLLMError(res, err, tag) {
   return res.status(502).json({ error: "The AI service had a problem handling that request. Please try again." });
 }
 import { runAssistantTurn, listGaps } from "./assistant.js";
-import { generateResume } from "./generateResume.js";
+import { generateResume, draftGapEdits } from "./generateResume.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootEnv = resolve(__dirname, "../.env");
@@ -234,6 +234,19 @@ app.post("/api/generate-resume", async (req, res) => {
     res.json(await generateResume({ resume, job: { role: job.role, company: job.company, jd: job.jd } }));
   } catch (err) {
     sendLLMError(res, err, "generate-resume");
+  }
+});
+
+// Tailor step "core edits": the gaps the user ticked, drafted into their resume with [blanks].
+app.post("/api/draft-gap-edits", async (req, res) => {
+  const { resume, job, gaps } = req.body || {};
+  if (!resume || typeof resume !== "object" || !job?.jd || !Array.isArray(gaps) || !gaps.length) {
+    return res.status(400).json({ error: "resume, job (with jd) and the ticked gaps are required" });
+  }
+  try {
+    res.json(await draftGapEdits({ resume, job: { role: job.role, company: job.company, jd: job.jd }, gaps }));
+  } catch (err) {
+    sendLLMError(res, err, "draft-gap-edits");
   }
 });
 

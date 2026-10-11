@@ -224,7 +224,9 @@ export function checkEdit(edit, context) {
     if (invented.length) problems.push(`introduces numbers not in the resume or the candidate's messages: ${invented.join(", ")} (use a [placeholder] and ask)`);
   }
 
-  if (edit.type !== "Removal") {
+  // allowJdClaims: the candidate ticked this requirement as something they have (generateResume's
+  // gap drafts), so stating it isn't borrowing.
+  if (edit.type !== "Removal" && !context.allowJdClaims) {
     // No borrowed claims: JD terms the resume and the candidate never mention can't be presented as experience.
     const evidence = new Set([...contentTokens(resumeAsText(resume)), ...contentTokens(candidateText), ...contentTokens(original)].map(stem));
     const jdStems = new Set(contentTokens(jd).map(stem));
@@ -254,7 +256,7 @@ export function checkEdit(edit, context) {
     }
   }
 
-  if (edit.section === "Skills" && edit.type === "Addition") {
+  if (edit.section === "Skills" && edit.type === "Addition" && !context.allowJdClaims) {
     const evidence = normalize(`${resumeAsText(resume)}\n${candidateText}`);
     if (!evidence.includes(normalize(proposed))) problems.push(`skill "${proposed}" has no evidence in the resume or the candidate's messages`);
   }

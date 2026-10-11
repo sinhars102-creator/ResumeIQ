@@ -2713,13 +2713,23 @@ function wordChanges(before, after) {
 const changeAddedStyle = { background: "color-mix(in srgb, #3B82F6 18%, transparent)", borderRadius: 3, padding: "0 2px" };
 const changeRemovedStyle = { color: "var(--rq-text-2)", textDecoration: "line-through", textDecorationColor: "var(--rq-danger)" };
 
+const blankStyle = { background: "color-mix(in srgb, var(--rq-warn) 22%, transparent)", borderBottom: "1px dashed var(--rq-warn)", borderRadius: 3, padding: "0 2px", fontStyle: "italic" };
+
+/** [Blanks] left for the user to fill in, marked so they stand out. */
+const BLANK = /(\[[^\]]+\])/;
+function withBlanks(text) {
+  if (!BLANK.test(text)) return text;
+  return text.split(BLANK).map((piece, k) => (BLANK.test(piece) ? <span key={k} style={blankStyle} title="Fill this in">{piece}</span> : piece));
+}
+const countBlanks = (text) => (String(text || "").match(/\[[^\]]+\]/g) || []).length;
+
 /** `after` shown as track changes against `before`: new words in light blue, removed words struck through. */
 function TrackChanges({ before, after }) {
-  if (before == null || before === after) return after;
+  if (before == null || before === after) return withBlanks(after);
   return wordChanges(before, after).map((part, k) => (
     <span key={k}>
       {k > 0 && " "}
-      {part.kind === "same" ? part.text : <span style={part.kind === "added" ? changeAddedStyle : changeRemovedStyle}>{part.text}</span>}
+      {part.kind === "same" ? withBlanks(part.text) : <span style={part.kind === "added" ? changeAddedStyle : changeRemovedStyle}>{part.kind === "added" ? withBlanks(part.text) : part.text}</span>}
     </span>
   ));
 }
@@ -2868,7 +2878,9 @@ function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
               const edit = editFor("Skills", skill);
               return (
                 <div key={idx} style={{ ...styles.resumeSkillChip, ...(edit ? { display: "flex", alignItems: "center", gap: 4 } : {}) }}>
-                  <TrackChanges before={edit ? beforeOf(edit) : null} after={skill} />
+                  {edit
+                    ? <ChangeableLine as="span" text={skill} before={beforeOf(edit)} onCommit={(next) => onEditLine({ section: "Skills", original: skill, proposed: next, edit })} />
+                    : skill}
                   {edit && (
                     <button type="button" style={{ ...undoButtonStyle, textDecoration: "none" }} title={edit.type === "Addition" ? "Remove this added skill" : `Put back: ${beforeOf(edit)}`} onClick={() => onUndo(edit.id)}>
                       ×
@@ -3186,7 +3198,9 @@ export default function ResumeIQ() {
   const [assistantChat, setAssistantChat] = useState({ messages: [], decisions: [] });
   // The Tailor step's wording pass for the open job: loading → done (with the gaps it can't fix) or error.
   const [generation, setGeneration] = useState({ jobId: null, status: "idle", realGaps: [] });
-  // The assistant is offered only when a must-have is missing; shown once the user asks for it.
+  // "Core edits": the gaps the user ticks, drafted into the resume with [blanks] (per job).
+  const [coreEdits, setCoreEdits] = useState({ jobId: null, status: "idle", ticked: [], added: [], skipped: [] });
+  // The assistant is still there for anyone who'd rather talk a gap through.
   const [showAssistant, setShowAssistant] = useState(false);
   const tailorJobRef = useRef(null); // the job the Tailor step shows (late wording-pass results for another job are dropped)
   const [openingInBuilder, setOpeningInBuilder] = useState(false);
@@ -3296,6 +3310,7 @@ export default function ResumeIQ() {
     setAssistantChat({ messages: [], decisions: [] });
     setApprovedIds(new Set());
     setShowAssistant(false);
+    setCoreEdits({ jobId: job.id, status: "idle", ticked: [], added: [], skipped: [] });
     tailorJobRef.current = job.id;
     scoreAgainstJob(job);
     rewordForJob(job);
@@ -3816,6 +3831,49 @@ export default function ResumeIQ() {
     const id = `yours-${Date.now()}`;
     setSuggestions((prev) => [...prev, { id, section, type: "Rewrite", original, proposed, experienceIndex, title: "Your edit", byYou: true }]);
     setApprovedIds((prev) => new Set(prev).add(id));
+  };
+
+  /** Draft the ticked gaps into the resume as it stands; each becomes an accepted edit with [blanks]. */
+  const addTickedGaps = async (job) => {
+    const ticked = coreEdits.jobId === job.id ? coreEdits.ticked : [];
+    if (!ticked.length) return;
+    const working = applyApprovedChangesClientSide(resume, suggestions.filter((x) => approvedIds.has(x.id)));
+    setCoreEdits((prev) => ({ ...prev, status: "loading", error: "" }));
+    try {
+      const response = await fetch(`${API_BASE.replace(/\/$/, "")}/api/draft-gap-edits`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resume: resumeForAI(working), job: { role: job.role, company: job.company, jd: job.jd }, gaps: ticked }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || `the request failed (${response.status})`);
+      if (tailorJobRef.current !== job.id) return;
+      const stamp = Date.now();
+      const edits = (data.edits || []).map((e, i) => ({
+        id: `core-${stamp}-${i}`,
+        section: e.section,
+        type: e.type,
+        original: e.original,
+        proposed: e.proposed,
+        experienceIndex: e.experienceIndex,
+        why: e.why,
+        title: ticked[e.gap],
+        core: true,
+      }));
+      setSuggestions((prev) => [...prev, ...edits]);
+      setApprovedIds((prev) => new Set([...prev, ...edits.map((e) => e.id)]));
+      const added = (data.edits || []).map((e) => ticked[e.gap]);
+      setCoreEdits((prev) => ({
+        ...prev,
+        status: "idle",
+        ticked: [],
+        added: [...prev.added, ...added],
+        skipped: (data.skipped || []).map((x) => ({ gap: ticked[x.gap], reason: x.reason })),
+      }));
+      track("core_edits_added", { ticked: ticked.length, added: added.length, blanks: edits.reduce((n, e) => n + countBlanks(e.proposed), 0) });
+    } catch (e) {
+      if (tailorJobRef.current === job.id) setCoreEdits((prev) => ({ ...prev, status: "error", error: e.message }));
+    }
   };
 
   const handleApplyChanges = async () => {
@@ -5027,24 +5085,52 @@ body {
                           <> {" "}<button type="button" style={undoButtonStyle} onClick={() => setApprovedIds((prev) => new Set([...prev, ...suggestions.filter((x) => x.reworded).map((x) => x.id)]))}>Put back {undone} undone change{undone === 1 ? "" : "s"}</button></>
                         )}
                       </div>
-                      {mustHaves.length > 0 && (
-                        <>
-                          <div style={{ ...styles.keyGapsTitle, marginTop: 4 }}>Must-haves your resume doesn't show</div>
-                          <ul style={styles.keyGapsList}>{mustHaves.map((g, i) => <li key={i}>⚠ {g.text}</li>)}</ul>
-                          {!showAssistant && (
-                            <div>
-                              <button type="button" style={styles.primaryButton} onClick={() => setShowAssistant(true)}>Work on these with the assistant</button>
+                      {gen.realGaps.length > 0 && (() => {
+                        const core = coreEdits.jobId === selectedJob.id ? coreEdits : { status: "idle", ticked: [], added: [], skipped: [] };
+                        const toggle = (text) => setCoreEdits((prev) => {
+                          const base = prev.jobId === selectedJob.id ? prev : { jobId: selectedJob.id, status: "idle", ticked: [], added: [], skipped: [] };
+                          return { ...base, ticked: base.ticked.includes(text) ? base.ticked.filter((t) => t !== text) : [...base.ticked, text] };
+                        });
+                        const gaps = [...mustHaves, ...niceToHaves];
+                        return (
+                          <>
+                            <div style={{ ...styles.keyGapsTitle, marginTop: 6 }}>What the job asks for that your resume doesn't show</div>
+                            <div style={small}>Tick the ones you have. ResumeIQ adds them to your resume and leaves <span style={blankStyle}>[blanks]</span> for details only you know.</div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              {gaps.map((g) => {
+                                const added = core.added.includes(g.text);
+                                return (
+                                  <label key={g.text} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, lineHeight: 1.5, color: added ? "var(--rq-text-2)" : "var(--rq-text)", cursor: added ? "default" : "pointer" }}>
+                                    <input type="checkbox" style={{ marginTop: 3 }} checked={added || core.ticked.includes(g.text)} disabled={added || core.status === "loading"} onChange={() => toggle(g.text)} />
+                                    <span>
+                                      <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: g.mustHave ? "var(--rq-warn)" : "var(--rq-text-2)", marginRight: 6 }}>{g.mustHave ? "Must-have" : "Nice-to-have"}</span>
+                                      {g.text}
+                                      {added && <span style={{ color: "var(--rq-accent)", fontWeight: 600 }}> · Added ✓</span>}
+                                    </span>
+                                  </label>
+                                );
+                              })}
                             </div>
-                          )}
-                          <div style={small}>Rewording can't add these. If you have the experience, the assistant asks about it and adds it in your words.</div>
-                        </>
-                      )}
-                      {niceToHaves.length > 0 && (
-                        <>
-                          <div style={{ ...styles.keyGapsTitle, marginTop: 4 }}>Nice-to-haves you don't show</div>
-                          <ul style={{ ...styles.keyGapsList, color: "var(--rq-text-2)" }}>{niceToHaves.map((g, i) => <li key={i}>{g.text}</li>)}</ul>
-                        </>
-                      )}
+                            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                              <button
+                                type="button"
+                                style={{ ...styles.primaryButton, ...(!core.ticked.length || core.status === "loading" ? styles.disabledButton : {}) }}
+                                disabled={!core.ticked.length || core.status === "loading"}
+                                onClick={() => addTickedGaps(selectedJob)}
+                              >
+                                {core.status === "loading" ? "Adding to your resume…" : `Add the ticked ones${core.ticked.length ? ` (${core.ticked.length})` : ""}`}
+                              </button>
+                              {!showAssistant && <button type="button" style={undoButtonStyle} onClick={() => setShowAssistant(true)}>Prefer to talk it through? Open the assistant</button>}
+                            </div>
+                            {core.status === "error" && <div style={{ ...small, color: "var(--rq-danger)" }}>Couldn't add them ({core.error}). Try again.</div>}
+                            {core.skipped.length > 0 && (
+                              <ul style={{ ...styles.keyGapsList, color: "var(--rq-text-2)" }}>
+                                {core.skipped.map((x) => <li key={x.gap}>Not added – {x.gap}: {x.reason}</li>)}
+                              </ul>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   );
                 })()}
@@ -5072,24 +5158,32 @@ body {
                 );
               })()}
 
+              {(() => {
+                // [Blanks] must be filled before the resume moves on (they'd end up in the PDF).
+                const blanks = suggestions.filter((x) => approvedIds.has(x.id)).reduce((n, x) => n + countBlanks(x.proposed), 0);
+                return (
               <div style={styles.suggestionsFooterRow}>
                 <div>
-                  {approvedCount
+                  {blanks
+                    ? <>Fill in the <span style={blankStyle}>{blanks} blank{blanks === 1 ? "" : "s"}</span> on your resume to continue – click a line to edit it.</>
+                    : approvedCount
                     ? `${approvedCount} edit${approvedCount === 1 ? "" : "s"} applied`
                     : "No edits applied yet – you can continue with your original resume"}
                 </div>
                 <button
                   type="button"
                   onClick={handleApplyChanges}
-                  disabled={applyingChanges}
+                  disabled={applyingChanges || blanks > 0}
                   style={{
                     ...styles.primaryButton,
-                    ...(applyingChanges ? styles.disabledButton : {}),
+                    ...(applyingChanges || blanks > 0 ? styles.disabledButton : {}),
                   }}
                 >
                   {approvedCount ? `Continue with ${approvedCount} edit${approvedCount === 1 ? "" : "s"} →` : "Continue with original resume →"}
                 </button>
               </div>
+                );
+              })()}
             </section>
           )}
 

@@ -263,3 +263,112 @@ Return ONLY the JSON object.`;
   for (const c of applied.changes) c.rawOriginal = rawLine(original, c);
   return { ...applied, realGaps: reply.realGaps };
 }
+
+const GAP_DRAFT_PROMPT = `The candidate ticked requirements from a job ("gaps") that they have but their resume doesn't show. Add each one to their resume.
+For each ticked gap write ONE edit:
+- Prefer rewriting the existing bullet (or summary sentence) of the role where it most plausibly happened; else add one bullet to that role. For a tool or skill on its own, a Skills Addition.
+- The gap itself may be stated as fact (the candidate ticked it). Everything else must come from the resume.
+- Any detail the resume doesn't give – which tool, how many, what result, which product – goes in a [square-bracket blank] that says what to fill in, e.g. "[number of A/B tests]", "[SQL or analytics tool]", "[result]". Use blanks rather than guessing; one to three per edit.
+
+Hard rules:
+1. "original" must be copied EXACTLY from the resume: the whole summary or one full sentence of it, one bullet, or "" for an Addition.
+2. Keep every specific in the original: tools, numbers, names. Never drop them.
+3. No numbers outside blanks unless the resume already has them.
+4. Never upgrade the candidate's role ("worked on" → "led").
+5. No filler ("results-driven", "track record", "passionate", "dynamic").
+6. One edit per gap, and never two edits on the same line. No Summary Additions.
+
+Respond with ONLY a JSON object:
+{
+  "edits": [
+    { "gap": <index of the ticked gap>, "section": "Summary" | "Experience" | "Skills", "type": "Rewrite" | "Addition",
+      "experienceIndex": number (Experience only), "original": "exact text or \\"\\"", "proposed": "new text with [blanks]", "why": "one sentence" }
+  ],
+  "skipped": [{ "gap": <index>, "reason": "why it can't go anywhere sensible" }]
+}`;
+
+/** Checks for a gap draft: the assistant's, with the ticked claim allowed; no Removals or Summary Additions. */
+function gapDraftProblems(edit, context) {
+  if (edit.type === "Removal") return ["removals aren't allowed – rewrite or add instead"];
+  if (edit.section === "Summary" && edit.type === "Addition") return ["add to the summary by rewriting one of its sentences instead"];
+  edit.proposed = String(edit.proposed || "").replace(/[‐‑]/g, "-");
+  return checkEdit(edit, context);
+}
+
+/**
+ * "Core edits": the gaps the candidate ticked, written into their resume with [blanks] for the
+ * details only they know. `resume` is the resume as it stands (wording edits already in), so each
+ * edit's original is exactly a line of it.
+ * @returns {{ edits: [{ gap, section, type, experienceIndex?, original, proposed, why }], skipped: [{ gap, reason }] }}
+ */
+export async function draftGapEdits({ resume, job, gaps }) {
+  const ticked = (gaps || []).map((g) => String(g || "").trim()).filter(Boolean).slice(0, 8);
+  if (!ticked.length) return { edits: [], skipped: [] };
+  const jd = String(job?.jd || "").slice(0, MAX_JD_CHARS);
+  const user = `JOB: ${job?.role || ""} at ${job?.company || ""}
+JOB DESCRIPTION:
+${jd}
+
+TICKED GAPS (the candidate has these):
+${ticked.map((g, i) => `[${i}] ${g}`).join("\n")}
+
+CANDIDATE RESUME:
+${formatResume(resume)}
+
+Return ONLY the JSON object.`;
+  const parseDrafts = (text) => {
+    const parsed = JSON.parse(String(text || "").replace(/```json|```/g, "").trim());
+    return {
+      edits: (Array.isArray(parsed.edits) ? parsed.edits : []).filter((e) => e && typeof e === "object" && Number.isInteger(Number(e.gap)) && ticked[Number(e.gap)]),
+      skipped: (Array.isArray(parsed.skipped) ? parsed.skipped : []).filter((x) => x && ticked[Number(x.gap)]).map((x) => ({ gap: Number(x.gap), reason: String(x.reason || "").slice(0, 200) })),
+    };
+  };
+  const context = { resume, jd, candidateText: ticked.join("\n"), decisions: [], allowJdClaims: true };
+  let reply = parseDrafts(await callLLM({ system: GAP_DRAFT_PROMPT, user, maxTokens: 3000, json: true, provider: PROVIDER }));
+  let checked = reply.edits.map((edit) => ({ edit, problems: gapDraftProblems(edit, context) }));
+  if (checked.some((c) => c.problems.length)) {
+    const feedback = checked
+      .map((c, i) => (c.problems.length ? `Edit ${i + 1} ("${String(c.edit.proposed).slice(0, 80)}") was rejected: ${c.problems.join("; ")}.` : `Edit ${i + 1} passed.`))
+      .join("\n");
+    try {
+      reply = parseDrafts(await callLLM({
+        system: GAP_DRAFT_PROMPT,
+        user: `${user}\n\nYour previous reply:\n${JSON.stringify(reply)}\n\nAutomatic checks failed:\n${feedback}\nFix the failing edits (keep passing ones unchanged); put any missing detail in a [blank]. Return the full JSON object again.`,
+        maxTokens: 3000,
+        json: true,
+        provider: PROVIDER,
+      }));
+      checked = reply.edits.map((edit) => ({ edit, problems: gapDraftProblems(edit, context) }));
+    } catch (e) {
+      console.warn("[gap drafts] repair pass failed:", e.message);
+    }
+  }
+  const used = new Set(); // one edit per gap, one edit per line
+  const edits = [];
+  const skipped = [...reply.skipped];
+  for (const { edit, problems } of checked) {
+    const gap = Number(edit.gap);
+    const line = `${edit.section}:${edit.experienceIndex ?? ""}:${edit.original}`;
+    if (problems.length || used.has(`gap:${gap}`) || (edit.original && used.has(line))) {
+      if (problems.length) console.log("[gap drafts] dropped:", problems.join("; "));
+      continue;
+    }
+    used.add(`gap:${gap}`);
+    if (edit.original) used.add(line);
+    edits.push({
+      gap,
+      section: edit.section,
+      type: edit.type,
+      experienceIndex: edit.section === "Experience" ? Number(edit.experienceIndex) : undefined,
+      original: String(edit.original || "").trim(),
+      proposed: String(edit.proposed || "").trim(),
+      why: String(edit.why || "").trim(),
+    });
+  }
+  // Every ticked gap is either drafted or explained.
+  ticked.forEach((_, gap) => {
+    if (!used.has(`gap:${gap}`) && !skipped.some((x) => x.gap === gap)) skipped.push({ gap, reason: "Couldn't place it on your resume – add it yourself by editing a line." });
+  });
+  return { edits, skipped: skipped.filter((x) => !used.has(`gap:${x.gap}`)) };
+}
+
