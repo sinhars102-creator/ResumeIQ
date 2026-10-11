@@ -1,6 +1,7 @@
 // Service worker: keeps the ResumeIQ session (from the website, via bridge.js), refreshes it,
 // and calls the ResumeIQ API for the side panel.
 import { CONFIG } from "./config.js";
+import { autoApply } from "./autoApply.js";
 
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
@@ -92,6 +93,8 @@ async function api(path, { method = "GET", body } = {}) {
   }
 }
 
+const runs = new Map(); // job id → its auto apply's latest state (with the application's tab)
+
 chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   if (msg.type === "auth:set") {
     getSession().then((current) => {
@@ -116,6 +119,29 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
   if (msg.type === "api") {
     api(msg.path, msg.options).then(reply);
     return true;
+  }
+  // Auto apply, started from the ResumeIQ website (via bridge.js); progress goes back to that tab.
+  if (msg.type === "autoapply:start" && msg.job?.jobId) {
+    const siteTab = _sender.tab?.id;
+    const jobId = msg.job.jobId;
+    if (runs.get(jobId)?.status === "running") {
+      reply({ already: true });
+      return false;
+    }
+    const update = (state) => {
+      runs.set(jobId, state);
+      if (siteTab != null) chrome.tabs.sendMessage(siteTab, { type: "autoapply:update", jobId, state }).catch(() => {});
+    };
+    autoApply(msg.job, { api, update }).catch((err) => update({ status: "failed", message: `Auto apply stopped: ${err.message}` }));
+    reply({ started: true });
+    return false;
+  }
+  if (msg.type === "autoapply:focus") {
+    const tabId = runs.get(msg.jobId)?.tabId;
+    if (tabId != null) {
+      chrome.tabs.update(tabId, { active: true }).then((t) => chrome.windows.update(t.windowId, { focused: true })).catch(() => {});
+    }
+    return false;
   }
   return false;
 });

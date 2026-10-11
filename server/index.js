@@ -1042,9 +1042,11 @@ app.post("/api/tailored/use", async (req, res) => {
     const pdf = await rxFetchBinary(`/resumes/${session.rx_resume_id}/pdf`);
     if (pdf.subarray(0, 5).toString() !== "%PDF-") throw new Error("the editor didn't return a PDF");
     const [job, profile] = await Promise.all([getJobById(jobId).catch(() => null), getProfile(user.id).catch(() => null)]);
-    const label = [job?.company, job?.role].filter(Boolean).join(" – ") || "Tailored resume";
+    // The site's job ids aren't always the jobs table's: fall back to what the page sent.
+    const company = job?.company || String(req.body?.company || "").slice(0, 200);
+    const label = [company, job?.role || String(req.body?.title || "").slice(0, 200)].filter(Boolean).join(" – ") || "Tailored resume";
     const person = [profile?.first_name, profile?.last_name].filter(Boolean).join("_") || "Resume";
-    const fileName = `${person}_${job?.company || "tailored"}`.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/_+/g, "_").slice(0, 80) + ".pdf";
+    const fileName = `${person}_${company || "tailored"}`.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/_+/g, "_").slice(0, 80) + ".pdf";
     const resume = await saveTailoredResumeFile(user.id, { jobId, rxResumeId: session.rx_resume_id, name: `${label} (tailored)`.slice(0, 90), fileName, bytes: pdf });
     return res.json({ resume, jobUrl: job?.url || null });
   } catch (err) {

@@ -3214,6 +3214,24 @@ export default function ResumeIQ() {
   // The assistant is still there for anyone who'd rather talk a gap through.
   const [showAssistant, setShowAssistant] = useState(false);
   const tailorJobRef = useRef(null); // the job the Tailor step shows (late wording-pass results for another job are dropped)
+  // Auto apply (run by the Chrome extension) for the job on Preview: saving → running → submitted |
+  // needs_review | failed | unsupported, plus no_extension / signin before it starts.
+  const [applyRun, setApplyRun] = useState({ jobId: null, status: "idle" });
+  const extReadyRef = useRef(false); // the extension's bridge answered on this page
+  useEffect(() => {
+    const onMessage = (event) => {
+      if (event.source !== window || event.origin !== window.location.origin || event.data?.source !== "resumeiq-ext") return;
+      if (event.data.type === "ext:ready") extReadyRef.current = true;
+      if (event.data.type === "autoapply:update" && event.data.state) {
+        const { status } = event.data.state;
+        setApplyRun({ jobId: event.data.jobId, ...event.data.state });
+        if (status !== "running") track("auto_apply_finished", { status, checks: (event.data.state.checks || []).length });
+      }
+    };
+    window.addEventListener("message", onMessage);
+    window.postMessage({ source: "resumeiq-app", type: "ext:ping" }, window.location.origin);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
   const [openingInBuilder, setOpeningInBuilder] = useState(false);
   const [openInBuilderError, setOpenInBuilderError] = useState(null);
   // Reactive Resume builder embedded in the Updated Resume step: { builderUrl, embeddable }.
@@ -3320,6 +3338,7 @@ export default function ResumeIQ() {
     setSuggestions([]);
     setAssistantChat({ messages: [], decisions: [] });
     setApprovedIds(new Set());
+    setUpdatedResume(null); // the previous job's tailored resume
     setShowAssistant(false);
     setCoreEdits({ jobId: job.id, status: "idle", ticked: [], added: [], skipped: [] });
     tailorJobRef.current = job.id;
@@ -3887,6 +3906,39 @@ export default function ResumeIQ() {
     }
   };
 
+  /**
+   * "Apply with this resume": the editor's PDF is saved as this job's resume, then the extension
+   * applies with it in a background tab and reports back here (extension/autoApply.js).
+   */
+  const handleApplyWithResume = async () => {
+    const job = selectedJob;
+    if (!job) return;
+    const set = (state) => setApplyRun({ jobId: job.id, ...state });
+    const session = supabaseClient ? (await supabaseClient.auth.getSession()).data.session : null;
+    if (!session) return set({ status: "signin", message: "Sign in to ResumeIQ to apply with this resume." });
+    if (!extReadyRef.current) {
+      return set({ status: "no_extension", message: "Auto apply runs in the ResumeIQ Chrome extension. Install it or turn it on, then reload this page." });
+    }
+    set({ status: "saving", step: "Saving this resume for the job…" });
+    try {
+      const response = await fetch(`${API_BASE.replace(/\/$/, "")}/api/tailored/use`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ jobId: job.id, company: job.company, title: job.role }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || `the request failed (${response.status})`);
+      set({ status: "running", step: "Starting…" });
+      window.postMessage(
+        { source: "resumeiq-app", type: "autoapply:start", job: { jobId: job.id, url: job.url, company: job.company, title: job.role, description: job.jd, resumeFileId: data.resume?.id } },
+        window.location.origin,
+      );
+      track("auto_apply_started", { source: job.source || "unknown" });
+    } catch (e) {
+      set({ status: "failed", message: `Couldn't save this resume for the job (${e.message}).` });
+    }
+  };
+
   const handleApplyChanges = async () => {
     track("continue_to_preview", { accepted_edits: approvedIds.size });
     setApplyingChanges(true);
@@ -3966,10 +4018,14 @@ export default function ResumeIQ() {
     setOpenInBuilderError(null);
     try {
       const base = API_BASE.replace(/\/$/, "");
+      // Signed in with a job: the job's editor resume is reopened (so "Apply with this resume" knows
+      // which one) and brought up to date with this content, keeping the design chosen in the editor.
+      const session = supabaseClient && selectedJob ? (await supabaseClient.auth.getSession()).data.session : null;
       const response = await fetch(`${base}/api/rxresume/open-in-builder`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
         body: JSON.stringify({
+          ...(session ? { jobId: selectedJob.id, refresh: true } : {}),
           // A very large embedded photo would exceed the API's request size limit; send the resume without it.
           resumeData: (getFinalResume()?.photoUrl?.length || 0) > 1_500_000 ? { ...getFinalResume(), photoUrl: null } : getFinalResume(),
           name: [getFinalResume()?.name, selectedJob && [selectedJob.role, selectedJob.company].filter(Boolean).join(" @ ")]
@@ -4086,6 +4142,8 @@ export default function ResumeIQ() {
   };
 
   const approvedCount = approvedIds.size;
+  // [Blanks] in accepted edits must be filled before the resume moves on (they'd end up in the PDF).
+  const blanksLeft = suggestions.filter((x) => approvedIds.has(x.id)).reduce((n, x) => n + countBlanks(x.proposed), 0);
 
   return (
     <div className="rq-app-root" style={styles.appRoot}>
@@ -4225,6 +4283,13 @@ body {
                 if (order === currentStepOrder) state = "active";
                 else if (order < currentStepOrder) state = "past";
                 const goToStep = () => {
+                  // From Tailor, Preview is reached the way Continue does: with your edits applied, and
+                  // not while [blanks] are left.
+                  if (s.id === "preview" && step === "suggestions") {
+                    if (blanksLeft) document.querySelector("[data-rq-tailor-footer]")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    else handleApplyChanges();
+                    return;
+                  }
                   setStep(s.id === "parsing" ? "select" : s.id);
                 };
                 return (
@@ -5170,10 +5235,9 @@ body {
               })()}
 
               {(() => {
-                // [Blanks] must be filled before the resume moves on (they'd end up in the PDF).
-                const blanks = suggestions.filter((x) => approvedIds.has(x.id)).reduce((n, x) => n + countBlanks(x.proposed), 0);
+                const blanks = blanksLeft;
                 return (
-              <div style={styles.suggestionsFooterRow}>
+              <div style={styles.suggestionsFooterRow} data-rq-tailor-footer>
                 <div>
                   {blanks
                     ? <>Fill in the <span style={blankStyle}>{blanks} blank{blanks === 1 ? "" : "s"}</span> on your resume to continue – click a line to edit it.</>
@@ -5212,13 +5276,22 @@ body {
                   )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  {selectedJob && (() => {
+                    const busy = applyRun.jobId === selectedJob.id && (applyRun.status === "saving" || applyRun.status === "running");
+                    const done = applyRun.jobId === selectedJob.id && applyRun.status === "submitted";
+                    return (
+                      <button type="button" style={{ ...styles.primaryButton, ...(busy || done ? styles.disabledButton : {}) }} disabled={busy || done} onClick={handleApplyWithResume}>
+                        {done ? "Applied ✓" : busy ? "Applying…" : "Apply with this resume"}
+                      </button>
+                    );
+                  })()}
                   {selectedJob?.url && (
                     <a
                       href={selectedJob.url}
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={() => track("job_posting_opened", { from: "preview", accepted_edits: approvedIds.size })}
-                      style={{ ...styles.primaryButton, textDecoration: "none" }}
+                      style={{ ...styles.ghostButton, textDecoration: "none" }}
                     >
                       View job posting ↗
                     </a>
@@ -5240,6 +5313,32 @@ body {
                   </button>
                 </div>
               </div>
+              {selectedJob && applyRun.jobId === selectedJob.id && applyRun.status !== "idle" && (() => {
+                const run = applyRun;
+                const tone = run.status === "submitted" ? "var(--rq-accent)" : run.status === "needs_review" || run.status === "unsupported" ? "var(--rq-warn)" : run.status === "failed" || run.status === "no_extension" || run.status === "signin" ? "var(--rq-danger)" : "var(--rq-text-2)";
+                return (
+                  <div style={{ borderBottom: "1px solid var(--rq-border)", padding: "10px 20px", display: "flex", flexDirection: "column", gap: 6, fontSize: 13, background: `color-mix(in srgb, ${tone} 6%, var(--rq-bg))` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span style={{ color: tone, fontWeight: 600 }}>
+                        {run.status === "saving" || run.status === "running" ? run.step || "Applying…" : run.status === "submitted" ? `Application submitted to ${selectedJob.company} ✓` : run.message}
+                      </span>
+                      {run.status === "needs_review" && run.tabId != null && (
+                        <button type="button" style={styles.ghostButton} onClick={() => window.postMessage({ source: "resumeiq-app", type: "autoapply:focus", jobId: selectedJob.id }, window.location.origin)}>
+                          Open the application
+                        </button>
+                      )}
+                      {run.status === "unsupported" && selectedJob.url && (
+                        <a href={selectedJob.url} target="_blank" rel="noopener noreferrer" style={{ ...styles.ghostButton, textDecoration: "none" }}>Open the job ↗</a>
+                      )}
+                    </div>
+                    {(run.checks || []).length > 0 && run.status !== "submitted" && (
+                      <ul style={{ margin: 0, paddingLeft: 18, color: "var(--rq-text)", display: "flex", flexDirection: "column", gap: 2 }}>
+                        {run.checks.map((c, i) => <li key={i}>{c}</li>)}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })()}
               {(() => {
                 // Other roles ranked by the quick estimate against the TAILORED resume (AI scores were for the original).
                 const tailored = getFinalResume();

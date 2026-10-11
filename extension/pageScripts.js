@@ -504,3 +504,40 @@ export function formSignal() {
     [...document.querySelectorAll("h1, h2")].find(visible)?.innerText || "";
   return { fields, isApplication, step: `${location.pathname}|${step.replace(/\s+/g, " ").trim().slice(0, 80)}` };
 }
+
+/**
+ * Auto apply: click the application's Submit button. Returns the button's text, or null when the
+ * page has none (nothing is clicked then).
+ */
+export function submitApplication() {
+  const visible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const text = (b) => (b.innerText || b.value || b.getAttribute("aria-label") || "").replace(/\s+/g, " ").trim();
+  const buttons = [...document.querySelectorAll('button, input[type="submit"]')].filter((b) => visible(b) && !b.disabled);
+  const pick =
+    buttons.find((b) => /^submit( your)?( application)?$/i.test(text(b))) ||
+    buttons.find((b) => /submit application|send application/i.test(text(b))) ||
+    buttons.find((b) => b.type === "submit" && /submit|apply/i.test(text(b)));
+  if (!pick) return null;
+  pick.scrollIntoView({ block: "center" });
+  pick.click();
+  return text(pick);
+}
+
+/**
+ * Auto apply, after Submit: did the site confirm the application, show errors, or put up a
+ * CAPTCHA challenge? { submitted, errors: [text], captcha }
+ */
+export function applicationOutcome() {
+  const visible = (el) => !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length);
+  const clean = (t) => String(t || "").replace(/\s+/g, " ").trim();
+  const page = document.body.innerText.slice(0, 20000);
+  const submitted =
+    /thank(s| you) for (applying|your application)|application (has been |was )?(successfully )?(submitted|received)|we('ve| have) received your application|your application has been sent/i.test(page) ||
+    /\/(confirmation|thanks|thank-you|thank_you)(\/|$)/i.test(location.pathname);
+  const errors = [...document.querySelectorAll('[role="alert"], [aria-invalid="true"], .error, .field-error, .error-message')]
+    .filter(visible)
+    .map((el) => clean(el.getAttribute("aria-invalid") === "true" ? el.labels?.[0]?.innerText || el.getAttribute("aria-label") || el.name : el.innerText))
+    .filter((t) => t && t.length < 200);
+  const captcha = [...document.querySelectorAll('iframe[src*="recaptcha"][src*="bframe"], iframe[src*="hcaptcha"], iframe[title*="challenge" i]')].some(visible);
+  return { submitted, errors: [...new Set(errors)].slice(0, 8), captcha };
+}

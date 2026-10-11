@@ -12,6 +12,7 @@
  *   POST /api/ext/generate-resume        the resume reworded for the role on the page, to review
  *   POST /api/ext/generated-resume/pdf   that resume as a PDF in the fixed template (preview)
  *   POST /api/ext/generated-resume/use   save that PDF as the resume for the role (autofill attaches it)
+ *   POST /api/ext/applications           record an auto apply run (submitted / needs review / failed)
  */
 import { createHash } from "crypto";
 import { callLLM } from "./llm.js";
@@ -23,6 +24,7 @@ import { jsPDF } from "jspdf";
 import {
   toRow, saveUserJob, setUserJobMatch, getProfile, listUserJobs,
   listResumeFiles, addResumeFile, setDefaultResumeFile, deleteResumeFile, getResumeFile, saveTailoredResumeFile,
+  recordApplication,
 } from "./jobStore.js";
 
 const RESUME_TYPES = {
@@ -299,6 +301,25 @@ export function registerExtensionRoutes(app, { userFromRequest, renderJobResumeP
     const { pdf, rxResumeId, jobId, label, fileName } = await generatedPdf(user, req.body);
     const resume = await saveTailoredResumeFile(user.id, { jobId, rxResumeId, name: `${label} (generated)`.slice(0, 90), fileName, bytes: pdf });
     return res.json({ resume });
+  }));
+
+  // Auto apply (extension/autoApply.js) records how each run ended, for the applications list.
+  const APPLY_STATUSES = new Set(["submitted", "needs_review", "failed"]);
+  app.post("/api/ext/applications", withUser(async (req, res, user) => {
+    const { jobId, source, company, title, applyUrl, status, details } = req.body || {};
+    if (!jobId || !APPLY_STATUSES.has(status)) return res.status(400).json({ error: "jobId and a status (submitted, needs_review, failed) are required" });
+    const id = await recordApplication({
+      user_id: user.id,
+      job_id: String(jobId).slice(0, 200),
+      source: String(source || "web").slice(0, 40),
+      company: String(company || "").slice(0, 200),
+      title: String(title || "").slice(0, 200),
+      apply_url: String(applyUrl || "").slice(0, 500),
+      status,
+      details: details && typeof details === "object" ? details : null,
+      submitted_at: status === "submitted" ? new Date().toISOString() : null,
+    });
+    return res.json({ id });
   }));
 
   app.get("/api/ext/jobs", withUser(async (req, res, user) => res.json({ jobs: await listUserJobs(user.id) })));
