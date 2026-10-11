@@ -131,7 +131,7 @@ function resumeAsText(resume) {
 }
 
 /** The resume as the model sees it: indexed so edits can point at an exact role. */
-function formatResume(resume) {
+export function formatResume(resume) {
   const parts = [
     `Name: ${resume.name || ""}`,
     `Headline: ${resume.title || ""}`,
@@ -173,7 +173,7 @@ function similarity(a, b) {
 const DUPLICATE_THRESHOLD = 0.8;
 
 /** Returns a list of reasons the edit fails the objectivity rules (empty = valid). Fixes experienceIndex in place. */
-function checkEdit(edit, context) {
+export function checkEdit(edit, context) {
   const { resume, jd, candidateText } = context;
   const problems = [];
   if (!SECTIONS.has(edit.section)) problems.push(`section must be Summary, Experience or Skills (got "${edit.section}")`);
@@ -224,7 +224,9 @@ function checkEdit(edit, context) {
     if (invented.length) problems.push(`introduces numbers not in the resume or the candidate's messages: ${invented.join(", ")} (use a [placeholder] and ask)`);
   }
 
-  if (edit.type !== "Removal") {
+  // allowJdClaims: the candidate ticked this requirement as something they have (generateResume's
+  // gap drafts), so stating it isn't borrowing.
+  if (edit.type !== "Removal" && !context.allowJdClaims) {
     // No borrowed claims: JD terms the resume and the candidate never mention can't be presented as experience.
     const evidence = new Set([...contentTokens(resumeAsText(resume)), ...contentTokens(candidateText), ...contentTokens(original)].map(stem));
     const jdStems = new Set(contentTokens(jd).map(stem));
@@ -254,20 +256,38 @@ function checkEdit(edit, context) {
     }
   }
 
-  if (edit.section === "Skills" && edit.type === "Addition") {
+  if (edit.section === "Skills" && edit.type === "Addition" && !context.allowJdClaims) {
     const evidence = normalize(`${resumeAsText(resume)}\n${candidateText}`);
     if (!evidence.includes(normalize(proposed))) problems.push(`skill "${proposed}" has no evidence in the resume or the candidate's messages`);
   }
 
-  // The targeted requirement must really be in the JD.
+  // The targeted requirement is a label shown with the edit, not a fact in the resume: when it
+  // doesn't match the job description's wording, use the closest JD sentence (or none) rather
+  // than throwing away an edit the candidate's facts support.
   const reqTokens = contentTokens(edit.jdRequirement);
   const jdTokens = new Set(contentTokens(jd));
-  if (!reqTokens.length) problems.push(`"jdRequirement" is missing`);
-  else if (reqTokens.filter((t) => jdTokens.has(t)).length / reqTokens.length < 0.5) {
-    problems.push(`"jdRequirement" doesn't match the job description's wording`);
+  if (!reqTokens.length || reqTokens.filter((t) => jdTokens.has(t)).length / reqTokens.length < 0.5) {
+    const want = new Set([...reqTokens, ...contentTokens(proposed)]);
+    const closest = splitSentences(jd)
+      .map((sentence) => ({ sentence, hits: contentTokens(sentence).filter((t) => want.has(t)).length }))
+      .sort((a, b) => b.hits - a.hits)[0];
+    edit.jdRequirement = closest?.hits >= 2 ? closest.sentence.slice(0, 200) : "";
   }
 
   return problems;
+}
+
+/** The checks that held an edit back, as one plain-language reason for the candidate. */
+function heldBackReason(problems) {
+  const text = problems.join(" ");
+  if (/introduces numbers/.test(text)) return "it used a number you haven't given me – tell me the figure and I'll use it";
+  if (/claims JD activities/.test(text)) return "it described experience that neither your resume nor our chat shows";
+  if (/upgrades the candidate's role/.test(text)) return "it made your role sound more senior than your resume says";
+  if (/duplicates text|repeats an edit/.test(text)) return "it repeated something already in your resume";
+  if (/drops numbers|drops specific terms/.test(text)) return "it lost numbers or specifics from your original line";
+  if (/generic filler/.test(text)) return "it used generic filler words";
+  if (/no evidence/.test(text)) return "that skill isn't shown in your resume or our chat";
+  return "it didn't match your resume's lines exactly";
 }
 
 function parseReply(text) {
@@ -446,8 +466,14 @@ ${mustDraft ? `QUESTION LIMIT REACHED for the current gap: you have already aske
   let message = reply.message;
   if (!message) message = edits.length ? "Here's the next edit." : "What would you like to work on next?";
   if (!edits.length && reply.edits.length) {
-    // The model's message refers to edits that were all filtered out – say so rather than leave a dangling reference.
-    message += "\n\n(I held back the edit I drafted because it didn't pass the accuracy checks – it would have changed or added facts your resume doesn't support. Tell me more about this point, or say \"next gap\".)";
+    // Every drafted edit was held back. Say why in plain words – and don't leave a message that
+    // claims the edit was made ("Added a bullet…") followed by a note contradicting it.
+    const reason = heldBackReason(dropped.flatMap((c) => c.problems));
+    const claimsEdit = /\b(added|i've (added|updated|rewritten|changed)|here('s| is) (the|an?) (edit|bullet|rewrite)|updated|rewrote)\b/i.test(message);
+    const ask = "Tell me more about this point, or say \"next gap\".";
+    message = claimsEdit
+      ? `I drafted an edit but held it back: ${reason}. ${ask}`
+      : `${message}\n\n(I held back the edit I drafted: ${reason}. ${ask})`;
   }
 
   const focusIds = new Set(focusGaps.map((g) => g.id));

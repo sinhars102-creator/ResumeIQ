@@ -10,6 +10,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync } from "fs";
 import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
+import { isIndiaLocation } from "./jobSources.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 // Vercel functions can only write to /tmp (cleared between cold starts), so saved roles are best-effort there.
@@ -75,7 +76,7 @@ function scheduleSave() {
   }, SAVE_DEBOUNCE_MS);
 }
 
-/** Jobs without a real LinkedIn id get a generated one per request; caching those would create duplicates. */
+/** Jobs without a real source id get a generated one per request; caching those would create duplicates. */
 function hasStableId(job) {
   return job?.id && !/^linkedin-\d+-\d+$/.test(job.id) && !/^guest-\d+$/.test(job.id);
 }
@@ -123,8 +124,10 @@ export function findJobs({ keywords = "", location = "", levels = [], limit = 30
     if (levels.length && entry.levels.length && !entry.levels.some((l) => levels.includes(l))) continue;
     if (locationLower) {
       // Trust the role's own location; scrapers sometimes return roles outside the searched area.
+      // Career-board roles name the city ("Bengaluru, Karnataka"), not the country.
       const inLocation = entry.job.location
-        ? entry.job.location.toLowerCase().includes(locationLower)
+        ? entry.job.location.toLowerCase().includes(locationLower) ||
+          (locationLower === "india" && isIndiaLocation(entry.job.location, { allowRemote: false }))
         : entry.locations.some((l) => l.toLowerCase() === locationLower);
       if (!inLocation) continue;
     }

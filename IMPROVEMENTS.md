@@ -67,4 +67,55 @@ Track these items for future implementation.
 
 ---
 
+## 9. Every Greenhouse job posting in our job board
+**What:** All Greenhouse job postings (India scope) should come into the ResumeIQ jobs database, not only the ~70 boards we know about today.
+**Why:** Roles like [Eudia – 4333174009](https://job-boards.greenhouse.io/eudia/jobs/4333174009) appear on LinkedIn and Greenhouse but were missing from our Greenhouse list, because Eudia's board isn't one we collect.
+**Notes:**
+- Learn boards from job links: any URL naming a Greenhouse board (`job-boards.greenhouse.io/<board>/…`, `?gh_jid=…&for=<board>`), whether from LinkedIn "Apply" links, the Chrome extension or Easy Apply, adds that board to `public.companies` as active, with no name guessing.
+- The live "Company career pages" search should use every active board in the database, not the 29 hard-coded in `server/jobBoards.js`.
+- Finish discovery of the ~1,130 companies still waiting (500 per daily run today); consider running it more often.
+- Same approach later for Lever and Ashby.
+
+---
+
+## 10. Prefer the Greenhouse posting when a role is on both LinkedIn and Greenhouse
+**What:** When the same role exists on LinkedIn and on Greenhouse, show and use the Greenhouse version.
+**Why:** The Greenhouse posting has the full job description, the employer's own apply link, and works with Easy Apply; LinkedIn copies often don't.
+**Notes:**
+- Today `mergeJobs` collapses duplicates by company + title + city and keeps the longer description; it should keep the Greenhouse record (id, source, link) and treat the LinkedIn one as a duplicate.
+- Apply the same rule in the database: link LinkedIn rows to the matching Greenhouse row (e.g. a `duplicate_of` column) so searches return one card, Greenhouse first.
+- LinkedIn's "Apply" link often points at the Greenhouse posting – use it to match the two exactly when available.
+
+---
+
+## 11. Match and tailor straight from any job page (Chrome extension)
+**What:** As soon as the extension sees a job opening, it matches it against the user's profile and shows the match percentage (with what's holding it back) in the side panel – without having to "Add to ResumeIQ" first – and offers an option to edit/tailor the resume for that role.
+**Why:** The fit is the first thing a job seeker wants to know on a posting; tailoring should be one click from there.
+**Notes:**
+- Today the match score appears only after "Add to ResumeIQ" (POST /api/ext/match runs after saving).
+- Run the match when the panel reads a job (cache per job so revisiting doesn't re-run the AI); keep "Add to ResumeIQ" as a separate save.
+- "Edit resume" opens ResumeIQ's tailoring flow for that job (the role saved or passed through, like `/app?easyApply=…`), and the tailored resume is what autofill / Easy Apply attach.
+
+---
+
+## 12. Keka as a job source
+**What:** Add Keka (keka.com) as a source of job postings.
+**Why:** Keka is an Indian HR platform whose hiring module ("Keka Hire") hosts careers pages for many Indian companies – roles we don't reach through Greenhouse, Lever, Ashby or Workable.
+**Notes (to verify when we start):**
+- Careers pages appear to live at `<company>.keka.com/careers`; check whether there's a public JSON feed per company (like Greenhouse's job board API) or whether pages must be read.
+- Discovery: learn Keka company slugs the same way as backlog item 9 (from job links seen on LinkedIn, the extension and Easy Apply), plus a curated list.
+- Then: India-scope filter, closing roles that leave a board, and whether Easy Apply / extension autofill can work on Keka's application form.
+
+---
+
+## 13. Deeper matching in the extension (must-haves weigh more)
+**What:** The extension's match score is a light, one-pass AI comparison. It should weigh a job's must-have requirements properly, so a missing must-have pulls the score down a lot.
+**Why:** Example: a role where video streaming experience is a must got a modest drop for missing it, when it should be a major one – the score overstates fit.
+**Notes:**
+- Extract the job's requirements first (must-have vs nice-to-have, years, domain, location/work mode) – the same structuring as the AI structuring of jobs discussed for filters – then score against the resume with weights, and cap the score when a must-have is missing.
+- Keep the explanation: list the missing must-haves first in "Holding your match back".
+- Reuse the same scoring in the app's Job Matches so both show the same number.
+
+---
+
 *Add new items below as needed.*

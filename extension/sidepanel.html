@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ResumeIQ</title>
+  <link rel="stylesheet" href="sidepanel.css">
+</head>
+<body>
+  <header class="top">
+    <span class="logo" aria-hidden="true">◈</span>
+    <span class="brand">ResumeIQ</span>
+    <span id="who" class="who"></span>
+  </header>
+
+  <main>
+    <section id="signedOut" class="card" hidden>
+      <h2>Sign in to ResumeIQ</h2>
+      <p>Open ResumeIQ and sign in there – this panel connects automatically within a few seconds. If you're already signed in, opening ResumeIQ reconnects it.</p>
+      <button id="openApp" class="btn primary" type="button">Open ResumeIQ</button>
+    </section>
+
+    <section id="easyApplyCard" class="card highlight" hidden>
+      <h2>Apply with ResumeIQ Easy Apply</h2>
+      <p class="muted">This is a Greenhouse application. Easy Apply fills it with your profile, lets you review every answer and sends it for you – including the verification code step.</p>
+      <button id="openEasyApply" class="btn primary" type="button">Open Easy Apply</button>
+    </section>
+
+    <section id="matchCard" class="card" hidden aria-live="polite">
+      <div class="score">
+        <div class="ring" id="ring"><span id="scoreValue">…</span></div>
+        <div>
+          <div id="scoreLabel" class="score-label">Your fit for this role</div>
+          <div id="scoreSummary" class="muted"></div>
+        </div>
+      </div>
+      <div id="matchDetails">
+        <h3>Holding your match back</h3>
+        <ul id="gaps" class="list gaps"></ul>
+        <h3>Where you fit</h3>
+        <ul id="matched" class="list matched"></ul>
+      </div>
+      <button id="rematch" class="link" type="button" hidden>Try again</button>
+      <button id="generate" class="btn primary" type="button" hidden>Generate resume for this job</button>
+      <button id="tailor" class="btn" type="button" hidden>Improve my resume for this job</button>
+      <div id="tailorStatus" class="status" role="status"></div>
+    </section>
+
+    <section id="genCard" class="card" hidden aria-live="polite">
+      <div class="row-between">
+        <h2>Your resume for this job</h2>
+        <button id="genClose" class="link" type="button">Close</button>
+      </div>
+      <div id="genStatus" class="status" role="status"></div>
+      <div id="genBody" hidden>
+        <p id="genIntro" class="muted"></p>
+        <div id="genGapsBox" class="gen-gaps" hidden>
+          <h3>Gaps to fix yourself</h3>
+          <p class="muted">Rewording can't close these – only experience you really have can.</p>
+          <ul id="genGaps" class="list gaps"></ul>
+          <button id="genAssistant" class="link" type="button">Work on these with the tailoring assistant</button>
+        </div>
+        <div id="genDoc" class="gen-doc"></div>
+        <p class="muted">Education and your other sections stay as they are. The PDF uses the Onyx template.</p>
+        <div class="row-actions gen-actions">
+          <button id="genPreview" class="btn" type="button">Preview PDF</button>
+          <button id="genUse" class="btn primary" type="button">Use for this job</button>
+        </div>
+        <div id="genUseStatus" class="status" role="status"></div>
+        <button id="genRedo" class="link" type="button">Generate again</button>
+      </div>
+    </section>
+
+    <section id="jobCard" class="card" hidden>
+      <div class="row-between">
+        <h2>Job on this page</h2>
+        <button id="rescan" class="link" type="button">Re-read page</button>
+      </div>
+      <button id="jobSummary" class="job-summary" type="button" hidden aria-expanded="false"></button>
+      <div id="jobStatus" class="status" role="status"></div>
+      <form id="jobForm" class="job-form">
+        <label>Job title<input id="title" required></label>
+        <label>Company<input id="company" required></label>
+        <label>Location<input id="location"></label>
+        <label>Job description<textarea id="description" rows="6"></textarea></label>
+        <button id="saveJob" class="btn primary" type="submit">Add to ResumeIQ</button>
+      </form>
+    </section>
+
+    <section id="applyCard" class="card" hidden>
+      <h2 id="applyTitle">Application form</h2>
+      <p id="applyHint" class="muted" hidden>No application form on this page yet. Click <strong>Apply</strong> on the page – autofill appears here when the form opens.</p>
+      <p id="applyAbout" class="muted">Fills this page's form from your ResumeIQ profile – including your voluntary details and, if you turned it on, standard declarations – and attaches your resume. Review everything, then submit on the page yourself.</p>
+      <div id="resumePick" class="resume-pick">
+        <label for="resumeSelect">Resume to attach</label>
+        <select id="resumeSelect"></select>
+        <div class="row-actions">
+          <button id="uploadResume" class="link" type="button">Upload a resume</button>
+          <button id="makeDefault" class="link" type="button" hidden>Make default</button>
+          <button id="removeResume" class="link danger" type="button" hidden>Remove</button>
+        </div>
+        <input id="resumeFile" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+        <div id="resumeStatus" class="status" role="status"></div>
+      </div>
+      <button id="autofill" class="btn primary" type="button">Autofill this application</button>
+      <div id="applyStatus" class="status" role="status"></div>
+      <div id="attachedBox" class="attached" hidden>
+        <div><strong>Resume attached:</strong> <span id="attachedResume"></span> <button id="viewResume" class="link" type="button">View</button></div>
+        <div id="attachedCoverRow" hidden><strong>Cover letter attached:</strong> <span id="attachedCover"></span> <button id="viewCover" class="link" type="button">View</button></div>
+      </div>
+      <ul id="skipped" class="list gaps"></ul>
+      <h3 id="optionalHead" hidden>Optional, left blank</h3>
+      <ul id="optional" class="list muted"></ul>
+      <div id="coverBox" hidden>
+        <h3>Cover letter (attached)</h3>
+        <p class="muted">Written from your resume for this role. Edit it if you like, then re-attach.</p>
+        <textarea id="coverText" rows="10"></textarea>
+        <button id="reattachCover" class="btn" type="button">Re-attach edited letter</button>
+        <div id="coverStatus" class="status" role="status"></div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

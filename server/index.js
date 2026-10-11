@@ -6,10 +6,23 @@
 import express from "express";
 import cors from "cors";
 import { readFileSync, existsSync } from "fs";
+import { createHash } from "crypto";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import * as cheerio from "cheerio";
 import { saveJobs, findJobs, repositorySize } from "./jobRepository.js";
+import { htmlToText, normalizeJob, fetchJobsApify, fetchJobsValig } from "./linkedinJobs.js";
+import {
+  jobStoreConfigured, toRow, inScope, upsertJobs, findStoredJobs, recordDemand, markDemandCollected, linkedInJobsForQuery,
+  userFromToken, recordApplication, updateApplication, getJobById,
+  getTailorSession, saveTailorSession, saveTailoredResumeFile, getProfile,
+} from "./jobStore.js";
+import { normalizeQuery, FRESH_HOURS } from "./searchDemand.js";
+import { fetchEasyApplyForm, easyApplyTarget } from "./easyApply.js";
+import { fillForm } from "./easyApplyFill.js";
+import { rehearse, submit as submitApplication, enterCode } from "./greenhouseSubmit.js";
+import { registerExtensionRoutes } from "./extensionApi.js";
+import { searchApiSources, adzunaConfigured, loadCompanies } from "./jobSources.js";
 import { callLLM, llmProvider, llmModel, LLMUserError } from "./llm.js";
 
 /** Provider errors can leak account details (e.g. Groq org ids); only our own messages reach users. */
@@ -19,6 +32,7 @@ function sendLLMError(res, err, tag) {
   return res.status(502).json({ error: "The AI service had a problem handling that request. Please try again." });
 }
 import { runAssistantTurn, listGaps } from "./assistant.js";
+import { generateResume, draftGapEdits } from "./generateResume.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootEnv = resolve(__dirname, "../.env");
@@ -28,6 +42,7 @@ const cwdEnv = resolve(process.cwd(), ".env");
 const ENV_KEYS = [
   "RAPIDAPI_KEY", "APIFY_TOKEN", "APIFY_API_TOKEN", "RXRESUME_API_KEY", "RXRESUME_URL",
   "GROQ_API_KEY", "GROQ_MODEL", "ANTHROPIC_API_KEY", "VITE_ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_EFFORT", "GROQ_FALLBACK_MODELS", "LLM_PROVIDER",
+  "ADZUNA_APP_ID", "ADZUNA_APP_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
 ];
 
 function loadEnvFile(filePath) {
@@ -89,208 +104,12 @@ const PORT = process.env.PORT || 3001;
 
 app.use(cors({ origin: true }));
 // 2 MB: resumes can carry an embedded photo (data URL) when exported to Reactive Resume.
-app.use(express.json({ limit: "2mb" }));
+// Resume uploads (up to 10 MB, sent base64) get a larger body limit than everything else.
+const jsonDefault = express.json({ limit: "2mb" });
+const jsonUpload = express.json({ limit: "15mb" });
+app.use((req, res, next) => (req.method === "POST" && req.path === "/api/ext/resumes" ? jsonUpload : jsonDefault)(req, res, next));
 
 const RAPIDAPI_HOST = "linkedin-job-search-api.p.rapidapi.com";
-
-/** Strip HTML to plain text. */
-function htmlToText(html) {
-  if (typeof html !== "string" || !html.trim()) return "";
-  try {
-    const $ = cheerio.load(html);
-    return $.text().replace(/\s+/g, " ").trim();
-  } catch {
-    return html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-  }
-}
-
-/** Get job description from raw object (multiple possible keys, strip HTML). */
-function getJd(raw) {
-  const candidates = [
-    raw.description,
-    raw.jobDescription,
-    raw.jd,
-    raw.jobDescriptionText,
-    raw.fullDescription,
-    raw.snippet,
-    raw.content,
-    raw.body,
-    raw.details?.description,
-    raw.jobData?.description,
-    raw.descriptionHtml,
-    raw.jobDescriptionHtml,
-  ].filter(Boolean);
-  for (const v of candidates) {
-    const str = typeof v === "string" ? v : (v && typeof v === "object" && (v.text ?? v.content) ? (v.text ?? v.content) : "");
-    if (typeof str === "string" && str.trim().length > 0) {
-      return /<[a-z][\s\S]*>/i.test(str) ? htmlToText(str) : str.trim();
-    }
-  }
-  // Fallback: longest string value that looks like prose (likely the JD)
-  if (raw && typeof raw === "object") {
-    let best = "";
-    for (const value of Object.values(raw)) {
-      const s = typeof value === "string" ? value : (value?.text ?? value?.content);
-      if (typeof s === "string" && s.length > best.length && s.length > 80 && /\s/.test(s)) {
-        best = /<[a-z][\s\S]*>/i.test(s) ? htmlToText(s) : s.trim();
-      }
-    }
-    if (best) return best;
-  }
-  return "";
-}
-
-/** Normalize third-party job shape to ResumeIQ job shape (RapidAPI + Apify).
- * practicaltools/linkedin-jobs returns: jobId, title, company, location, datePosted, url, labels, logo, extractedAt, source, discoveredAt — no description field. */
-function normalizeJob(raw, index) {
-  const id = raw.jobId ?? raw.id ?? raw.urn ?? raw.link?.match(/-(\d+)\?/)?.[1] ?? `linkedin-${index}-${Date.now()}`;
-  const company =
-    (typeof raw.company === "string" ? raw.company : null) ??
-    raw.company?.name ??
-    raw.companyName ??
-    raw.employer ??
-    raw.organization ??
-    (typeof raw.company === "object" && raw.company !== null ? raw.company.name || raw.company.title : null) ??
-    "Company";
-  const locationStr =
-    (typeof raw.location === "string" ? raw.location : null) ??
-    raw.locationName ??
-    raw.place ??
-    raw.jobLocation ??
-    (raw.locationDetails ? [raw.locationDetails.city, raw.locationDetails.country].filter(Boolean).join(", ") : "") ??
-    "";
-  const jd = getJd(raw);
-  const salary = raw.salary ?? raw.compensation ?? (raw.salaryInfo?.raw ?? "") ?? raw.salaryRange ?? "";
-  const role =
-    raw.title ??
-    raw.jobTitle ??
-    raw.position ??
-    raw.positionTitle ??
-    raw.name ??
-    "Role";
-  return {
-    id: String(id).replace(/\s/g, "-"),
-    company: typeof company === "string" ? company : "Company",
-    role: typeof role === "string" ? role : "Role",
-    location: locationStr || "",
-    salary: salary || "",
-    badge: raw.badge ?? null,
-    source: "linkedin",
-    jd: jd || "",
-    url: raw.url ?? raw.jobUrl ?? raw.link ?? "",
-  };
-}
-
-/** Fetch jobs via Apify LinkedIn Jobs Scraper. Returns { jobs } or { error: string } on failure. */
-async function fetchJobsApify(token, keywords, location, limit, experienceLevels = []) {
-  const requested = Math.min(Number(limit) || 25, 150);
-  const maxPages = Math.min(Math.ceil(requested / 10), 15); // 10 jobs per page, cap 15 pages (150 jobs)
-  const url = `https://api.apify.com/v2/acts/practicaltools~linkedin-jobs/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=180&format=json`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      keywords: keywords || "Product Manager",
-      location: location || "India",
-      maxPages,
-      maxRequestsPerCrawl: Math.min(maxPages * 12, 200),
-      ...(experienceLevels.length ? { experienceLevel: experienceLevels } : {}),
-    }),
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    let detail = text.slice(0, 200);
-    try {
-      const err = JSON.parse(text);
-      if (err.error && err.error.message) detail = err.error.message;
-      else if (err.message) detail = err.message;
-    } catch (_) {}
-    console.error("[linkedin-jobs] Apify error", response.status, detail);
-    return { error: `Apify ${response.status}: ${detail}` };
-  }
-  let rawList;
-  try {
-    const parsed = JSON.parse(text);
-    if (Array.isArray(parsed)) {
-      rawList = parsed;
-    } else if (parsed && typeof parsed === "object") {
-      rawList = parsed.data ?? parsed.items ?? parsed.results ?? parsed.jobs ?? (parsed.content && Array.isArray(parsed.content) ? parsed.content : null);
-      if (!Array.isArray(rawList)) {
-        const keys = Object.keys(parsed).join(", ");
-        console.warn("[linkedin-jobs] Apify response not an array, top-level keys:", keys);
-        return { jobs: [] };
-      }
-    } else {
-      rawList = [];
-    }
-  } catch {
-    console.error("[linkedin-jobs] Apify response not valid JSON");
-    return { error: "Apify returned invalid JSON" };
-  }
-  if (!Array.isArray(rawList) || rawList.length === 0) {
-    console.log("[linkedin-jobs] Apify – no items in response");
-    return { jobs: [] };
-  }
-  // Apify practicaltools/linkedin-jobs returns items like { scrapedAt, total, jobs: [...] }. Flatten.
-  const flatRaw = [];
-  for (const item of rawList) {
-    if (item && typeof item === "object" && Array.isArray(item.jobs)) {
-      flatRaw.push(...item.jobs);
-    } else if (item && typeof item === "object" && (item.title || item.jobTitle || item.company || item.companyName)) {
-      flatRaw.push(item);
-    }
-  }
-  const toNormalize = flatRaw.length ? flatRaw : rawList;
-  if (toNormalize.length > 0 && toNormalize[0] && typeof toNormalize[0] === "object") {
-    const first = toNormalize[0];
-    console.log("[linkedin-jobs] Apify job keys:", Object.keys(first).join(", "));
-    const firstNormalized = normalizeJob(first, 0);
-    console.log("[linkedin-jobs] Apify first job JD length:", firstNormalized.jd?.length ?? 0);
-    if (!firstNormalized.jd && first && typeof first === "object") {
-      const descKeys = ["description", "jobDescription", "jd", "snippet", "content", "body", "fullDescription", "jobDescriptionText"];
-      const found = descKeys.find((k) => first[k] && typeof first[k] === "string");
-      console.log("[linkedin-jobs] JD missing – checked keys present:", found ? found : "none (actor may not return full descriptions in list output)");
-    }
-  }
-  const jobs = toNormalize.map((raw, i) => normalizeJob(raw, i));
-  console.log("[linkedin-jobs] Apify 200 – jobs count:", jobs.length);
-  return { jobs };
-}
-
-/** Fetch jobs with full JDs using Valig LinkedIn Jobs Scraper (returns description in one call). */
-async function fetchJobsValig(token, keywords, location, limit, experienceLevels = []) {
-  const reqLimit = Math.min(Number(limit) || 50, 100);
-  const url = `https://api.apify.com/v2/acts/valig~linkedin-jobs-scraper/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=180&format=json`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
-    body: JSON.stringify({
-      keywords: keywords || "Product Manager",
-      location: location || "India",
-      limit: reqLimit,
-      ...(experienceLevels.length ? { urlParam: [{ key: "f_E", value: experienceLevels.join(",") }] } : {}),
-    }),
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    console.warn("[linkedin-jobs] Valig Apify error", response.status, text.slice(0, 200));
-    return null;
-  }
-  let rawList = [];
-  try {
-    const parsed = JSON.parse(text);
-    rawList = Array.isArray(parsed) ? parsed : parsed?.data ?? parsed?.items ?? [];
-  } catch {
-    return null;
-  }
-  if (rawList.length === 0) return null;
-  const jobs = rawList.map((raw, i) => normalizeJob(raw, i));
-  console.log("[linkedin-jobs] Valig 200 – jobs count:", jobs.length, "with JDs");
-  return { jobs };
-}
 
 /** Fetch jobs via RapidAPI LinkedIn Job Search API. Returns { jobs } or null on failure. */
 async function fetchJobsRapidAPI(key, keywords, location, limit, offset) {
@@ -405,6 +224,32 @@ app.post("/api/assistant/gaps", async (req, res) => {
   }
 });
 
+// The Tailor step's wording pass: the resume reworded for the job (wording only), real gaps listed.
+app.post("/api/generate-resume", async (req, res) => {
+  const { resume, job } = req.body || {};
+  if (!resume || typeof resume !== "object" || !job?.jd) {
+    return res.status(400).json({ error: "resume and job (with jd) are required" });
+  }
+  try {
+    res.json(await generateResume({ resume, job: { role: job.role, company: job.company, jd: job.jd } }));
+  } catch (err) {
+    sendLLMError(res, err, "generate-resume");
+  }
+});
+
+// Tailor step "core edits": the gaps the user ticked, drafted into their resume with [blanks].
+app.post("/api/draft-gap-edits", async (req, res) => {
+  const { resume, job, gaps } = req.body || {};
+  if (!resume || typeof resume !== "object" || !job?.jd || !Array.isArray(gaps) || !gaps.length) {
+    return res.status(400).json({ error: "resume, job (with jd) and the ticked gaps are required" });
+  }
+  try {
+    res.json(await draftGapEdits({ resume, job: { role: job.role, company: job.company, jd: job.jd }, gaps }));
+  } catch (err) {
+    sendLLMError(res, err, "draft-gap-edits");
+  }
+});
+
 app.post("/api/assistant", async (req, res) => {
   const { resume, job, messages, decisions, focusGaps, questionsOnGap } = req.body || {};
   if (!resume || typeof resume !== "object" || !job?.jd) {
@@ -438,16 +283,78 @@ app.post("/api/assistant", async (req, res) => {
  * Saved roles from earlier live searches that match this one – returns
  * instantly so the job grid isn't empty while /api/linkedin-jobs scrapes.
  */
-app.get("/api/jobs/saved", (req, res) => {
+/** One stored role by id – used when the extension opens the app to tailor a resume for it. */
+app.get("/api/jobs/by-id", async (req, res) => {
+  const id = String(req.query.id || "").slice(0, 200);
+  if (!id || !jobStoreConfigured()) return res.status(400).json({ error: "id is required" });
+  try {
+    const job = await getJobById(id);
+    return job ? res.json({ job }) : res.status(404).json({ error: "That job isn't in ResumeIQ" });
+  } catch (err) {
+    console.warn("[jobs-db] by-id failed:", err.message);
+    return res.status(502).json({ error: "Couldn't load the job" });
+  }
+});
+
+app.get("/api/jobs/saved", async (req, res) => {
   const keywords = (req.query.keywords || "").trim();
   const location = (req.query.location || "").trim();
   const levels = String(req.query.experienceLevel || "")
     .split(",")
     .map((x) => x.trim())
     .filter((x) => /^[1-6]$/.test(x));
+  // The Supabase jobs repository (every source) when configured; otherwise the local file.
+  if (jobStoreConfigured()) {
+    try {
+      const jobs = await findStoredJobs({ keywords, location, limit: Math.min(Number(req.query.limit) || 100, 200) });
+      return res.json({ jobs, repository: "supabase" });
+    } catch (err) {
+      console.warn("[jobs-db] saved roles lookup failed, using the local file:", err.message);
+    }
+  }
   const limit = Math.min(Number(req.query.limit) || 30, 100);
   const jobs = findJobs({ keywords, location, levels, limit });
   res.json({ jobs, repositorySize: repositorySize() });
+});
+
+const isIndiaSearch = (location) => !location || /^india$/i.test(String(location).trim());
+
+/** Save a live LinkedIn search to the Supabase repository, tagged with its normalised search. */
+async function storeLinkedInResults(jobs, keywords, location) {
+  if (!jobStoreConfigured() || !isIndiaSearch(location) || !normalizeQuery(keywords)) return;
+  const key = normalizeQuery(keywords);
+  try {
+    const rows = jobs.filter((job) => /^\d+$/.test(job.id)).map((job) => toRow(job, { query: key })).filter(inScope);
+    const saved = await upsertJobs(rows);
+    await markDemandCollected(key);
+    console.log(`[jobs-db] live search "${key}" – ${saved} roles saved`);
+  } catch (err) {
+    console.warn("[jobs-db] saving live search failed:", err.message);
+  }
+}
+
+/**
+ * Roles from sources with official public APIs: company career boards on Greenhouse,
+ * Lever, Ashby and Workable (server/jobBoards.js), plus Adzuna India when keyed.
+ * Runs alongside the LinkedIn search; results are saved to the roles repository too.
+ */
+app.get("/api/jobs/sources", async (req, res) => {
+  const keywords = String(req.query.keywords || "").trim().slice(0, 120) || "Product Manager";
+  const location = String(req.query.location || "").trim().slice(0, 80) || "India";
+  const limit = Math.min(Number(req.query.limit) || 100, 200);
+  try {
+    const result = await searchApiSources({ keywords, location, limit });
+    const { added, total } = saveJobs(result.jobs, { location, levels: parseExperienceLevels(req.query.experienceLevel) });
+    console.log(
+      `[job-sources] "${keywords}" in ${location} – ${result.jobs.length} roles ` +
+        `(boards ${result.sources.companyBoards.boardsOk}/${result.sources.companyBoards.boardsChecked} ok, ` +
+        `adzuna ${result.sources.adzuna.configured ? result.sources.adzuna.found : "off"}), ${added} new, ${total} saved`,
+    );
+    return res.json(result);
+  } catch (err) {
+    console.warn("[job-sources] search failed:", err.message);
+    return res.status(502).json({ error: "Could not search career pages", jobs: [] });
+  }
 });
 
 /**
@@ -480,6 +387,24 @@ app.post("/api/linkedin-jobs/start", async (req, res) => {
   if (!token) return res.status(400).json({ error: "Live search not configured", fallback: true });
   const { keywords, location, limit, experienceLevel } = req.body || {};
   const levels = parseExperienceLevels(experienceLevel);
+  // Demand-driven: count the ask, and serve a search collected in the last FRESH_HOURS
+  // from the repository instead of paying for another live run.
+  const key = normalizeQuery(keywords);
+  if (jobStoreConfigured() && key && isIndiaSearch(location)) {
+    try {
+      const demand = await recordDemand(key, String(keywords).trim());
+      const collected = demand?.last_collected_at ? Date.parse(demand.last_collected_at) : 0;
+      if (Date.now() - collected < FRESH_HOURS * 60 * 60 * 1000) {
+        const jobs = await linkedInJobsForQuery(key);
+        if (jobs.length) {
+          console.log(`[jobs-db] "${key}" served from repository – ${jobs.length} roles, no live run`);
+          return res.json({ cached: true, jobs });
+        }
+      }
+    } catch (err) {
+      console.warn("[jobs-db] demand/cache check failed, searching live:", err.message);
+    }
+  }
   try {
     const { data } = await apifyJson(`/acts/${VALIG_ACTOR}/runs?timeout=180`, token, {
       method: "POST",
@@ -534,6 +459,7 @@ app.get("/api/linkedin-jobs/results", async (req, res) => {
       levels: parseExperienceLevels(req.query.experienceLevel),
     });
     console.log(`[jobs-repo] live search – ${jobs.length} roles, ${added} new, ${total} in repository`);
+    await storeLinkedInResults(jobs, req.query.keywords, location);
     return res.json({ jobs });
   } catch (err) {
     console.warn("[linkedin-jobs] results failed:", err.message);
@@ -554,9 +480,10 @@ app.get("/api/linkedin-jobs", async (req, res) => {
     .map((x) => x.trim())
     .filter((x) => /^[1-6]$/.test(x));
 
-  const respondWithJobs = (result) => {
+  const respondWithJobs = async (result) => {
     const { added, total } = saveJobs(result.jobs, { location, levels: experienceLevels });
     console.log(`[jobs-repo] saved search – ${added} new roles, ${total} in repository`);
+    await storeLinkedInResults(result.jobs, keywords, location);
     return res.json(result);
   };
 
@@ -1036,16 +963,51 @@ app.post("/api/rxresume/tailor-suggestions", async (req, res) => {
  * WYSIWYG editing, PDF export. We don't reimplement any of that; we just import
  * the data and point the user at Reactive Resume's own editor for it.
  */
+/** The signed-in ResumeIQ user from the request's bearer token, or null (signed out / no job store). */
+async function optionalUser(req) {
+  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  if (!token || !jobStoreConfigured()) return null;
+  return userFromToken(token).catch(() => null);
+}
+
+const builderReply = (resumeId, extra = {}) => ({
+  resumeId, builderUrl: `${RX_APP_URL}/builder/${resumeId}`, embeddable: RX_APP_URL !== "https://rxresu.me", ...extra,
+});
+
+/**
+ * Open the resume in the design editor. Signed in and tailoring a job: the editor resume made for
+ * that job before is reopened, so what the user changed in the editor stays. When ResumeIQ's copy has
+ * changed since (new accepted edits), the reply says so; with `refresh` the editor resume's content is
+ * replaced and its template and styling kept. Otherwise a new editor resume is made.
+ */
 app.post("/api/rxresume/open-in-builder", async (req, res) => {
   const key = getRxResumeKey();
   if (!key) {
     return res.status(400).json({ error: "RXRESUME_API_KEY not configured on the server (.env)." });
   }
-  const { resumeData, name } = req.body || {};
+  const { resumeData, name, jobId, refresh } = req.body || {};
   if (!resumeData) {
     return res.status(400).json({ error: "resumeData is required." });
   }
   try {
+    const user = jobId ? await optionalUser(req) : null;
+    const contentHash = createHash("sha256").update(JSON.stringify(resumeData)).digest("hex");
+    const session = user ? await getTailorSession(user.id, String(jobId)).catch((err) => (console.warn("[tailor] session lookup:", err.message), null)) : null;
+    if (session) {
+      const existing = await rxFetch(`/resumes/${session.rx_resume_id}`, { method: "GET" });
+      if (existing.ok && existing.data?.data) {
+        const changed = session.content_hash !== contentHash;
+        if (!changed || !refresh) return res.json(builderReply(session.rx_resume_id, { reused: true, contentChanged: changed }));
+        // New edits from ResumeIQ: replace the content, keep the template, layout and styling chosen in the editor.
+        const design = existing.data.data.metadata;
+        const data = { ...mapToRxResumeData(resumeData, design?.template), ...(design ? { metadata: design } : {}) };
+        const updated = await rxFetch(`/resumes/${session.rx_resume_id}`, { method: "PUT", body: JSON.stringify({ data }) });
+        if (!updated.ok) throw new Error(updated.data?.message || `Updating the editor resume failed (${updated.status})`);
+        await saveTailorSession(user.id, String(jobId), { rxResumeId: session.rx_resume_id, contentHash });
+        return res.json(builderReply(session.rx_resume_id, { reused: true, updated: true }));
+      }
+      // The editor resume was deleted in the editor: make a new one below.
+    }
     const { resumeId } = await importIntoRxResume(resumeData);
     // Imports get a random name ("Alone Brown Vulture"); label it after the candidate and job.
     const label = rxText(name).trim().slice(0, 120);
@@ -1053,12 +1015,71 @@ app.post("/api/rxresume/open-in-builder", async (req, res) => {
       const renamed = await rxFetch(`/resumes/${resumeId}`, { method: "PUT", body: JSON.stringify({ name: label }) });
       if (!renamed.ok) console.warn("Reactive Resume rename failed:", renamed.status, renamed.data?.message);
     }
-    return res.json({ resumeId, builderUrl: `${RX_APP_URL}/builder/${resumeId}`, embeddable: RX_APP_URL !== "https://rxresu.me" });
+    if (user) {
+      await saveTailorSession(user.id, String(jobId), { rxResumeId: resumeId, contentHash })
+        .catch((err) => console.warn("[tailor] saving the session failed:", err.message)); // the editor still opens
+    }
+    return res.json(builderReply(resumeId, { reused: false }));
   } catch (err) {
     console.error("Reactive Resume open-in-builder error:", err);
     return res.status(502).json({ error: "Failed to open resume in Reactive Resume", details: err.message });
   }
 });
+
+/**
+ * "Use this resume for applying": the PDF of the job's editor resume, exactly as the editor renders it,
+ * saved as the user's tailored resume for that job (replacing the previous one). The Chrome extension
+ * attaches it on that job's application.
+ */
+app.post("/api/tailored/use", async (req, res) => {
+  const user = await optionalUser(req);
+  if (!user) return res.status(401).json({ error: "Sign in to ResumeIQ to save this resume for applying" });
+  const jobId = String(req.body?.jobId || "");
+  if (!jobId) return res.status(400).json({ error: "Which job is this resume for?" });
+  try {
+    const session = await getTailorSession(user.id, jobId);
+    if (!session) return res.status(404).json({ error: "Open this job's resume in the editor first" });
+    const pdf = await rxFetchBinary(`/resumes/${session.rx_resume_id}/pdf`);
+    if (pdf.subarray(0, 5).toString() !== "%PDF-") throw new Error("the editor didn't return a PDF");
+    const [job, profile] = await Promise.all([getJobById(jobId).catch(() => null), getProfile(user.id).catch(() => null)]);
+    // The site's job ids aren't always the jobs table's: fall back to what the page sent.
+    const company = job?.company || String(req.body?.company || "").slice(0, 200);
+    const label = [company, job?.role || String(req.body?.title || "").slice(0, 200)].filter(Boolean).join(" – ") || "Tailored resume";
+    const person = [profile?.first_name, profile?.last_name].filter(Boolean).join("_") || "Resume";
+    const fileName = `${person}_${company || "tailored"}`.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/_+/g, "_").slice(0, 80) + ".pdf";
+    const resume = await saveTailoredResumeFile(user.id, { jobId, rxResumeId: session.rx_resume_id, name: `${label} (tailored)`.slice(0, 90), fileName, bytes: pdf });
+    return res.json({ resume, jobUrl: job?.url || null });
+  } catch (err) {
+    console.error("[tailor] saving the tailored resume failed:", err.message);
+    return res.status(502).json({ error: "Couldn't save the resume from the editor – please try again", details: err.message });
+  }
+});
+
+/**
+ * The job's editor resume, set to this content in `template` (made on first use, replaced after), and
+ * its PDF exactly as the editor renders it. Used by the extension's "Generate resume", which always
+ * uses one fixed template.
+ */
+async function renderJobResumePdf(userId, jobId, resumeData, { template, name }) {
+  if (!getRxResumeKey()) throw new Error("RXRESUME_API_KEY not configured on the server (.env)");
+  const session = await getTailorSession(userId, jobId);
+  let rxResumeId = null;
+  if (session) {
+    const updated = await rxFetch(`/resumes/${session.rx_resume_id}`, { method: "PUT", body: JSON.stringify({ data: mapToRxResumeData(resumeData, template) }) });
+    if (updated.ok) rxResumeId = session.rx_resume_id;
+    else console.warn("[generate] updating the editor resume failed, making a new one:", updated.status, updated.data?.message);
+  }
+  if (!rxResumeId) {
+    ({ resumeId: rxResumeId } = await importIntoRxResume(resumeData, template));
+    const label = rxText(name).trim().slice(0, 120);
+    if (label) await rxFetch(`/resumes/${rxResumeId}`, { method: "PUT", body: JSON.stringify({ name: label }) });
+  }
+  const contentHash = createHash("sha256").update(JSON.stringify(resumeData)).digest("hex");
+  await saveTailorSession(userId, jobId, { rxResumeId, contentHash });
+  const pdf = await rxFetchBinary(`/resumes/${rxResumeId}/pdf`);
+  if (pdf.subarray(0, 5).toString() !== "%PDF-") throw new Error("the editor didn't return a PDF");
+  return { pdf, rxResumeId };
+}
 
 app.get("/api/rxresume/templates", (_req, res) => res.json({ templates: RX_TEMPLATES }));
 
@@ -1088,6 +1109,123 @@ app.post("/api/rxresume/render-pdf", async (req, res) => {
 });
 
 // Health check for dev/proxy
+/**
+ * Easy Apply, phase 1 (nothing is submitted): the employer's real form for a job, and an
+ * autofill of it from the applicant's profile and resume for them to review.
+ */
+app.get("/api/easy-apply/form", async (req, res) => {
+  const jobId = String(req.query.jobId || "");
+  if (!easyApplyTarget(jobId)) return res.status(400).json({ error: "Easy Apply isn't available for this job yet" });
+  try {
+    return res.json(await fetchEasyApplyForm(jobId));
+  } catch (err) {
+    console.warn("[easy-apply] form fetch failed:", err.message);
+    return res.status(502).json({ error: "Could not load this application form" });
+  }
+});
+
+app.post("/api/easy-apply/fill", async (req, res) => {
+  const { fields, profile, resume, job } = req.body || {};
+  if (!Array.isArray(fields) || !fields.length) return res.status(400).json({ error: "fields are required" });
+  try {
+    return res.json(await fillForm({ fields: fields.slice(0, 80), profile: profile || {}, resume: resume || null, job: job || {} }));
+  } catch (err) {
+    return sendLLMError(res, err, "easy-apply");
+  }
+});
+
+/* Easy Apply, phase 2: fill the employer's real page and submit it – only when the signed-in applicant asks. */
+
+const easyApplySessions = new Map(); // verification-code sessionId → { userId, applicationId }
+
+async function easyApplyUser(req, res) {
+  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const user = jobStoreConfigured() ? await userFromToken(token) : null;
+  if (!user) res.status(401).json({ error: "Please sign in to apply" });
+  return user;
+}
+
+registerExtensionRoutes(app, {
+  userFromRequest: async (req) =>
+    jobStoreConfigured() ? userFromToken(String(req.headers.authorization || "").replace(/^Bearer\s+/i, "")) : null,
+  renderJobResumePdf,
+});
+
+/** The form is fetched again here rather than trusted from the browser; answers are keyed by its field ids. */
+async function easyApplyInput(body) {
+  const target = easyApplyTarget(body.jobId);
+  if (!target) throw Object.assign(new Error("Easy Apply isn't available for this job yet"), { status: 400 });
+  const form = await fetchEasyApplyForm(body.jobId);
+  return {
+    form,
+    input: {
+      board: target.board,
+      jobId: target.jobId,
+      fields: form.fields,
+      values: body.values && typeof body.values === "object" ? body.values : {},
+      country: String(body.country || "India").slice(0, 60),
+      resumePdfBase64: typeof body.resumePdf === "string" ? body.resumePdf : null,
+    },
+  };
+}
+
+app.post("/api/easy-apply/rehearse", async (req, res) => {
+  if (!(await easyApplyUser(req, res))) return;
+  try {
+    const { input } = await easyApplyInput(req.body || {});
+    return res.json(await rehearse(input));
+  } catch (err) {
+    console.warn("[easy-apply] rehearsal failed:", err.message);
+    return res.status(err.status || 502).json({ error: err.status ? err.message : "Couldn't open the application page" });
+  }
+});
+
+app.post("/api/easy-apply/submit", async (req, res) => {
+  const user = await easyApplyUser(req, res);
+  if (!user) return;
+  let applicationId = null;
+  try {
+    const { form, input } = await easyApplyInput(req.body || {});
+    if (!input.resumePdfBase64) return res.status(400).json({ error: "Your resume PDF is missing" });
+    const result = await submitApplication(input);
+    const status = result.status === "submitted" ? "submitted" : result.status === "code_required" ? "code_required" : "failed";
+    applicationId = await recordApplication({
+      user_id: user.id, job_id: req.body.jobId, source: form.ats, company: form.job.company, title: form.job.title,
+      apply_url: form.applyUrl, status, details: { outcome: result.status, errors: result.errors, problems: result.problems },
+      submitted_at: status === "submitted" ? new Date().toISOString() : null,
+    });
+    if (result.sessionId) easyApplySessions.set(result.sessionId, { userId: user.id, applicationId });
+    console.log(`[easy-apply] ${form.job.company} – ${form.job.title}: ${result.status}`);
+    return res.json({ ...result, applicationId });
+  } catch (err) {
+    console.warn("[easy-apply] submit failed:", err.message);
+    if (applicationId) await updateApplication(applicationId, { status: "failed", details: { error: err.message } });
+    return res.status(err.status || 502).json({ error: err.status ? err.message : "Couldn't submit on the application page" });
+  }
+});
+
+app.post("/api/easy-apply/code", async (req, res) => {
+  const user = await easyApplyUser(req, res);
+  if (!user) return;
+  const { sessionId, code } = req.body || {};
+  const session = easyApplySessions.get(sessionId);
+  if (!session || session.userId !== user.id) return res.status(404).json({ status: "expired", error: "This application timed out – please submit again" });
+  try {
+    const result = await enterCode(sessionId, String(code || "").slice(0, 20));
+    if (result.status === "submitted") {
+      await updateApplication(session.applicationId, { status: "submitted", submitted_at: new Date().toISOString() });
+      easyApplySessions.delete(sessionId);
+    } else if (result.status !== "code_required") {
+      easyApplySessions.delete(sessionId);
+      await updateApplication(session.applicationId, { status: "failed", details: { outcome: result.status, errors: result.errors } });
+    }
+    return res.json(result);
+  } catch (err) {
+    console.warn("[easy-apply] code entry failed:", err.message);
+    return res.status(502).json({ error: "Couldn't enter the code on the application page" });
+  }
+});
+
 app.get("/api/health", (_, res) =>
   res.json({
     ok: true,
@@ -1096,6 +1234,8 @@ app.get("/api/health", (_, res) =>
     apify: !!getApifyToken(),
     rapidapi: !!getRapidApiKey(),
     rxresume: !!getRxResumeKey(),
+    adzuna: adzunaConfigured(),
+    careerBoards: loadCompanies().length,
   })
 );
 
@@ -1113,6 +1253,8 @@ if (!process.env.VERCEL) app.listen(PORT, () => {
   if (rapid) console.log("  RAPIDAPI_KEY: loaded (fallback)");
   if (!apify && !rapid) console.log("  No API keys – will use free LinkedIn guest API when job search runs");
   console.log(`  LLM: ${llmProvider() ? `${llmProvider()} – ${llmModel()}` : "not configured – set GROQ_API_KEY or ANTHROPIC_API_KEY"}`);
+  console.log(`  Career boards: ${loadCompanies().length} companies (server/jobBoards.js)`);
+  console.log(`  Adzuna India: ${adzunaConfigured() ? "configured" : "off – set ADZUNA_APP_ID and ADZUNA_APP_KEY"}`);
   if (rxresume) console.log("  RXRESUME_API_KEY: loaded (Reactive Resume AI tailoring)");
   else console.log("  RXRESUME_API_KEY: not set – suggestion generation will fail until it's configured");
 });

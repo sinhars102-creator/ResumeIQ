@@ -10,16 +10,23 @@
     "preview": "vite preview",
     "server": "node server/index.js",
     "start": "node server/index.js",
-    "dev:all": "concurrently \"npm run dev\" \"npm run server\""
+    "dev:all": "concurrently \"npm run dev\" \"npm run server\"",
+    "test": "node --test \"server/**/*.test.js\"",
+    "check-sources": "node scripts/check-job-sources.mjs",
+    "collect": "node --env-file-if-exists=.env server/collectJobs.js",
+    "ext:config": "node --env-file-if-exists=.env scripts/ext-config.mjs",
+    "ext:package": "node --env-file-if-exists=.env scripts/ext-package.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
+    "@supabase/supabase-js": "^2.117.2",
     "@vercel/analytics": "^1.6.1",
     "cheerio": "^1.2.0",
     "cors": "^2.8.5",
     "express": "^4.21.0",
     "jspdf": "^4.2.0",
     "pdfjs-dist": "^5.4.624",
+    "playwright-core": "^1.63.0",
     "posthog-js": "^1.435.6",
     "react": "^19.2.0",
     "react-dom": "^19.2.0"

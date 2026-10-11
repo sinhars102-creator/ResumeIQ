@@ -137,9 +137,13 @@ async function callAnthropic({ system, user, maxTokens }, model) {
     .join("\n");
 }
 
-/** Run one prompt, falling back across models/providers when one is rate limited. */
-export async function callLLM({ system, user, maxTokens = 1500, json = false }) {
-  const provider = llmProvider();
+/**
+ * Run one prompt, falling back across models/providers when one is rate limited.
+ * `provider` ("groq" | "anthropic") puts that provider first for this call only – e.g. a step where
+ * quality matters more than speed – with the other still as the fallback.
+ */
+export async function callLLM({ system, user, maxTokens = 1500, json = false, provider: preferred }) {
+  const provider = preferred === "anthropic" && anthropicKey() ? "anthropic" : preferred === "groq" && process.env.GROQ_API_KEY ? "groq" : llmProvider();
   if (!provider) throw new Error("No LLM provider configured. Set GROQ_API_KEY or ANTHROPIC_API_KEY in .env.");
   const prompt = { system, user, maxTokens, json };
   const groq = process.env.GROQ_API_KEY ? groqModels().map((m) => () => callGroq(prompt, m)) : [];

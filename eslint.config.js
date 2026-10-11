@@ -26,4 +26,14 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  {
+    // The API server and scripts run on Node, not in the browser.
+    files: ['server/**/*.js', 'api/**/*.js', 'scripts/**/*.{js,mjs}'],
+    languageOptions: { globals: { ...globals.node } },
+  },
+  {
+    // The Chrome extension runs in the browser with the chrome.* extension APIs.
+    files: ['extension/**/*.js'],
+    languageOptions: { globals: { ...globals.browser, ...globals.webextensions } },
+  },
 ])

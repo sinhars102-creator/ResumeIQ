@@ -1,16 +1,49 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import * as pdfjsLib from "pdfjs-dist";
-import { jsPDF } from "jspdf";
 
 // PDF.js worker: bundle via Vite so production gets a valid asset URL (fixes "load failed" on Vercel)
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { track, bucket } from "./analytics.js";
+import EasyApplyPanel, { SignIn } from "./easyApply/EasyApplyPanel.jsx";
+import { supabase as supabaseClient, loadProfile } from "./easyApply/supabaseClient.js";
+import {
+  MAX_BULLETS_PER_EXPERIENCE, PHOTO_WIDTH_MM, PHOTO_HEIGHT_MM, DEFAULT_SECTION_ORDER, DEFAULT_PDF_FORMAT, buildResumePdf,
+} from "./resumePdf.js";
+import UploadStep from "./UploadStep.jsx";
+import {
+  computeLocalMatchScore, experienceFromRoles, getCandidateYears, parseJdYearsRange, resumeForAI, scoreResume,
+} from "./matchScore.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 
 // API origin: VITE_API_URL if set; otherwise the local dev server, or the same origin in
 // production builds (the API is deployed alongside the frontend at /api on Vercel).
 const API_BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://localhost:3001" : "");
+// Unfinished features: on when running locally, off on the live site unless its env turns them on
+// (VITE_FEATURE_EASY_APPLY=1, VITE_FEATURE_AUTO_APPLY=1).
+const feature = (flag) => (flag ?? (import.meta.env.DEV ? "1" : "0")) === "1";
+const FEATURES = {
+  easyApply: feature(import.meta.env.VITE_FEATURE_EASY_APPLY), // submitting Greenhouse applications needs the worker server
+  autoApply: feature(import.meta.env.VITE_FEATURE_AUTO_APPLY), // "Apply with this resume" on Preview (RES-54, in progress)
+};
+
+// The marketing landing page, served by this app at "/" (the product lives at /app).
+const HOME_URL = "/";
+
+// Where a role came from – shown as a pill on its card and in the "View posting" link.
+const SOURCE_LABELS = {
+  linkedin: "LinkedIn",
+  greenhouse: "Career page",
+  lever: "Career page",
+  ashby: "Career page",
+  workable: "Career page",
+  adzuna: "Adzuna",
+  naukri: "Naukri",
+  glassdoor: "Glassdoor",
+};
+const sourceLabel = (source) => SOURCE_LABELS[source] || null;
+const SOURCE_SITES = { linkedin: "LinkedIn", adzuna: "Adzuna", naukri: "Naukri", glassdoor: "Glassdoor" };
+const postingLinkText = (source) => (SOURCE_SITES[source] ? `on ${SOURCE_SITES[source]}` : "on the company's career page");
 
 const SAMPLE_RESUME = {
   name: "Alex Chen",
@@ -447,6 +480,224 @@ const styles = {
     fontFamily: "inherit",
     fontSize: 12,
     color: "var(--rq-text-2)",
+  },
+  jobFilterRow: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 10,
+    marginBottom: 14,
+  },
+  filterChip: (active) => ({
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    minHeight: 40,
+    padding: "8px 14px",
+    borderRadius: 999,
+    border: `1px solid ${active ? "var(--rq-accent)" : "var(--rq-border-strong)"}`,
+    background: active ? "var(--rq-accent)" : "var(--rq-surface)",
+    color: active ? "#FFFFFF" : "var(--rq-text)",
+    fontFamily: "inherit",
+    fontSize: 13,
+    fontWeight: 600,
+    cursor: "pointer",
+  }),
+  easyApplyTag: {
+    fontSize: 11,
+    fontWeight: 700,
+    padding: "3px 8px",
+    borderRadius: 6,
+    background: "color-mix(in srgb, var(--rq-accent) 14%, transparent)",
+    color: "var(--rq-accent)",
+  },
+  jobsLayout: {
+    display: "grid",
+    gridTemplateColumns: "190px minmax(0, 1fr)",
+    gap: 28,
+    alignItems: "start",
+  },
+  jobsNav: {
+    position: "sticky",
+    top: 96,
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+    paddingRight: 20,
+    borderRight: "1px solid var(--rq-border)",
+  },
+  jobsNavItem: (active) => ({
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    minHeight: 44,
+    padding: "8px 12px",
+    borderRadius: 10,
+    border: "none",
+    background: active ? "color-mix(in srgb, var(--rq-accent) 12%, transparent)" : "transparent",
+    color: active ? "var(--rq-accent)" : "var(--rq-text-2)",
+    fontFamily: "inherit",
+    fontSize: 14,
+    fontWeight: active ? 600 : 500,
+    textAlign: "left",
+    textDecoration: "none",
+    cursor: active ? "default" : "pointer",
+  }),
+  pasteJdDetails: {
+    marginBottom: 20,
+    padding: "12px 16px",
+    border: "1px solid var(--rq-border)",
+    borderRadius: 12,
+    background: "var(--rq-surface)",
+  },
+  pasteJdSummary: {
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 600,
+    color: "var(--rq-text)",
+    minHeight: 24,
+  },
+  jobList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 16,
+  },
+  jobRow: (hovered) => ({
+    display: "flex",
+    alignItems: "stretch",
+    gap: 0,
+    background: "var(--rq-surface)",
+    border: `1px solid ${hovered ? "var(--rq-border-strong)" : "var(--rq-border)"}`,
+    borderRadius: 16,
+    overflow: "hidden",
+    cursor: "pointer",
+    boxShadow: hovered ? "0 8px 24px rgba(31, 42, 46, 0.08)" : "0 1px 2px rgba(31, 42, 46, 0.04)",
+    transition: "box-shadow 0.15s ease, border-color 0.15s ease",
+  }),
+  jobRowBody: {
+    flex: 1,
+    minWidth: 0,
+    padding: "20px 22px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+  },
+  companyMark: {
+    flex: "none",
+    width: 52,
+    height: 52,
+    borderRadius: 12,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 22,
+    fontWeight: 700,
+    color: "var(--rq-accent)",
+    background: "color-mix(in srgb, var(--rq-accent) 10%, var(--rq-surface))",
+    border: "1px solid var(--rq-border)",
+  },
+  jobTagRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 6,
+  },
+  jobTag: {
+    fontSize: 11,
+    fontWeight: 600,
+    padding: "3px 8px",
+    borderRadius: 6,
+    background: "color-mix(in srgb, var(--rq-border) 60%, transparent)",
+    color: "var(--rq-text-2)",
+  },
+  jobRowTitle: {
+    margin: 0,
+    fontSize: 20,
+    fontWeight: 700,
+    lineHeight: 1.25,
+    color: "var(--rq-text)",
+  },
+  jobRowCompany: {
+    marginTop: 2,
+    fontSize: 14,
+    color: "var(--rq-text-2)",
+  },
+  jobRowMeta: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "8px 24px",
+    paddingTop: 12,
+    borderTop: "1px solid var(--rq-border)",
+  },
+  jobRowMetaItem: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 13,
+    color: "var(--rq-text)",
+  },
+  jobRowPreview: {
+    margin: 0,
+    fontSize: 13,
+    lineHeight: 1.55,
+    color: "var(--rq-text-2)",
+  },
+  jobRowActions: {
+    display: "flex",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  jobRowLink: {
+    fontSize: 12,
+    color: "var(--rq-info)",
+  },
+  jobIconButton: {
+    width: 40,
+    height: 40,
+    padding: 0, // the global button padding would squeeze the icon to nothing
+    borderRadius: 999,
+    border: "1px solid var(--rq-border)",
+    background: "var(--rq-surface)",
+    color: "var(--rq-text-2)",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+  },
+  jobScorePanel: {
+    flex: "none",
+    width: 210,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+    padding: "20px 16px",
+    textAlign: "center",
+    background: "var(--rq-scrim)",
+    color: "#FFFFFF",
+  },
+  jobScoreValue: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 28,
+    fontWeight: 700,
+  },
+  jobScoreTier: {
+    fontSize: 14,
+    fontWeight: 700,
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+  },
+  jobScoreNote: {
+    marginTop: 4,
+    fontSize: 11,
+    lineHeight: 1.4,
+    color: "rgba(255,255,255,0.72)",
   },
   jobGrid: {
     display: "grid",
@@ -1087,6 +1338,21 @@ function getStepOrder(step) {
   }
 }
 
+/** Roles Easy Apply can fill inside ResumeIQ (Greenhouse career pages, for now). */
+const isEasyApplyJob = (job) => String(job?.id || "").startsWith("gh-");
+
+/** "3 days ago" style age for a posting date, or "" when unknown. */
+function timeAgo(date) {
+  const ms = Date.now() - Date.parse(date || "");
+  if (!Number.isFinite(ms) || ms < 0) return "";
+  const units = [["year", 365 * 864e5], ["month", 30 * 864e5], ["week", 7 * 864e5], ["day", 864e5], ["hour", 36e5], ["minute", 6e4]];
+  for (const [unit, size] of units) {
+    const n = Math.floor(ms / size);
+    if (n >= 1) return `${n} ${unit}${n === 1 ? "" : "s"} ago`;
+  }
+  return "Just now";
+}
+
 function getScoreTier(score) {
   if (score >= 75) {
     return { color: "var(--rq-accent)", label: "Strong Match" };
@@ -1095,37 +1361,6 @@ function getScoreTier(score) {
     return { color: "var(--rq-warn)", label: "Moderate Match" };
   }
   return { color: "var(--rq-danger)", label: "Needs Alignment" };
-}
-
-const MATCH_STOPWORDS = new Set([
-  "the", "and", "for", "with", "you", "your", "will", "are", "that", "this",
-  "from", "have", "has", "our", "to", "of", "in", "on", "at", "as", "is",
-  "be", "by", "or", "we", "it", "its", "their", "they", "them", "who",
-  "what", "when", "where", "why", "how", "not", "but", "if", "can",
-  "across", "into", "more", "most", "also", "than", "then", "over",
-  "under", "about", "each", "every", "both", "other", "such", "only",
-  "own", "same", "too", "very", "just", "should", "now", "new", "team",
-  "teams", "role", "work", "working", "years", "year",
-]);
-
-function tokenizeForMatch(text) {
-  return (text || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9+#./\s-]/g, " ")
-    .split(/\s+/)
-    .filter((w) => w.length >= 3 && !MATCH_STOPWORDS.has(w));
-}
-
-function buildResumeCorpus(resume) {
-  const parts = [
-    resume.title || "",
-    resume.summary || "",
-    (resume.skills || []).join(" "),
-    (resume.certifications || []).join(" "),
-    (resume.achievements || []).join(" "),
-    ...(resume.experience || []).flatMap((e) => [e.role || "", ...(e.bullets || [])]),
-  ];
-  return parts.join(" \n ");
 }
 
 /**
@@ -1159,90 +1394,6 @@ function writeCachedScore(key, value) {
   } catch {
     // Storage full or blocked: the score still shows, it just won't persist.
   }
-}
-
-/**
- * Experience points out of 25 from the candidate's years vs the JD's required range.
- * Computed in code so the card estimate and the AI analysis agree, and it never varies between runs.
- */
-function experienceFit(candidateYears, jd) {
-  const range = parseJdYearsRange(jd);
-  if (!candidateYears || !range) return null;
-  const { min, max } = range;
-  let points;
-  if (candidateYears >= min) points = max != null && candidateYears > max + 4 ? 20 : 25;
-  else points = Math.round((25 * candidateYears) / min);
-  const required = max != null ? `${min}–${max}` : `${min}+`;
-  return { points, candidateYears, required, short: candidateYears < min };
-}
-
-/**
- * Client-side keyword/skills overlap score — no API calls, so it can run
- * instantly across an entire job grid (up to 150 results) without hitting
- * Claude rate limits or cost. The detailed Claude-scored breakdown still
- * runs on-demand in scoreResume() once a specific job is opened.
- */
-/** Share of resume bullets that show a measurable result (numbers, %, currency, multipliers). */
-function impactPoints(resume) {
-  const bullets = (resume.experience || []).flatMap((e) => e.bullets || []).filter(Boolean);
-  if (!bullets.length) return 0;
-  const quantified = bullets.filter((b) => /\d|%|₹|\$|€|£/.test(b)).length;
-  // Half of the bullets quantified earns full marks.
-  return Math.round(25 * Math.min(1, quantified / bullets.length / 0.5));
-}
-
-/**
- * The four 0–25 parts behind every match score. Keywords, impact and experience are computed here
- * and shared by the quick estimate and the AI analysis; only "skills" differs between them.
- */
-function scoreParts(resume, job, candidateYears = getCandidateYears(resume)) {
-  if (!resume || !job) return null;
-  const jdText = `${job.role || ""} ${job.jd || ""}`;
-  const jdTokens = tokenizeForMatch(jdText);
-  const resumeTokens = tokenizeForMatch(buildResumeCorpus(resume));
-  if (!jdTokens.length || !resumeTokens.length) return null;
-
-  // Terms the JD repeats are its real requirements; one-off words are mostly boilerplate.
-  const resumeSet = new Set(resumeTokens);
-  const jdFreq = new Map();
-  jdTokens.forEach((t) => jdFreq.set(t, (jdFreq.get(t) || 0) + 1));
-  const repeated = [...jdFreq.entries()].filter(([, count]) => count >= 2);
-  const signalTerms = repeated.length >= 8 ? repeated : [...jdFreq.entries()];
-  let matchedWeight = 0;
-  let totalWeight = 0;
-  signalTerms.forEach(([term, count]) => {
-    const weight = Math.min(count, 4);
-    totalWeight += weight;
-    if (resumeSet.has(term)) matchedWeight += weight;
-  });
-  const keywordShare = totalWeight ? matchedWeight / totalWeight : 0;
-
-  // Estimate of skills: how many of the role's skills the candidate lists – not the share of a long list.
-  const skills = resume.skills || [];
-  const jdLower = jdText.toLowerCase();
-  const matchedSkills = skills.filter((s) => s && jdLower.includes(s.toLowerCase()));
-  const skillShare = skills.length ? Math.min(1, matchedSkills.length / Math.min(skills.length, 8)) : keywordShare;
-
-  const fit = experienceFit(candidateYears, jdText);
-  return {
-    skills: Math.round(25 * skillShare),
-    experience: fit ? fit.points : 20,
-    impact: impactPoints(resume),
-    keywords: Math.round(25 * keywordShare),
-    matchedSkills,
-    fit,
-  };
-}
-
-/**
- * Instant estimate for the job grid (no API calls): the same four parts as the AI analysis,
- * with skills estimated from the resume's skill list instead of the role's must-haves.
- */
-function computeLocalMatchScore(resume, job, candidateYears = getCandidateYears(resume)) {
-  const parts = scoreParts(resume, job, candidateYears);
-  if (!parts) return null;
-  const score = parts.skills + parts.experience + parts.impact + parts.keywords;
-  return { score: Math.max(5, Math.min(98, score)), matchedSkills: parts.matchedSkills };
 }
 
 /**
@@ -1323,58 +1474,6 @@ function heuristicExtractYears(jd) {
   return match ? `${match[1].trim()} years` : "Not specified";
 }
 
-/** Total years of experience: the parser's figure, else the span from the earliest role's start year to today. */
-const MONTHS = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, sept: 8, oct: 9, nov: 10, dec: 11 };
-
-/**
- * A role period ("Aug 2018 – Oct 2019", "Jan 2024 – Present", "03/2021 - 12/2021", "2019 – 2021") as an
- * inclusive range of month indexes (year * 12 + month), or null if it has no recognisable dates.
- * A year without a month starts in January / ends in December.
- */
-function parsePeriod(period, now = new Date()) {
-  const text = String(period || "").toLowerCase();
-  const points = [];
-  const re = /(?:(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s*,?\s*|(\d{1,2})\s*[/.-]\s*)?((?:19|20)\d{2})|\b(present|current|now|till date|to date|ongoing)\b/g;
-  let m;
-  while ((m = re.exec(text)) && points.length < 2) {
-    if (m[4]) points.push({ index: now.getFullYear() * 12 + now.getMonth(), monthKnown: true });
-    else {
-      const month = m[1] ? MONTHS[m[1].slice(0, m[1] === "sept" ? 4 : 3)] : m[2] ? Number(m[2]) - 1 : null;
-      points.push({ year: Number(m[3]), month: month != null && month >= 0 && month <= 11 ? month : null });
-    }
-  }
-  if (!points.length) return null;
-  const toIndex = (p, isEnd) => (p.index != null ? p.index : p.year * 12 + (p.month != null ? p.month : isEnd ? 11 : 0));
-  const start = toIndex(points[0], false);
-  const end = points[1] ? toIndex(points[1], true) : toIndex(points[0], true);
-  return end >= start ? { start, end: Math.min(end, now.getFullYear() * 12 + now.getMonth()) } : null;
-}
-
-/**
- * Total experience from the roles' dates: months worked (overlapping roles counted once) / 12, plus
- * the gaps between roles. This is what the resume's history adds up to, whatever its summary claims.
- */
-function experienceFromRoles(resume, now = new Date()) {
-  const ranges = (resume?.experience || [])
-    .map((e) => parsePeriod(e.period, now))
-    .filter(Boolean)
-    .sort((a, b) => a.start - b.start);
-  if (!ranges.length) return null;
-  const merged = [];
-  for (const r of ranges) {
-    const last = merged[merged.length - 1];
-    if (last && r.start <= last.end + 1) last.end = Math.max(last.end, r.end);
-    else merged.push({ ...r });
-  }
-  const months = merged.reduce((sum, r) => sum + (r.end - r.start + 1), 0);
-  const gaps = [];
-  for (let i = 1; i < merged.length; i++) {
-    const gapMonths = merged[i].start - merged[i - 1].end - 1;
-    if (gapMonths > 3) gaps.push({ from: merged[i - 1].end + 1, to: merged[i].start - 1, months: gapMonths });
-  }
-  return { months, years: Math.round((months / 12) * 10) / 10, start: merged[0].start, gaps };
-}
-
 /** "Nov 2019" for a month index. */
 function formatMonthIndex(index) {
   const names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -1386,15 +1485,6 @@ function formatDuration(months) {
   const y = Math.floor(months / 12);
   const m = months % 12;
   return [y && `${y} year${y === 1 ? "" : "s"}`, m && `${m} month${m === 1 ? "" : "s"}`].filter(Boolean).join(" ") || "0 months";
-}
-
-/** Years of experience: from the roles' dates when they can be read, else the figure the resume states. */
-function getCandidateYears(resume) {
-  if (!resume) return null;
-  const fromRoles = experienceFromRoles(resume);
-  if (fromRoles && fromRoles.months > 0) return fromRoles.years;
-  const stated = Number(resume.yearsOfExperience);
-  return Number.isFinite(stated) && stated > 0 ? Math.round(stated) : null;
 }
 
 /**
@@ -1426,16 +1516,6 @@ function yearsToLinkedInLevels(years) {
   if (years < 6) return ["3", "4"];
   if (years < 12) return ["4", "5"];
   return ["5", "6"];
-}
-
-/** Years range a JD asks for, e.g. "4-6 years" → { min: 4, max: 6 }, "5+ years" → { min: 5, max: null }. */
-function parseJdYearsRange(jd) {
-  const match = (jd || "").match(/(\d{1,2})\s*(?:(?:-|–|—|to)\s*(\d{1,2}))?\s*(\+)?\s*(?:\+\s*)?years?/i);
-  if (!match) return null;
-  const min = Number(match[1]);
-  const max = match[2] ? Number(match[2]) : null;
-  if (min > 30 || (max != null && max < min)) return null;
-  return { min, max };
 }
 
 /** True when the JD's stated range sits clearly below the candidate's experience. */
@@ -1560,99 +1640,6 @@ ${pastedText}`;
   }
 }
 
-/** The resume without its embedded photo – the AI never needs it, and the data URL alone can exceed request limits. */
-function resumeForAI(resume) {
-  if (!resume) return resume;
-  // eslint-disable-next-line no-unused-vars
-  const { photoUrl, ...rest } = resume;
-  const computed = experienceFromRoles(resume);
-  return computed ? { ...rest, totalExperience: `${computed.years} years (${computed.months} months across listed roles)` } : rest;
-}
-
-async function scoreResume(job, resumeData, candidateYears = getCandidateYears(resumeData)) {
-  // Used for any field the model leaves out; on a failed call the step shows "Score unavailable" instead of made-up numbers.
-  const fallback = {
-    score: null,
-    label: "Score unavailable",
-    summary: "",
-    breakdown: { skills: 0, experience: 0, impact: 0, keywords: 0 },
-    keyGaps: [],
-  };
-  try {
-    const system =
-      "You are a professional resume evaluator. Return ONLY valid JSON, no markdown.";
-    const parts = scoreParts(resumeData, job, candidateYears);
-    const fit = parts?.fit;
-    const user = `You are evaluating how well a candidate's resume matches a specific job description.
-${fit ? `The candidate has ${fit.candidateYears} years of experience; the role asks for ${fit.required} years.\n` : ""}
-List the role's must-have skills, tools and certifications (6–10, from the JD's requirements, not nice-to-haves),
-and for each say whether the resume clearly shows it (stated skill, certification, or work described in a bullet).
-
-Return ONLY a JSON object with this shape:
-{
-  "summary": "2–3 sentence overview of fit.",
-  "mustHaveSkills": [{ "skill": "name", "candidateHas": true }],
-  "keyGaps": ["gap 1", "gap 2", "gap 3"]
-}
-
-Job description:
-${job.jd}
-
-Resume JSON:
-${JSON.stringify(resumeForAI(resumeData), null, 2)}`;
-    const text = await callLLM(system, user, 1500);
-    const cleaned = text.replace(/```json|```/g, "").trim();
-    const parsed = JSON.parse(cleaned);
-    // Scores are computed here from the facts, so the same resume and job always give the same breakdown.
-    const mustHaves = Array.isArray(parsed.mustHaveSkills) ? parsed.mustHaveSkills.filter((m) => m && m.skill) : [];
-    if (parts) {
-      parsed.breakdown = {
-        skills: mustHaves.length ? Math.round((25 * mustHaves.filter((m) => m.candidateHas === true).length) / mustHaves.length) : parts.skills,
-        experience: parts.experience,
-        impact: parts.impact,
-        keywords: parts.keywords,
-      };
-      parsed.score = parsed.breakdown.skills + parsed.breakdown.experience + parsed.breakdown.impact + parsed.breakdown.keywords;
-      parsed.label = getScoreTier(parsed.score).label;
-    }
-    return {
-      score: typeof parsed.score === "number" ? parsed.score : fallback.score,
-      label: parsed.label || fallback.label,
-      summary: parsed.summary || fallback.summary,
-      breakdown: {
-        skills:
-          parsed.breakdown && typeof parsed.breakdown.skills === "number"
-            ? parsed.breakdown.skills
-            : fallback.breakdown.skills,
-        experience:
-          parsed.breakdown && typeof parsed.breakdown.experience === "number"
-            ? parsed.breakdown.experience
-            : fallback.breakdown.experience,
-        impact:
-          parsed.breakdown && typeof parsed.breakdown.impact === "number"
-            ? parsed.breakdown.impact
-            : fallback.breakdown.impact,
-        keywords:
-          parsed.breakdown && typeof parsed.breakdown.keywords === "number"
-            ? parsed.breakdown.keywords
-            : fallback.breakdown.keywords,
-      },
-      keyGaps:
-        Array.isArray(parsed.keyGaps) && parsed.keyGaps.length
-          ? parsed.keyGaps.slice(0, 3)
-          : fallback.keyGaps,
-    };
-  } catch (e) {
-    console.error("Score error:", e);
-    return {
-      ...fallback,
-      unavailable: true,
-      summary: `We couldn't score this resume against the job (${e.message || "AI request failed"}). The assistant below can still help you tailor it.`,
-    };
-  }
-}
-
-const MAX_BULLETS_PER_EXPERIENCE = 3;
 
 /** Apply approved suggestions to resume on the client so AFTER view always shows changes. */
 function applyApprovedChangesClientSide(resumeData, approvedSuggestions) {
@@ -1714,7 +1701,11 @@ function applyApprovedChangesClientSide(resumeData, approvedSuggestions) {
 
     if (section === "Skills") {
       if (type === "Rewrite" && original && proposed) {
-        resume.skills = proposed.split(/[,·|]|\s+\|\s+/).map((x) => x.trim()).filter(Boolean);
+        // One skill rewritten (what the assistant and the wording pass propose); else the whole list.
+        const skills = resume.skills || [];
+        const idx = skills.findIndex((x) => typeof x === "string" && x.trim() === original.trim());
+        if (idx !== -1) skills[idx] = proposed.trim();
+        else resume.skills = proposed.split(/[,·|]|\s+\|\s+/).map((x) => x.trim()).filter(Boolean);
       } else if (type === "Addition" && proposed) {
         resume.skills = resume.skills || [];
         resume.skills.push(proposed.trim());
@@ -1732,69 +1723,13 @@ function applyApprovedChangesClientSide(resumeData, approvedSuggestions) {
   return resume;
 }
 
-/** Photo size in PDF: 3:4 aspect ratio (same as on-screen). */
-const PHOTO_WIDTH_MM = 28;
-const PHOTO_HEIGHT_MM = Math.round(PHOTO_WIDTH_MM * (4 / 3) * 10) / 10;
-
-const DEFAULT_SECTION_ORDER = ["summary", "experience", "education", "skills"];
 const PDF_FONT_OPTIONS = [
   { value: "helvetica", label: "Helvetica" },
   { value: "times", label: "Times New Roman" },
   { value: "courier", label: "Courier" },
 ];
 
-const DEFAULT_PDF_FORMAT = {
-  marginMm: 14,
-  lineH: 4.2,
-  lineHSmall: 3.8,
-  sectionGap: 5,
-  fontSizeName: 16,
-  fontSizeTitle: 10,
-  fontSizeContact: 9,
-  fontSizeLabel: 9,
-  fontSizeBody: 10,
-  fontSizeBullet: 9,
-  photoWidthMm: 28,
-  photoGapMm: 10,
-  showDivider: true,
-  dividerColor: "#c8d0da",
-  fontHeader: "helvetica",
-  fontBody: "helvetica",
-  fontBullet: "helvetica",
-  sectionOrder: [...DEFAULT_SECTION_ORDER],
-  skillsInHeader: false,
-  singlePage: false,
-  fontColor: "#000000",
-  backgroundColor: "#ffffff",
-};
 const MM_TO_PX = 2.5;
-
-function parseColor(hexOrRgb, fallbackR, fallbackG, fallbackB) {
-  const def = { r: fallbackR ?? 0, g: fallbackG ?? 0, b: fallbackB ?? 0 };
-  if (!hexOrRgb || typeof hexOrRgb !== "string") return def;
-  const hex = hexOrRgb.trim().replace(/^#/, "");
-  if (/^[0-9a-fA-F]{6}$/.test(hex)) {
-    return { r: parseInt(hex.slice(0, 2), 16), g: parseInt(hex.slice(2, 4), 16), b: parseInt(hex.slice(4, 6), 16) };
-  }
-  const m = hexOrRgb.match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/);
-  if (m) return { r: +m[1], g: +m[2], b: +m[3] };
-  return def;
-}
-
-function parseDividerColor(hexOrRgb) {
-  if (!hexOrRgb || typeof hexOrRgb !== "string") return { r: 200, g: 208, b: 218 };
-  const hex = hexOrRgb.trim().replace(/^#/, "");
-  if (/^[0-9a-fA-F]{6}$/.test(hex)) {
-    return {
-      r: parseInt(hex.slice(0, 2), 16),
-      g: parseInt(hex.slice(2, 4), 16),
-      b: parseInt(hex.slice(4, 6), 16),
-    };
-  }
-  const m = hexOrRgb.match(/rgb\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)/);
-  if (m) return { r: +m[1], g: +m[2], b: +m[3] };
-  return { r: 200, g: 208, b: 218 };
-}
 
 /**
  * Rebuild a PDF page's reading order from text positions. Design tools (Canva
@@ -1930,240 +1865,30 @@ async function extractPdfPhoto(file) {
   }
 }
 
-/**
- * Single-column resume PDF: photo top-left, name/title/contact to the right, then Summary, Experience, Education, Skills.
- * Uses format options so it matches the on-screen PDF preview.
- */
 function downloadResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FORMAT) {
-  if (!resumeData || typeof resumeData !== "object") return;
-  const doc = new jsPDF({ format: "a4", unit: "mm" });
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
-  const singlePage = format.singlePage === true;
-  const scale = singlePage ? 0.78 : 1;
-  let margin = (format.marginMm ?? 14) * scale;
-  const hasPhoto = typeof photoDataUrl === "string" && photoDataUrl.length > 0;
-  const photoGap = hasPhoto ? (format.photoGapMm ?? 10) * scale : 0;
-  const photoW = hasPhoto ? (format.photoWidthMm ?? PHOTO_WIDTH_MM) * scale : 0;
-  const photoH = Math.round(photoW * (4 / 3) * 10) / 10;
-  const headerTextX = margin + photoW + photoGap;
-  const contentW = pageW - margin * 2;
-  const headerTextW = pageW - headerTextX - margin;
-  let lineH = (format.lineH ?? 4.2) * scale;
-  let lineHSmall = (format.lineHSmall ?? 3.8) * scale;
-  let sectionGap = (format.sectionGap ?? 5) * scale;
-  let y = margin;
-
-  const bg = parseColor(format.backgroundColor, 255, 255, 255);
-  doc.setFillColor(bg.r, bg.g, bg.b);
-  doc.rect(0, 0, pageW, pageH, "F");
-
-  doc.setCharSpace(0);
-  doc.setFont("helvetica", "normal");
-
-  const fc = parseColor(format.fontColor, 0, 0, 0);
-  const fs = (v, d) => Math.max(1, ((v ?? d) * scale));
-  const checkPage = (yVal) => {
-    if (singlePage) return yVal;
-    if (yVal > pageH - margin - 10) {
-      doc.addPage();
-      doc.setFillColor(bg.r, bg.g, bg.b);
-      doc.rect(0, 0, pageW, pageH, "F");
-      return margin;
-    }
-    return yVal;
-  };
-
-  const drawWrappedText = (text, x, maxWidth, lineHeight) => {
-    doc.setCharSpace(0);
-    const lines = doc.splitTextToSize(String(text || ""), maxWidth);
-    lines.forEach((line) => {
-      doc.text(line, x, y);
-      y += lineHeight;
-    });
-  };
-
-  const fontH = format.fontHeader || "helvetica";
-  const fontB = format.fontBody || "helvetica";
-  const fontBul = format.fontBullet || "helvetica";
-  const bulletIndentMm = 4;
-  const sectionOrder = Array.isArray(format.sectionOrder) && format.sectionOrder.length
-    ? format.sectionOrder
-    : DEFAULT_SECTION_ORDER;
-
-  // —— Photo top-left ——
-  if (hasPhoto) {
-    try {
-      doc.addImage(photoDataUrl, "PNG", margin, margin, photoW, photoH);
-    } catch (e) {
-      console.warn("PDF photo failed", e);
-    }
-  }
-
-  // —— Name, title, contact: align name top with photo top (baseline = margin + ascent) ——
-  const ascentMm = (format.fontSizeName ?? 16) * 0.3528 * scale;
-  let yHeader = margin + ascentMm;
-  doc.setFont(fontH, "bold");
-  doc.setFontSize(fs(format.fontSizeName, 16));
-  doc.setCharSpace(0);
-  doc.setTextColor(fc.r, fc.g, fc.b);
-  doc.text(resumeData.name || "Resume", headerTextX, yHeader);
-  yHeader += 6;
-
-  doc.setFont(fontB, "normal");
-  doc.setFontSize(fs(format.fontSizeTitle, 10));
-  doc.setCharSpace(0);
-  const titleLines = doc.splitTextToSize(resumeData.title || "", headerTextW);
-  titleLines.forEach((line) => {
-    doc.text(line, headerTextX, yHeader);
-    yHeader += lineHSmall;
-  });
-  yHeader += 3;
-
-  doc.setFontSize(fs(format.fontSizeContact, 9));
-  doc.setCharSpace(0);
-  const contactLines = doc.splitTextToSize(resumeData.contact || "", headerTextW);
-  contactLines.forEach((line) => {
-    doc.text(line, headerTextX, yHeader);
-    yHeader += lineHSmall;
-  });
-
-  if (format.skillsInHeader && (resumeData.skills || []).length > 0) {
-    yHeader += lineHSmall;
-    doc.setFont(fontB, "normal");
-    doc.setFontSize(fs(format.fontSizeBody, 10));
-    doc.setCharSpace(0);
-    doc.setTextColor(fc.r, fc.g, fc.b);
-    const skillLines = doc.splitTextToSize((resumeData.skills || []).join(" | "), headerTextW);
-    skillLines.forEach((line) => {
-      doc.text(line, headerTextX, yHeader);
-      yHeader += lineHSmall;
-    });
-    doc.setTextColor(fc.r, fc.g, fc.b);
-  }
-
-  y = Math.max(margin + photoH, yHeader) + 5;
-  if (format.showDivider !== false) {
-    const dc = parseDividerColor(format.dividerColor);
-    doc.setDrawColor(dc.r, dc.g, dc.b);
-    doc.setLineWidth(0.3);
-    doc.line(margin, y - 1, pageW - margin, y - 1);
-  }
-  y += 3;
-
-  const bodySectionOrder = format.skillsInHeader
-    ? sectionOrder.filter((k) => k !== "skills")
-    : sectionOrder;
-
-  const renderSection = (key) => {
-    if (key === "summary") {
-      doc.setFont(fontH, "bold");
-      doc.setFontSize(fs(format.fontSizeLabel, 9));
-      doc.setCharSpace(0);
-      doc.setTextColor(90, 107, 138);
-      doc.text("SUMMARY", margin, y);
-      doc.setTextColor(fc.r, fc.g, fc.b);
-      y += lineH;
-      doc.setFont(fontB, "normal");
-      doc.setFontSize(fs(format.fontSizeBody, 10));
-      if (resumeData.summary) {
-        drawWrappedText(resumeData.summary, margin, contentW, lineHSmall);
-      }
-      return;
-    }
-    if (key === "experience") {
-      y = checkPage(y);
-      doc.setFont(fontH, "bold");
-      doc.setFontSize(fs(format.fontSizeLabel, 9));
-      doc.setCharSpace(0);
-      doc.setTextColor(90, 107, 138);
-      doc.text("EXPERIENCE", margin, y);
-      doc.setTextColor(fc.r, fc.g, fc.b);
-      y += lineH;
-      (resumeData.experience || []).forEach((exp) => {
-        y = checkPage(y);
-        doc.setFont(fontB, "bold");
-        doc.setFontSize(fs(format.fontSizeBody, 10));
-        doc.setCharSpace(0);
-        doc.text(`${exp.role || ""} · ${exp.company || ""}`, margin, y);
-        y += lineHSmall;
-        doc.setFont(fontBul, "normal");
-        doc.setFontSize(fs(format.fontSizeBullet, 9));
-        doc.setCharSpace(0);
-        if (exp.period) {
-          doc.text(exp.period, margin, y);
-          y += lineHSmall;
-        }
-        (exp.bullets || []).slice(0, MAX_BULLETS_PER_EXPERIENCE).forEach((b) => {
-          y = checkPage(y);
-          const textW = contentW - bulletIndentMm - 2;
-          const lines = doc.splitTextToSize(String(b), textW);
-          const bulletPrefix = "• ";
-          doc.text(bulletPrefix, margin, y);
-          const textX = margin + bulletIndentMm;
-          if (lines.length) {
-            doc.text(lines[0], textX, y);
-            y += lineHSmall;
-            for (let i = 1; i < lines.length; i++) {
-              y = checkPage(y);
-              doc.text(lines[i], textX, y);
-              y += lineHSmall;
-            }
-          }
-        });
-        y += lineHSmall;
-      });
-      return;
-    }
-    if (key === "education") {
-      y = checkPage(y);
-      doc.setFont(fontH, "bold");
-      doc.setFontSize(fs(format.fontSizeLabel, 9));
-      doc.setCharSpace(0);
-      doc.setTextColor(90, 107, 138);
-      doc.text("EDUCATION", margin, y);
-      doc.setTextColor(fc.r, fc.g, fc.b);
-      y += lineH;
-      doc.setFont(fontB, "normal");
-      doc.setFontSize(fs(format.fontSizeBody, 10));
-      (resumeData.education || []).forEach((ed) => {
-        y = checkPage(y);
-        doc.text(`${ed.degree || ""} · ${ed.school || ""} · ${ed.year || ""}`, margin, y);
-        y += lineHSmall + 1;
-      });
-      return;
-    }
-    if (key === "skills") {
-      y = checkPage(y);
-      doc.setFont(fontH, "bold");
-      doc.setFontSize(fs(format.fontSizeLabel, 9));
-      doc.setCharSpace(0);
-      doc.setTextColor(90, 107, 138);
-      doc.text("SKILLS", margin, y);
-      doc.setTextColor(fc.r, fc.g, fc.b);
-      y += lineH;
-      doc.setFont(fontB, "normal");
-      doc.setFontSize(fs(format.fontSizeBody, 10));
-      const skills = resumeData.skills || [];
-      if (skills.length) {
-        drawWrappedText(skills.join(" · "), margin, contentW, lineHSmall);
-      }
-    }
-  };
-
-  bodySectionOrder.forEach((key, i) => {
-    renderSection(key);
-    if (i < bodySectionOrder.length - 1) y += sectionGap;
-  });
-
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(7);
-  doc.setTextColor(160, 160, 160);
-  doc.text("ResumeIQ", margin, pageH - 6);
-  doc.setTextColor(0, 0, 0);
-
+  const doc = buildResumePdf(resumeData, photoDataUrl, format);
+  if (!doc) return;
   const safeName = (resumeData.name || "resume").replace(/[^a-z0-9-_]/gi, "_").slice(0, 40);
   doc.save(`${safeName}_resume.pdf`);
+}
+
+/** The resume as a PDF data URI (for Easy Apply's upload), with its photo when it has one. */
+async function resumePdfDataUri(resumeData, format = DEFAULT_PDF_FORMAT) {
+  const photoUrl = resumeData?.photoUrl || null;
+  let photoDataUrl = photoUrl && photoUrl.startsWith("data:") ? photoUrl : null;
+  if (photoUrl && !photoDataUrl) {
+    try {
+      const blob = await (await fetch(photoUrl)).blob();
+      photoDataUrl = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      photoDataUrl = null; // the PDF still goes, just without the photo
+    }
+  }
+  return buildResumePdf(resumeData, photoDataUrl, format)?.output("datauristring") || null;
 }
 
 const FONT_FAMILY_MAP = { helvetica: "Helvetica, Arial", times: "Times New Roman, serif", courier: "Courier New, monospace" };
@@ -2965,6 +2690,250 @@ function DiffTextarea({ original, value, onChange }) {
   );
 }
 
+/** Word-level changes from `before` to `after` (punctuation/case-only differences count as unchanged). */
+function wordChanges(before, after) {
+  const a = String(before || "").split(/\s+/).filter(Boolean);
+  const b = String(after || "").split(/\s+/).filter(Boolean);
+  const key = (w) => w.toLowerCase().replace(/[^\p{L}\p{N}%$₹+]/gu, "");
+  const lcs = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--)
+    for (let j = b.length - 1; j >= 0; j--) lcs[i][j] = key(a[i]) === key(b[j]) ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  const parts = [];
+  const push = (kind, word) => {
+    const last = parts[parts.length - 1];
+    if (last?.kind === kind) last.text += ` ${word}`;
+    else parts.push({ kind, text: word });
+  };
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && key(a[i]) === key(b[j])) {
+      push("same", b[j]);
+      i++;
+      j++;
+    } else if (i < a.length && (j === b.length || lcs[i + 1][j] >= lcs[i][j + 1])) push("removed", a[i++]); // removed words read first
+    else push("added", b[j++]);
+  }
+  return parts;
+}
+
+const changeAddedStyle = { background: "color-mix(in srgb, #3B82F6 18%, transparent)", borderRadius: 3, padding: "0 2px" };
+const changeRemovedStyle = { color: "var(--rq-text-2)", textDecoration: "line-through", textDecorationColor: "var(--rq-danger)" };
+
+const blankStyle = { background: "color-mix(in srgb, var(--rq-warn) 22%, transparent)", borderBottom: "1px dashed var(--rq-warn)", borderRadius: 3, padding: "0 2px", fontStyle: "italic" };
+
+/** [Blanks] left for the user to fill in, marked so they stand out. */
+const BLANK = /(\[[^\]]+\])/;
+function withBlanks(text) {
+  if (!BLANK.test(text)) return text;
+  return text.split(BLANK).map((piece, k) => (BLANK.test(piece) ? <span key={k} style={blankStyle} title="Fill this in">{piece}</span> : piece));
+}
+const countBlanks = (text) => (String(text || "").match(/\[[^\]]+\]/g) || []).length;
+
+/** `after` shown as track changes against `before`: new words in light blue, removed words struck through. */
+function TrackChanges({ before, after }) {
+  if (before == null || before === after) return withBlanks(after);
+  return wordChanges(before, after).map((part, k) => (
+    <span key={k}>
+      {k > 0 && " "}
+      {part.kind === "same" ? withBlanks(part.text) : <span style={part.kind === "added" ? changeAddedStyle : changeRemovedStyle}>{part.kind === "added" ? withBlanks(part.text) : part.text}</span>}
+    </span>
+  ));
+}
+
+/** A line shown as track changes; click to edit it as plain text (committed when you click away). */
+function ChangeableLine({ text, before, onCommit, as: Tag = "div", style }) {
+  const [editing, setEditing] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!editing || !ref.current) return;
+    ref.current.textContent = text;
+    ref.current.focus();
+    // Caret at the end.
+    const range = document.createRange();
+    range.selectNodeContents(ref.current);
+    range.collapse(false);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+  }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Separate keys for viewing and editing: the browser changes the editable element's text as you
+  // type, outside React, so reusing it for the view would keep that text next to the redrawn one.
+  if (!editing) {
+    return (
+      <Tag key="view" className="rq-editable" style={{ ...style, cursor: "text" }} title="Click to edit" onClick={() => setEditing(true)}>
+        <TrackChanges before={before} after={text} />
+      </Tag>
+    );
+  }
+  return (
+    <Tag
+      key="edit"
+      ref={ref}
+      contentEditable
+      suppressContentEditableWarning
+      className="rq-editable"
+      style={style}
+      onBlur={(e) => {
+        setEditing(false);
+        const next = (e.currentTarget.textContent || "").replace(/\s+/g, " ").trim();
+        if (next && next !== text) onCommit(next);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.currentTarget.blur();
+        }
+        if (e.key === "Escape") setEditing(false);
+      }}
+    />
+  );
+}
+
+const undoButtonStyle = { border: "none", background: "none", padding: "0 2px", color: "var(--rq-accent)", fontSize: 11.5, fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", textDecoration: "underline" };
+
+/**
+ * The Tailor step's resume: `working` (the resume with accepted edits) shown as track changes
+ * against `base` (the resume as uploaded). Every changed line has Undo; any summary, bullet or role
+ * title line can be clicked and edited – an edit becomes an accepted edit like the others.
+ * `edits` are the accepted suggestions: { id, section, type, original, displayOriginal?, proposed }.
+ */
+function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
+  if (!working) return null;
+  const summaryEdits = edits.filter((e) => e.section === "Summary");
+  // The summary as it was, with the wording pass's tidied text for the sentences it changed (so
+  // spacing fixes don't show as changes).
+  let summaryBefore = base?.summary || "";
+  for (const e of summaryEdits) if (e.displayOriginal && e.original) summaryBefore = summaryBefore.replace(e.original, e.displayOriginal);
+  const editFor = (section, text) => edits.find((e) => e.section === section && e.proposed === text);
+  const beforeOf = (e) => (e.type === "Addition" ? "" : e.displayOriginal ?? e.original);
+  const snippet = (text) => (text.length > 60 ? `${text.slice(0, 57)}…` : text);
+  // What an edit changed, in a few words: its first added words (else its first removed ones).
+  const whatChanged = (e) => {
+    const parts = wordChanges(beforeOf(e), e.proposed);
+    const added = parts.find((p) => p.kind === "added");
+    if (added) return `added “${snippet(added.text)}”`;
+    const removed = parts.find((p) => p.kind === "removed");
+    return removed ? `removed “${snippet(removed.text)}”` : `“${snippet(e.proposed)}”`;
+  };
+
+  return (
+    <div style={styles.resumePaper}>
+      <div style={styles.resumeHeaderRow}>
+        <div style={styles.resumeHeaderText}>
+          <div style={styles.resumeNameText}>{working.name}</div>
+          <div style={styles.resumeTitleText}>{working.title}</div>
+          <div style={styles.resumeContactText}>{working.contact}</div>
+        </div>
+      </div>
+      <hr style={styles.resumeHr} />
+      {working.summary && (
+        <>
+          <div style={styles.resumeSectionTitle}>Summary</div>
+          <ChangeableLine
+            text={working.summary}
+            before={summaryBefore}
+            style={styles.resumeBodyText}
+            onCommit={(next) => onEditLine({ section: "Summary", original: working.summary, proposed: next })}
+          />
+          {summaryEdits.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", marginTop: 4 }}>
+              {summaryEdits.map((e) => (
+                <button key={e.id} type="button" style={undoButtonStyle} title={`Put back: ${beforeOf(e)}`} onClick={() => onUndo(e.id)}>
+                  Undo: {whatChanged(e)}
+                </button>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      <div style={styles.resumeSectionTitle}>Experience</div>
+      {(working.experience || []).map((exp, idx) => (
+        <div key={idx}>
+          <div style={styles.resumeExpHeaderRow}>
+            <div style={styles.resumeExpTitle}>
+              {exp.role} · {exp.company}
+            </div>
+            <div style={styles.resumeExpPeriod}>{exp.period}</div>
+          </div>
+          <ul style={styles.resumeBullets}>
+            {(exp.bullets || []).map((b, i) => {
+              const edit = editFor("Experience", b);
+              return (
+                <li key={i} style={{ ...styles.resumeBullet }}>
+                  <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                    <ChangeableLine
+                      text={b}
+                      before={edit ? beforeOf(edit) : null}
+                      style={{ flex: 1 }}
+                      onCommit={(next) => onEditLine({ section: "Experience", experienceIndex: idx, original: b, proposed: next, edit })}
+                    />
+                    {edit && (
+                      <button type="button" style={undoButtonStyle} title={edit.type === "Addition" ? "Remove this added bullet" : `Put back: ${beforeOf(edit)}`} onClick={() => onUndo(edit.id)}>
+                        Undo
+                      </button>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ))}
+
+      <div style={styles.resumeSectionTitle}>Education</div>
+      {(working.education || []).map((ed, idx) => (
+        <div key={idx} style={styles.resumeEducationRow}>
+          <strong>{ed.degree}</strong> · {ed.school} · {ed.year}
+        </div>
+      ))}
+
+      {(working.skills || []).length > 0 && (
+        <>
+          <div style={styles.resumeSectionTitle}>Skills</div>
+          <div style={styles.resumeSkillsWrap}>
+            {working.skills.map((skill, idx) => {
+              const edit = editFor("Skills", skill);
+              return (
+                <div key={idx} style={{ ...styles.resumeSkillChip, ...(edit ? { display: "flex", alignItems: "center", gap: 4 } : {}) }}>
+                  {edit
+                    ? <ChangeableLine as="span" text={skill} before={beforeOf(edit)} onCommit={(next) => onEditLine({ section: "Skills", original: skill, proposed: next, edit })} />
+                    : skill}
+                  {edit && (
+                    <button type="button" style={{ ...undoButtonStyle, textDecoration: "none" }} title={edit.type === "Addition" ? "Remove this added skill" : `Put back: ${beforeOf(edit)}`} onClick={() => onUndo(edit.id)}>
+                      ×
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+      {(working.certifications || []).length > 0 && (
+        <>
+          <div style={styles.resumeSectionTitle}>Certifications</div>
+          <ul style={styles.resumeBullets}>
+            {working.certifications.map((c, idx) => (
+              <li key={idx} style={styles.resumeBullet}>{c}</li>
+            ))}
+          </ul>
+        </>
+      )}
+      {(working.achievements || []).length > 0 && (
+        <>
+          <div style={styles.resumeSectionTitle}>Achievements</div>
+          <ul style={styles.resumeBullets}>
+            {working.achievements.map((a, idx) => (
+              <li key={idx} style={styles.resumeBullet}>{a}</li>
+            ))}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 function ResumeDocument({ resume, highlights = [], dim = false, afterMode = false, editable = false, onEdit }) {
   if (!resume || typeof resume !== "object") {
     return (
@@ -3166,6 +3135,39 @@ const DEFAULT_PARSING_STATUS = { extractText: false, parseStructure: false, find
 
 export default function ResumeIQ() {
   const [step, setStep] = useState("upload");
+  // Job whose Easy Apply panel is open (Greenhouse roles only, for now).
+  const [easyApplyJob, setEasyApplyJob] = useState(null);
+  const [easyApplyOnly, setEasyApplyOnly] = useState(false);
+
+  // "/app?signin=1" (from the Chrome extension's "Open ResumeIQ"): sign in, or confirm the
+  // extension is connected when already signed in.
+  const [signInPrompt, setSignInPrompt] = useState(null); // null | "signin" | "connected"
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("signin") !== "1" || !supabaseClient) return undefined;
+    params.delete("signin");
+    window.history.replaceState({}, "", `${window.location.pathname}${params.size ? `?${params}` : ""}`);
+    supabaseClient.auth.getSession().then(({ data }) => setSignInPrompt(data.session ? "connected" : "signin"));
+    const { data } = supabaseClient.auth.onAuthStateChange((_e, session) => {
+      if (session) setSignInPrompt((p) => (p === "signin" ? "connected" : p));
+    });
+    return () => data.subscription.unsubscribe();
+  }, []);
+
+  // "/app?easyApply=gh-<board>-<id>" (from the Chrome extension) opens Easy Apply for that role.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const jobId = params.get("easyApply");
+    if (!FEATURES.easyApply || !jobId || !/^gh-[A-Za-z0-9_-]+-\d+$/.test(jobId)) return;
+    params.delete("easyApply");
+    window.history.replaceState({}, "", `${window.location.pathname}${params.size ? `?${params}` : ""}`);
+    fetch(`${API_BASE.replace(/\/$/, "")}/api/easy-apply/form?jobId=${encodeURIComponent(jobId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((form) => {
+        if (form) setEasyApplyJob({ id: jobId, role: form.job.title, company: form.job.company, location: form.job.location, url: form.applyUrl, source: "greenhouse" });
+      })
+      .catch(() => {});
+  }, []);
   const [jobs, setJobs] = useState([]);
   const jobsRef = useRef(jobs);
   const searchIdRef = useRef(0);
@@ -3200,8 +3202,6 @@ export default function ResumeIQ() {
   const [uploadedFileSize, setUploadedFileSize] = useState("");
   const [parsingStatus, setParsingStatus] = useState(() => ({ ...DEFAULT_PARSING_STATUS }));
   const [parsingError, setParsingError] = useState(null);
-  const [dropZoneHover, setDropZoneHover] = useState(false);
-  const fileInputRef = useRef(null);
   const [score, setScore] = useState(null);
   const [scoreBreakdown, setScoreBreakdown] = useState(null);
   const [suggestions, setSuggestions] = useState([]);
@@ -3214,6 +3214,31 @@ export default function ResumeIQ() {
   const [pdfFormat, setPdfFormat] = useState(() => ({ ...DEFAULT_PDF_FORMAT }));
   // Tailoring assistant conversation for the selected job: { messages, decisions }.
   const [assistantChat, setAssistantChat] = useState({ messages: [], decisions: [] });
+  // The Tailor step's wording pass for the open job: loading → done (with the gaps it can't fix) or error.
+  const [generation, setGeneration] = useState({ jobId: null, status: "idle", realGaps: [] });
+  // "Core edits": the gaps the user ticks, drafted into the resume with [blanks] (per job).
+  const [coreEdits, setCoreEdits] = useState({ jobId: null, status: "idle", ticked: [], added: [], skipped: [] });
+  // The assistant is still there for anyone who'd rather talk a gap through.
+  const [showAssistant, setShowAssistant] = useState(false);
+  const tailorJobRef = useRef(null); // the job the Tailor step shows (late wording-pass results for another job are dropped)
+  // Auto apply (run by the Chrome extension) for the job on Preview: saving → running → submitted |
+  // needs_review | failed | unsupported, plus no_extension / signin before it starts.
+  const [applyRun, setApplyRun] = useState({ jobId: null, status: "idle" });
+  const extReadyRef = useRef(false); // the extension's bridge answered on this page
+  useEffect(() => {
+    const onMessage = (event) => {
+      if (event.source !== window || event.origin !== window.location.origin || event.data?.source !== "resumeiq-ext") return;
+      if (event.data.type === "ext:ready") extReadyRef.current = true;
+      if (event.data.type === "autoapply:update" && event.data.state) {
+        const { status } = event.data.state;
+        setApplyRun({ jobId: event.data.jobId, ...event.data.state });
+        if (status !== "running") track("auto_apply_finished", { status, checks: (event.data.state.checks || []).length });
+      }
+    };
+    window.addEventListener("message", onMessage);
+    window.postMessage({ source: "resumeiq-app", type: "ext:ping" }, window.location.origin);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
   const [openingInBuilder, setOpeningInBuilder] = useState(false);
   const [openInBuilderError, setOpenInBuilderError] = useState(null);
   // Reactive Resume builder embedded in the Updated Resume step: { builderUrl, embeddable }.
@@ -3309,6 +3334,8 @@ export default function ResumeIQ() {
     }
     return list;
   }, [jobs, jobSortBy, jobMatchScores, showBelowLevelJobs, belowLevelJobIds]);
+  const easyApplyCount = useMemo(() => sortedJobs.filter(isEasyApplyJob).length, [sortedJobs]);
+  const visibleJobs = useMemo(() => (easyApplyOnly ? sortedJobs.filter(isEasyApplyJob) : sortedJobs), [sortedJobs, easyApplyOnly]);
 
   const handleJobAnalyzeClick = (job) => {
     setSelectedJob(job);
@@ -3318,8 +3345,49 @@ export default function ResumeIQ() {
     setSuggestions([]);
     setAssistantChat({ messages: [], decisions: [] });
     setApprovedIds(new Set());
+    setUpdatedResume(null); // the previous job's tailored resume
+    setShowAssistant(false);
+    setCoreEdits({ jobId: job.id, status: "idle", ticked: [], added: [], skipped: [] });
+    tailorJobRef.current = job.id;
     scoreAgainstJob(job);
+    rewordForJob(job);
   };
+
+  // (Declared after the resume state and handleJobAnalyzeClick, which these effects use.)
+  // "/app?tailor=<job id>" (from the Chrome extension) opens tailoring for that role, with the
+  // resume from the signed-in user's profile – or after they upload one, if there's none.
+  const [pendingTailorJob, setPendingTailorJob] = useState(null);
+  const [tailorNotice, setTailorNotice] = useState("");
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const jobId = params.get("tailor");
+    if (!jobId) return;
+    params.delete("tailor");
+    window.history.replaceState({}, "", `${window.location.pathname}${params.size ? `?${params}` : ""}`);
+    (async () => {
+      const r = await fetch(`${API_BASE.replace(/\/$/, "")}/api/jobs/by-id?id=${encodeURIComponent(jobId)}`).catch(() => null);
+      const job = r?.ok ? (await r.json()).job : null;
+      if (!job) {
+        setTailorNotice("Couldn't load that job – try Add to ResumeIQ in the extension again.");
+        return;
+      }
+      setJobs((prev) => (prev.some((j) => j.id === job.id) ? prev : [job, ...prev]));
+      setPendingTailorJob(job);
+      const session = supabaseClient ? (await supabaseClient.auth.getSession()).data.session : null;
+      const profile = session ? await loadProfile(session.user.id).catch(() => null) : null;
+      if (profile?.resume) setResume(profile.resume);
+      else setTailorNotice(`Upload your resume to tailor it for ${job.role} at ${job.company}.`);
+    })();
+  }, []);
+  useEffect(() => {
+    if (!pendingTailorJob || !resume) return;
+    const job = pendingTailorJob;
+    setPendingTailorJob(null);
+    setTailorNotice("");
+    track("tailor_from_extension");
+    handleJobAnalyzeClick(job);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once the resume is available
+  }, [pendingTailorJob, resume]);
 
   const handleExtractJob = async () => {
     if (!linkedInText.trim()) return;
@@ -3352,16 +3420,36 @@ export default function ResumeIQ() {
    * Returns how many were added.
    */
   const mergeJobs = (incoming, { markFresh = false } = {}) => {
+    // The same role often appears on LinkedIn and on the company's own career page:
+    // match on company + title + city and keep one card, with the longest description.
+    const dupKey = (job) => {
+      const norm = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      return `${norm(job.company)}|${norm(job.role)}|${norm(String(job.location || "").split(",")[0])}`;
+    };
     const shownIds = new Set(jobsRef.current.map((job) => job.id));
-    const addedCount = new Set(incoming.map((job) => job.id).filter((id) => !shownIds.has(id))).size;
+    const shownKeys = new Set(jobsRef.current.map(dupKey));
+    const addedCount = new Set(
+      incoming.filter((job) => !shownIds.has(job.id) && !shownKeys.has(dupKey(job))).map((job) => job.id),
+    ).size;
     setJobs((prev) => {
       const byId = new Map(prev.map((job) => [job.id, job]));
+      const idByKey = new Map(prev.map((job) => [dupKey(job), job.id]));
       for (const job of incoming) {
-        const existing = byId.get(job.id);
+        const existingId = byId.has(job.id) ? job.id : idByKey.get(dupKey(job));
+        const existing = existingId ? byId.get(existingId) : null;
         if (existing) {
-          byId.set(job.id, { ...existing, ...job, jd: job.jd || existing.jd, badge: existing.badge });
+          const longer = (job.jd || "").length > (existing.jd || "").length;
+          byId.set(existingId, {
+            ...existing,
+            ...(existingId === job.id ? job : {}),
+            jd: longer ? job.jd : existing.jd,
+            url: existing.url || job.url,
+            salary: existing.salary || job.salary,
+            badge: existing.badge,
+          });
         } else {
-          byId.set(job.id, { ...job, source: "linkedin", badge: markFresh ? "Just in" : null });
+          byId.set(job.id, { ...job, source: job.source || "linkedin", badge: markFresh ? "Just in" : null });
+          idByKey.set(dupKey(job), job.id);
         }
       }
       return [...byId.values()];
@@ -3394,7 +3482,7 @@ export default function ResumeIQ() {
 
     setLinkedInSearchError(null);
     setLinkedInSearching(true);
-    setJobFeedStatus({ keywords, savedCount: null, linkedInFound: 0, linkedInTotal: null, freshCount: null, startedAt: Date.now() });
+    setJobFeedStatus({ keywords, savedCount: null, careerCount: null, linkedInFound: 0, linkedInTotal: null, freshCount: null, startedAt: Date.now() });
     const searchStarted = Date.now();
     track("job_search_started", { india_only: linkedInSearchIndiaOnly, limit: linkedInSearchLimit, has_years: levels.length > 0 });
     const updateFeed = (patch) => setJobFeedStatus((s) => (s && s.keywords === keywords ? { ...s, ...patch } : s));
@@ -3407,6 +3495,20 @@ export default function ResumeIQ() {
       })
       .catch(() => updateFeed({ savedCount: 0 }));
 
+    // Company career pages (Greenhouse, Lever, Ashby, Workable) and Adzuna – official APIs, full JDs.
+    const sourceParams = new URLSearchParams(params);
+    sourceParams.set("limit", "150");
+    fetch(`${base}/api/jobs/sources?${sourceParams}`)
+      .then((res) => (res.ok ? res.json() : { jobs: [] }))
+      .then((data) => {
+        if (!isCurrent()) return;
+        const found = data.jobs || [];
+        const added = mergeJobs(found, { markFresh: true });
+        updateFeed({ careerCount: found.length, careerAdded: added });
+        track("job_sources_completed", { found: found.length, new_roles: added, adzuna: !!data.sources?.adzuna?.configured });
+      })
+      .catch(() => updateFeed({ careerCount: 0, careerAdded: 0 }));
+
     try {
       params.set("limit", String(linkedInSearchLimit));
       // Live search: start an Apify run and poll its real item count so the wait shows progress.
@@ -3418,7 +3520,10 @@ export default function ResumeIQ() {
       })
         .then((r) => (r.ok ? r.json() : null))
         .catch(() => null);
-      if (started?.runId && started?.datasetId) {
+      if (started?.cached && Array.isArray(started.jobs)) {
+        // Searched recently by someone: served from the jobs repository, no live run.
+        liveJobs = started.jobs;
+      } else if (started?.runId && started?.datasetId) {
         const run = new URLSearchParams({ runId: started.runId, datasetId: started.datasetId });
         let status = "RUNNING";
         while (isCurrent() && ["READY", "RUNNING"].includes(status)) {
@@ -3432,7 +3537,7 @@ export default function ResumeIQ() {
         }
         if (!isCurrent()) return;
         if (status === "SUCCEEDED") {
-          const results = new URLSearchParams({ datasetId: started.datasetId, location, experienceLevel: levels.join(",") });
+          const results = new URLSearchParams({ datasetId: started.datasetId, keywords, location, experienceLevel: levels.join(",") });
           const data = await fetch(`${base}/api/linkedin-jobs/results?${results}`)
             .then((r) => (r.ok ? r.json() : null))
             .catch(() => null);
@@ -3639,7 +3744,7 @@ export default function ResumeIQ() {
       // Reuse this job's earlier analysis (this session or a saved one) so the score doesn't shift between visits.
       const cacheKey = scoreCacheKey(resumeHash, matchYears, job);
       const reused = !!(analyzedScores.get(job.id) || readCachedScore(cacheKey));
-      const scoreData = analyzedScores.get(job.id) || readCachedScore(cacheKey) || (await scoreResume(job, resume, matchYears));
+      const scoreData = analyzedScores.get(job.id) || readCachedScore(cacheKey) || (await scoreResume(job, resume, matchYears, callLLM));
       setScore(scoreData.score);
       setScoreBreakdown(scoreData);
       if (scoreData.score != null) {
@@ -3688,6 +3793,157 @@ export default function ResumeIQ() {
     setLoading(false);
     setLoadingMsg("");
     setApplyingChanges(false);
+  };
+
+  /**
+   * The wording pass: the resume reworded for this job (server/generateResume.js), applied as accepted
+   * edits the user can undo. Saved in the browser per (resume, job) so reopening the job doesn't redo it.
+   */
+  const rewordForJob = async (job) => {
+    if (!job?.jd || !resume) return;
+    const cacheKey = `rq-reworded-v1:${resumeHash}:${job.id}:${hashString(job.jd)}`;
+    const applyResult = (data) => {
+      if (tailorJobRef.current !== job.id) return; // the user opened another job meanwhile
+      const edits = (data.changes || []).map((c, i) => ({
+        id: `reworded-${job.id}-${i}`,
+        section: c.section,
+        type: c.type,
+        original: c.rawOriginal ?? c.original, // as the resume stores it, so applying and undoing find it
+        displayOriginal: c.original,
+        proposed: c.proposed,
+        experienceIndex: c.experienceIndex,
+        jdRequirement: c.jdRequirement,
+        why: c.why,
+        title: c.jdRequirement || "Reworded for this job",
+        reworded: true,
+      }));
+      setSuggestions((prev) => [...edits, ...prev.filter((x) => !x.reworded)]);
+      setApprovedIds((prev) => new Set([...prev, ...edits.map((e) => e.id)]));
+      setGeneration({ jobId: job.id, status: "done", realGaps: data.realGaps || [], changed: edits.length });
+    };
+    const cached = readCachedScore(cacheKey);
+    if (cached) return applyResult(cached);
+    setGeneration({ jobId: job.id, status: "loading", realGaps: [] });
+    try {
+      const response = await fetch(`${API_BASE.replace(/\/$/, "")}/api/generate-resume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resume: resumeForAI(resume), job: { role: job.role, company: job.company, jd: job.jd } }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || `the request failed (${response.status})`);
+      writeCachedScore(cacheKey, data);
+      applyResult(data);
+      track("resume_reworded", { changes: (data.changes || []).length, must_have_gaps: (data.realGaps || []).filter((g) => g.mustHave).length });
+    } catch (e) {
+      if (tailorJobRef.current === job.id) setGeneration({ jobId: job.id, status: "error", realGaps: [], error: e.message });
+    }
+  };
+
+  /** Undo one accepted edit: its line goes back to what it was. */
+  const undoEdit = (id) => {
+    setApprovedIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  };
+
+  /**
+   * The user edited a line on the Tailor step. A line already changed has that change updated (or
+   * undone, when edited back to the original); any other line gets a new accepted edit.
+   */
+  const editTailoredLine = ({ section, experienceIndex, original, proposed, edit }) => {
+    if (edit) {
+      if (proposed === edit.original || proposed === edit.displayOriginal) return undoEdit(edit.id);
+      setSuggestions((prev) => prev.map((x) => (x.id === edit.id ? { ...x, proposed } : x)));
+      return;
+    }
+    // Your own summary edit replaces your earlier one (it already includes it).
+    const mine = section === "Summary" ? suggestions.find((x) => x.byYou && x.section === "Summary" && approvedIds.has(x.id)) : null;
+    if (mine) {
+      setSuggestions((prev) => prev.map((x) => (x.id === mine.id ? { ...x, proposed } : x)));
+      return;
+    }
+    const id = `yours-${Date.now()}`;
+    setSuggestions((prev) => [...prev, { id, section, type: "Rewrite", original, proposed, experienceIndex, title: "Your edit", byYou: true }]);
+    setApprovedIds((prev) => new Set(prev).add(id));
+  };
+
+  /** Draft the ticked gaps into the resume as it stands; each becomes an accepted edit with [blanks]. */
+  const addTickedGaps = async (job) => {
+    const ticked = coreEdits.jobId === job.id ? coreEdits.ticked : [];
+    if (!ticked.length) return;
+    const working = applyApprovedChangesClientSide(resume, suggestions.filter((x) => approvedIds.has(x.id)));
+    setCoreEdits((prev) => ({ ...prev, status: "loading", error: "" }));
+    try {
+      const response = await fetch(`${API_BASE.replace(/\/$/, "")}/api/draft-gap-edits`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resume: resumeForAI(working), job: { role: job.role, company: job.company, jd: job.jd }, gaps: ticked }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || `the request failed (${response.status})`);
+      if (tailorJobRef.current !== job.id) return;
+      const stamp = Date.now();
+      const edits = (data.edits || []).map((e, i) => ({
+        id: `core-${stamp}-${i}`,
+        section: e.section,
+        type: e.type,
+        original: e.original,
+        proposed: e.proposed,
+        experienceIndex: e.experienceIndex,
+        why: e.why,
+        title: ticked[e.gap],
+        core: true,
+      }));
+      setSuggestions((prev) => [...prev, ...edits]);
+      setApprovedIds((prev) => new Set([...prev, ...edits.map((e) => e.id)]));
+      const added = (data.edits || []).map((e) => ticked[e.gap]);
+      setCoreEdits((prev) => ({
+        ...prev,
+        status: "idle",
+        ticked: [],
+        added: [...prev.added, ...added],
+        skipped: (data.skipped || []).map((x) => ({ gap: ticked[x.gap], reason: x.reason })),
+      }));
+      track("core_edits_added", { ticked: ticked.length, added: added.length, blanks: edits.reduce((n, e) => n + countBlanks(e.proposed), 0) });
+    } catch (e) {
+      if (tailorJobRef.current === job.id) setCoreEdits((prev) => ({ ...prev, status: "error", error: e.message }));
+    }
+  };
+
+  /**
+   * "Apply with this resume": the editor's PDF is saved as this job's resume, then the extension
+   * applies with it in a background tab and reports back here (extension/autoApply.js).
+   */
+  const handleApplyWithResume = async () => {
+    const job = selectedJob;
+    if (!job) return;
+    const set = (state) => setApplyRun({ jobId: job.id, ...state });
+    const session = supabaseClient ? (await supabaseClient.auth.getSession()).data.session : null;
+    if (!session) return set({ status: "signin", message: "Sign in to ResumeIQ to apply with this resume." });
+    if (!extReadyRef.current) {
+      return set({ status: "no_extension", message: "Auto apply runs in the ResumeIQ Chrome extension. Install it or turn it on, then reload this page." });
+    }
+    set({ status: "saving", step: "Saving this resume for the job…" });
+    try {
+      const response = await fetch(`${API_BASE.replace(/\/$/, "")}/api/tailored/use`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ jobId: job.id, company: job.company, title: job.role }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.error || `the request failed (${response.status})`);
+      set({ status: "running", step: "Starting…" });
+      window.postMessage(
+        { source: "resumeiq-app", type: "autoapply:start", job: { jobId: job.id, url: job.url, company: job.company, title: job.role, description: job.jd, resumeFileId: data.resume?.id } },
+        window.location.origin,
+      );
+      track("auto_apply_started", { source: job.source || "unknown" });
+    } catch (e) {
+      set({ status: "failed", message: `Couldn't save this resume for the job (${e.message}).` });
+    }
   };
 
   const handleApplyChanges = async () => {
@@ -3769,10 +4025,14 @@ export default function ResumeIQ() {
     setOpenInBuilderError(null);
     try {
       const base = API_BASE.replace(/\/$/, "");
+      // Signed in with a job: the job's editor resume is reopened (so "Apply with this resume" knows
+      // which one) and brought up to date with this content, keeping the design chosen in the editor.
+      const session = supabaseClient && selectedJob ? (await supabaseClient.auth.getSession()).data.session : null;
       const response = await fetch(`${base}/api/rxresume/open-in-builder`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
         body: JSON.stringify({
+          ...(session ? { jobId: selectedJob.id, refresh: true } : {}),
           // A very large embedded photo would exceed the API's request size limit; send the resume without it.
           resumeData: (getFinalResume()?.photoUrl?.length || 0) > 1_500_000 ? { ...getFinalResume(), photoUrl: null } : getFinalResume(),
           name: [getFinalResume()?.name, selectedJob && [selectedJob.role, selectedJob.company].filter(Boolean).join(" @ ")]
@@ -3889,6 +4149,8 @@ export default function ResumeIQ() {
   };
 
   const approvedCount = approvedIds.size;
+  // [Blanks] in accepted edits must be filled before the resume moves on (they'd end up in the PDF).
+  const blanksLeft = suggestions.filter((x) => approvedIds.has(x.id)).reduce((n, x) => n + countBlanks(x.proposed), 0);
 
   return (
     <div className="rq-app-root" style={styles.appRoot}>
@@ -3901,6 +4163,18 @@ export default function ResumeIQ() {
   .rq-two-col > * { flex: 1 1 100% !important; width: 100% !important; position: static !important; }
 }
 
+/* Job Matches: the left nav becomes a row above the list on narrow screens; on phones the score panel sits under the card. */
+@media (max-width: 900px) {
+  .rq-jobs-layout { grid-template-columns: minmax(0, 1fr) !important; gap: 16px !important; }
+  .rq-jobs-nav { position: static !important; flex-direction: row !important; overflow-x: auto; padding-right: 0 !important; border-right: none !important; border-bottom: 1px solid var(--rq-border); padding-bottom: 8px; }
+  .rq-jobs-nav-item { white-space: nowrap; }
+}
+@media (max-width: 640px) {
+  .rq-job-card { flex-direction: column; }
+  .rq-job-score { width: auto !important; flex-direction: row !important; justify-content: flex-start !important; text-align: left !important; }
+}
+.rq-jobs-nav-item:not([aria-current]):hover { background: color-mix(in srgb, var(--rq-border) 50%, transparent) !important; color: var(--rq-text) !important; }
+.rq-jobs-nav-item:focus-visible, .rq-job-card button:focus-visible, .rq-job-card a:focus-visible { outline: 2px solid var(--rq-accent); outline-offset: 2px; }
 /* Phones: wrap the header, compact the stepper, stack two-column layouts. */
 @media (max-width: 640px) {
   .rq-app-root { padding: 12px 12px 32px !important; }
@@ -4016,6 +4290,13 @@ body {
                 if (order === currentStepOrder) state = "active";
                 else if (order < currentStepOrder) state = "past";
                 const goToStep = () => {
+                  // From Tailor, Preview is reached the way Continue does: with your edits applied, and
+                  // not while [blanks] are left.
+                  if (s.id === "preview" && step === "suggestions") {
+                    if (blanksLeft) document.querySelector("[data-rq-tailor-footer]")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    else handleApplyChanges();
+                    return;
+                  }
                   setStep(s.id === "parsing" ? "select" : s.id);
                 };
                 return (
@@ -4041,85 +4322,22 @@ body {
         </header>
 
         <main className="rq-main-card" style={styles.mainCard}>
+          {step === "upload" && tailorNotice && (
+            <div role="status" style={{ marginBottom: 16, padding: "10px 14px", borderRadius: 10, fontSize: 14, background: "color-mix(in srgb, var(--rq-accent) 10%, transparent)", color: "var(--rq-text)" }}>
+              {tailorNotice}
+            </div>
+          )}
           {step === "upload" && (
-            <section style={styles.stepSection}>
-              <div style={styles.uploadHero}>
-                <div style={styles.uploadTitle}>Resume intelligence for your job search</div>
-                <h1 style={styles.uploadHeadline}>
-                  Find Jobs That <span style={styles.uploadHeadlineAccent}>Actually Fit You</span>
-                </h1>
-                <p style={styles.uploadSubtext}>
-                  Upload your resume. We’ll scan the job market, score every match, and help you tailor your resume to land interviews.
-                </p>
-              </div>
-              {parsingError && (
-                <div style={{ marginBottom: 16, padding: 12, background: "color-mix(in srgb, var(--rq-danger) 15%, transparent)", borderRadius: 8, fontSize: 13, color: "var(--rq-danger)" }}>
-                  {parsingError}
-                </div>
-              )}
-              <div
-                style={{
-                  ...styles.dropZone,
-                  ...(dropZoneHover ? styles.dropZoneHover : {}),
-                }}
-                onDragOver={(e) => { e.preventDefault(); setDropZoneHover(true); }}
-                onDragLeave={() => setDropZoneHover(false)}
-                onDrop={(e) => {
-                  e.preventDefault();
-                  setDropZoneHover(false);
-                  const file = e.dataTransfer?.files?.[0];
-                  if (file && /\.(pdf|txt|md)$/i.test(file.name)) handleUploadAndParse(file);
-                }}
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <div style={styles.dropZoneIcon}>↑</div>
-                <div style={styles.dropZoneLabel}>Drop your resume here</div>
-                <div style={styles.dropZoneBrowse}>or browse files</div>
-                <div style={styles.dropZoneTypes}>PDF, TXT, Markdown</div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
-                  style={{ display: "none" }}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleUploadAndParse(file);
-                    e.target.value = "";
-                  }}
-                />
-              </div>
-              <div style={styles.featureGrid}>
-                <div style={styles.featureCard}>
-                  <div style={styles.featureCardTitle}>AI Resume Parsing</div>
-                  <div style={styles.featureCardDesc}>Extracts every detail automatically</div>
-                </div>
-                <div style={styles.featureCard}>
-                  <div style={styles.featureCardTitle}>Live Job Search</div>
-                  <div style={styles.featureCardDesc}>Real openings in India & worldwide</div>
-                </div>
-                <div style={styles.featureCard}>
-                  <div style={styles.featureCardTitle}>Match Scoring</div>
-                  <div style={styles.featureCardDesc}>% fit shown on every job card</div>
-                </div>
-                <div style={styles.featureCard}>
-                  <div style={styles.featureCardTitle}>Smart Edits</div>
-                  <div style={styles.featureCardDesc}>Approve AI suggestions one by one</div>
-                </div>
-              </div>
-              <p style={{ textAlign: "center", marginTop: 24, fontSize: 12, color: "var(--rq-text-3)" }}>
-                <button
-                  type="button"
-                  style={{ ...styles.ghostButton, fontSize: 12 }}
-                  onClick={() => {
-                    track("sample_resume_used");
-                    setResume(SAMPLE_RESUME);
-                    setStep("select");
-                  }}
-                >
-                  Use sample resume instead
-                </button>
-              </p>
-            </section>
+            <UploadStep
+              homeHref={HOME_URL}
+              error={parsingError}
+              onFile={handleUploadAndParse}
+              onSample={() => {
+                track("sample_resume_used");
+                setResume(SAMPLE_RESUME);
+                setStep("select");
+              }}
+            />
           )}
 
           {step === "parsing" && (
@@ -4159,6 +4377,37 @@ body {
 
           {step === "select" && (
             <section style={styles.stepSection}>
+              <div className="rq-jobs-layout" style={styles.jobsLayout}>
+              <nav className="rq-jobs-nav" aria-label="ResumeIQ sections" style={styles.jobsNav}>
+                {[
+                  { id: "jobs", label: "Jobs", icon: <><rect x="3" y="7" width="18" height="13" rx="2" /><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /><path d="M3 13h18" /></>, active: true },
+                  { id: "resume", label: "Resume", icon: <><path d="M7 3h7l5 5v13H7z" /><path d="M14 3v5h5" /><path d="M10 13h6M10 17h4" /></>, onClick: () => setStep("preview") },
+                  { id: "upload", label: "Upload new resume", icon: <><path d="M12 16V4" /><path d="M6 10l6-6 6 6" /><path d="M4 20h16" /></>, onClick: handleReset },
+                  { id: "home", label: "Home", icon: <><path d="M3 11l9-8 9 8" /><path d="M5 10v10h14V10" /></>, href: HOME_URL },
+                ].map((item) => {
+                  const content = (
+                    <>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{item.icon}</svg>
+                      <span>{item.label}</span>
+                    </>
+                  );
+                  return item.href ? (
+                    <a key={item.id} href={item.href} className="rq-jobs-nav-item" style={styles.jobsNavItem(false)}>{content}</a>
+                  ) : (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="rq-jobs-nav-item"
+                      aria-current={item.active ? "page" : undefined}
+                      style={styles.jobsNavItem(item.active)}
+                      onClick={item.onClick}
+                    >
+                      {content}
+                    </button>
+                  );
+                })}
+              </nav>
+              <div style={{ minWidth: 0 }}>
               <div style={{ ...styles.sectionHeader, display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
                 <div>
                   <h2 style={styles.sectionTitle}>Your Job Matches</h2>
@@ -4194,6 +4443,15 @@ body {
                     label: "Saved roles from earlier searches",
                     state: f.savedCount == null ? "active" : "done",
                     detail: f.savedCount == null ? "Checking…" : f.savedCount > 0 ? `${f.savedCount} matched instantly` : "None yet for this role",
+                  },
+                  {
+                    label: "Company career pages & job boards",
+                    state: f.careerCount == null ? "active" : "done",
+                    detail: f.careerCount == null
+                      ? "Checking…"
+                      : f.careerCount > 0
+                        ? `${f.careerCount} found${f.careerAdded ? ` · ${f.careerAdded} new` : ""}`
+                        : "None for this role yet",
                   },
                   {
                     label: "LinkedIn · live listings",
@@ -4246,7 +4504,7 @@ body {
               <div style={styles.linkedInPanel}>
                 <div style={styles.panelLabelRow}>
                   <div style={styles.panelLabel}>
-                    <span>Search LinkedIn Jobs</span>
+                    <span>Search jobs</span>
                   </div>
                   <div style={styles.smallPill}>India & worldwide · up to 150 jobs</div>
                 </div>
@@ -4306,7 +4564,7 @@ body {
                     disabled={linkedInSearching}
                     onClick={() => handleSearchLinkedInJobs()}
                   >
-                    {linkedInSearching ? "Searching…" : "Search LinkedIn"}
+                    {linkedInSearching ? "Searching…" : "Search jobs"}
                   </button>
                 </div>
                 {suggestedRoles.length > 0 && (
@@ -4341,7 +4599,9 @@ body {
                 )}
               </div>
 
-              <div style={styles.linkedInPanel}>
+              <details className="rq-paste-jd" style={styles.pasteJdDetails}>
+                <summary style={styles.pasteJdSummary}>Found a role elsewhere? Paste its job description</summary>
+                <div style={{ marginTop: 12 }}>
                 <div style={styles.panelLabelRow}>
                   <div style={styles.panelLabel}>
                     <span>Paste JD / Job Posting</span>
@@ -4377,8 +4637,28 @@ body {
                     </span>
                   )}
                 </div>
-              </div>
+                              </div>
+              </details>
 
+              {FEATURES.easyApply && sortedJobs.length > 0 && (
+                <div style={styles.jobFilterRow}>
+                  <button
+                    type="button"
+                    aria-pressed={easyApplyOnly}
+                    className="rq-filter-chip"
+                    style={styles.filterChip(easyApplyOnly)}
+                    onClick={() => setEasyApplyOnly((v) => !v)}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M13 2L4 14h7l-1 8 9-12h-7z" /></svg>
+                    Easy Apply only ({easyApplyCount})
+                  </button>
+                  {easyApplyOnly && easyApplyCount === 0 && (
+                    <span style={{ fontSize: 13, color: "var(--rq-text-2)" }}>
+                      No Easy Apply roles in these results yet – they come from company career pages on Greenhouse.
+                    </span>
+                  )}
+                </div>
+              )}
               {belowLevelJobIds.size > 0 && (
                 <div style={{ marginBottom: 12, fontSize: 12, color: "var(--rq-text-2)", display: "flex", alignItems: "center", gap: 8 }}>
                   {showBelowLevelJobs
@@ -4395,106 +4675,186 @@ body {
               )}
               {sortedJobs.length === 0 && !linkedInSearching && (
                 <div style={{ padding: 24, textAlign: "center", fontSize: 13, color: "var(--rq-text-2)", border: "1px dashed color-mix(in srgb, var(--rq-text) 12%, transparent)", borderRadius: 12, marginBottom: 16 }}>
-                  No jobs yet. Search LinkedIn above to find roles that match your resume.
+                  No jobs yet. Search above to find roles that match your resume.
                 </div>
               )}
-              <div style={styles.jobGrid}>
-                {sortedJobs.map((job) => {
+              <div style={styles.jobList}>
+                {visibleJobs.map((job) => {
                   const hovered = hoveredJobId === job.id;
                   const matchInfo = jobMatchScores.get(job.id);
+                  const tier = matchInfo ? getScoreTier(matchInfo.score) : null;
+                  const posted = timeAgo(job.postedAt);
                   return (
-                    <div
+                    <article
                       key={job.id}
-                      style={styles.jobCard(hovered)}
+                      className="rq-job-card"
+                      style={styles.jobRow(hovered)}
                       onMouseEnter={() => setHoveredJobId(job.id)}
                       onMouseLeave={() => setHoveredJobId(null)}
                       onClick={() => setExpandedJob(job)}
                     >
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          gap: 8,
-                          marginBottom: 4,
-                        }}
-                      >
-                        <div style={styles.jobCompany}>
-                          {job.company}
+                      <div style={styles.jobRowBody}>
+                        <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+                          <div style={styles.companyMark} aria-hidden="true">
+                            {(job.company || "?").trim().charAt(0).toUpperCase()}
+                          </div>
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={styles.jobTagRow}>
+                              {posted && <span style={styles.jobTag}>{posted}</span>}
+                              {FEATURES.easyApply && isEasyApplyJob(job) && <span style={styles.easyApplyTag}>Easy Apply</span>}
+                              {job.badge && <span style={styles.badgePill(job.badge)}>{job.badge}</span>}
+                              {sourceLabel(job.source) && <span style={styles.sourcePill}>{sourceLabel(job.source)}</span>}
+                            </div>
+                            <h3 style={styles.jobRowTitle}>{job.role}</h3>
+                            <div style={styles.jobRowCompany}>{job.company}</div>
+                          </div>
                         </div>
-                        <button
-                          type="button"
-                          style={{
-                            ...styles.dangerButton,
-                            padding: "4px 8px",
-                            fontSize: 10,
-                          }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteJob(job.id);
-                          }}
-                        >
-                          ✕ Remove
-                        </button>
-                      </div>
-                      <div style={styles.jobTitle}>{job.role}</div>
-                      <div style={styles.jobMetaRow}>
-                        <div style={styles.jobLocation}>{job.location}</div>
-                        <div style={styles.jobSalary}>{job.salary}</div>
-                      </div>
-                      <div style={styles.jobMetaRow}>
-                        {matchInfo && (
-                          <div
-                            style={styles.matchPill(matchInfo.score)}
-                            title={matchInfo.analyzed ? "Score from the full AI analysis" : "Quick keyword estimate – open the role and Analyze My Fit for the full score"}
+                        <div style={styles.jobRowMeta}>
+                          {job.location && (
+                            <span style={styles.jobRowMetaItem}>
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z" /><circle cx="12" cy="10" r="2.5" /></svg>
+                              {job.location}
+                            </span>
+                          )}
+                          {job.salary && (
+                            <span style={styles.jobRowMetaItem}>
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2" /><circle cx="12" cy="12" r="2.5" /></svg>
+                              {job.salary}
+                            </span>
+                          )}
+                        </div>
+                        {job.jd && (
+                          <p style={styles.jobRowPreview}>{job.jd.length > 220 ? `${job.jd.slice(0, 220)}…` : job.jd}</p>
+                        )}
+                        <div style={styles.jobRowActions}>
+                          {job.url && (
+                            <a
+                              href={job.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              style={styles.jobRowLink}
+                            >
+                              View posting {postingLinkText(job.source)} →
+                            </a>
+                          )}
+                          <span style={{ flex: 1 }} />
+                          <button
+                            type="button"
+                            aria-label={`Remove ${job.role} at ${job.company}`}
+                            title="Remove this role"
+                            style={styles.jobIconButton}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteJob(job.id);
+                            }}
                           >
-                            {matchInfo.analyzed ? `${matchInfo.score}% Match ✓` : `~${matchInfo.score}% Match`}
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M5.6 5.6l12.8 12.8" /></svg>
+                          </button>
+                          <button
+                            type="button"
+                            style={styles.ghostButton}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedJob(job);
+                            }}
+                          >
+                            View details
+                          </button>
+                          <button
+                            type="button"
+                            style={isEasyApplyJob(job) ? styles.ghostButton : styles.primaryButton}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleJobAnalyzeClick(job);
+                            }}
+                          >
+                            Analyze my fit →
+                          </button>
+                          {FEATURES.easyApply && isEasyApplyJob(job) && (
+                            <button
+                              type="button"
+                              style={styles.primaryButton}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                track("easy_apply_opened", { source: job.source });
+                                setEasyApplyJob(job);
+                              }}
+                            >
+                              Easy Apply
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="rq-job-score" style={styles.jobScorePanel}>
+                        <div style={{ position: "relative", width: 96, height: 96 }}>
+                          <svg width="96" height="96" viewBox="0 0 96 96" aria-hidden="true">
+                            <circle cx="48" cy="48" r="42" fill="none" stroke="rgba(255,255,255,0.14)" strokeWidth="6" />
+                            {matchInfo && (
+                              <circle
+                                cx="48" cy="48" r="42" fill="none"
+                                stroke={`color-mix(in srgb, ${tier.color} 70%, white)`}
+                                strokeWidth="6" strokeLinecap="round"
+                                strokeDasharray={`${(matchInfo.score / 100) * 263.9} 263.9`}
+                                transform="rotate(-90 48 48)"
+                              />
+                            )}
+                          </svg>
+                          <div style={styles.jobScoreValue}>
+                            {matchInfo ? <>{matchInfo.analyzed ? "" : "~"}{matchInfo.score}<span style={{ fontSize: 15 }}>%</span></> : "–"}
                           </div>
-                        )}
-                        {job.badge && (
-                          <div style={styles.badgePill(job.badge)}>
-                            {job.badge}
+                        </div>
+                        <div>
+                          <div style={styles.jobScoreTier}>{tier ? tier.label : "Not scored yet"}</div>
+                          <div style={styles.jobScoreNote}>
+                            {!matchInfo ? "Open the role to analyze" : matchInfo.analyzed ? "From the full AI analysis" : "Quick estimate · analyze for the full score"}
                           </div>
-                        )}
-                        {job.source === "linkedin" && (
-                          <div style={styles.sourcePill}>LinkedIn</div>
-                        )}
+                        </div>
                       </div>
-                      <div style={styles.jobPreview}>
-                        {job.jd ? (job.jd.length > 280 ? `${job.jd.slice(0, 280)}…` : job.jd) : ""}
-                      </div>
-                      {job.url && (
-                        <a
-                          href={job.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                          style={{ fontSize: 11, color: "var(--rq-info)", marginTop: 6, display: "inline-block" }}
-                        >
-                          View full JD on LinkedIn →
-                        </a>
-                      )}
-                      <div style={styles.cardFooterRow}>
-                        <button
-                          type="button"
-                          style={styles.analyzeCta(hovered)}
-                        >
-                          View Details →
-                        </button>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            color: "var(--rq-text-3)",
-                          }}
-                        >
-                          Click anywhere to open
-                        </span>
-                      </div>
-                    </div>
+                    </article>
                   );
                 })}
               </div>
+              </div>
+              </div>
             </section>
+          )}
+
+          {signInPrompt && (
+            <div className="ea-overlay" onClick={() => setSignInPrompt(null)}>
+              <section className="ea-panel ea-signin-dialog" role="dialog" aria-modal="true" aria-label="Sign in to ResumeIQ" onClick={(e) => e.stopPropagation()}>
+                <header className="ea-header">
+                  <h2>{signInPrompt === "connected" ? "You're signed in" : "Sign in to ResumeIQ"}</h2>
+                  <button type="button" className="ea-close" onClick={() => setSignInPrompt(null)} aria-label="Close">✕</button>
+                </header>
+                <div className="ea-body">
+                  {signInPrompt === "connected" ? (
+                    <div className="ea-outcome ea-outcome-ok" role="status">
+                      <h3>Connected</h3>
+                      <p>The ResumeIQ Chrome extension can use your account now. You can go back to the job page.</p>
+                      <button type="button" className="ea-btn ea-btn-primary" onClick={() => setSignInPrompt(null)}>Done</button>
+                    </div>
+                  ) : (
+                    <SignIn />
+                  )}
+                </div>
+              </section>
+            </div>
+          )}
+
+          {easyApplyJob && (
+            <EasyApplyPanel
+              job={easyApplyJob}
+              resume={updatedResume || resume}
+              getResumePdf={updatedResume || resume ? () => resumePdfDataUri(updatedResume || resume, pdfFormat) : null}
+              apiBase={API_BASE}
+              onClose={() => setEasyApplyJob(null)}
+              onTailorResume={() => {
+                const job = easyApplyJob;
+                setEasyApplyJob(null);
+                handleJobAnalyzeClick(job);
+              }}
+            />
           )}
 
           {expandedJob && (
@@ -4526,8 +4886,8 @@ body {
                     </div>
                   )}
                   {expandedJob.badge && <div style={styles.badgePill(expandedJob.badge)}>{expandedJob.badge}</div>}
-                  {expandedJob.source === "linkedin" && (
-                    <div style={styles.sourcePill}>LinkedIn</div>
+                  {sourceLabel(expandedJob.source) && (
+                    <div style={styles.sourcePill}>{sourceLabel(expandedJob.source)}</div>
                   )}
                 </div>
                 {expandedJob.url && (
@@ -4537,7 +4897,7 @@ body {
                     rel="noopener noreferrer"
                     style={{ fontSize: 12, color: "var(--rq-info)", display: "inline-block", marginTop: 4 }}
                   >
-                    View full posting on LinkedIn →
+                    View full posting {postingLinkText(expandedJob.source)} →
                   </a>
                 )}
                 <div style={styles.jobModalDivider} />
@@ -4643,8 +5003,8 @@ body {
               <div style={styles.sectionHeader}>
                 <h2 style={styles.sectionTitle}>Tailor your resume</h2>
                 <p style={styles.sectionSubtitle}>
-                  See how you fit this role, then work through the gaps with the
-                  assistant. Accepted edits appear in your resume on the left.
+                  ResumeIQ rewords your resume for this role and marks every change
+                  on the left. Undo any you don't want, or click a line to edit it.
                 </p>
               </div>
 
@@ -4736,11 +5096,7 @@ body {
                 return (
                   <div className="rq-two-col" style={{ ...styles.twoColumn, marginTop: 16 }}>
                     <div style={styles.colLeft}>
-                      <ResumeDocument
-                        resume={workingResume}
-                        highlights={acceptedEdits.map((e) => e.proposed).filter(Boolean)}
-                        afterMode
-                      />
+                      <TailoredResume base={resume} working={workingResume} edits={acceptedEdits} onUndo={undoEdit} onEditLine={editTailoredLine} />
                     </div>
                     <aside style={{ width: 460, maxWidth: "100%", flexShrink: 0, position: "sticky", top: 16, display: "flex", flexDirection: "column", gap: 12 }}>
                 {(() => {
@@ -4778,6 +5134,90 @@ body {
                     </div>
                   );
                 })()}
+                {(() => {
+                  // The wording pass's status, the gaps it can't fix, and – only when a must-have is
+                  // missing – the assistant.
+                  const gen = generation.jobId === selectedJob.id ? generation : { status: "loading", realGaps: [] };
+                  const mustHaves = gen.realGaps.filter((g) => g.mustHave);
+                  const niceToHaves = gen.realGaps.filter((g) => !g.mustHave);
+                  const undone = suggestions.filter((x) => x.reworded && !approvedIds.has(x.id)).length;
+                  const card = { border: "1px solid color-mix(in srgb, var(--rq-text) 10%, transparent)", borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8, background: "var(--rq-surface, transparent)" };
+                  const note = { fontSize: 13, lineHeight: 1.55, color: "var(--rq-text)" };
+                  const small = { fontSize: 12, color: "var(--rq-text-2)", lineHeight: 1.5 };
+                  if (gen.status === "loading") {
+                    return <div style={card}><span style={styles.monoStatus}>Rewording your resume for this job – this can take up to a minute…</span></div>;
+                  }
+                  if (gen.status === "error") {
+                    return (
+                      <div style={card}>
+                        <div style={note}>Couldn't reword your resume for this job ({gen.error}).</div>
+                        <div><button type="button" style={styles.ghostButton} onClick={() => rewordForJob(selectedJob)}>Try again</button></div>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div style={card}>
+                      <div style={{ fontWeight: 600, fontSize: 13.5, color: "var(--rq-text)" }}>
+                        {gen.changed ? `${gen.changed} line${gen.changed === 1 ? "" : "s"} reworded for this job` : "Nothing needed rewording"}
+                      </div>
+                      <div style={small}>
+                        {gen.changed
+                          ? <>New words are <span style={changeAddedStyle}>highlighted</span>, removed ones <span style={changeRemovedStyle}>struck through</span>. Only wording changed – nothing you haven't done was added.</>
+                          : "Your resume already says what this job asks for, in its terms."}
+                        {undone > 0 && (
+                          <> {" "}<button type="button" style={undoButtonStyle} onClick={() => setApprovedIds((prev) => new Set([...prev, ...suggestions.filter((x) => x.reworded).map((x) => x.id)]))}>Put back {undone} undone change{undone === 1 ? "" : "s"}</button></>
+                        )}
+                      </div>
+                      {gen.realGaps.length > 0 && (() => {
+                        const core = coreEdits.jobId === selectedJob.id ? coreEdits : { status: "idle", ticked: [], added: [], skipped: [] };
+                        const toggle = (text) => setCoreEdits((prev) => {
+                          const base = prev.jobId === selectedJob.id ? prev : { jobId: selectedJob.id, status: "idle", ticked: [], added: [], skipped: [] };
+                          return { ...base, ticked: base.ticked.includes(text) ? base.ticked.filter((t) => t !== text) : [...base.ticked, text] };
+                        });
+                        const gaps = [...mustHaves, ...niceToHaves];
+                        return (
+                          <>
+                            <div style={{ ...styles.keyGapsTitle, marginTop: 6 }}>What the job asks for that your resume doesn't show</div>
+                            <div style={small}>Tick the ones you have. ResumeIQ adds them to your resume and leaves <span style={blankStyle}>[blanks]</span> for details only you know.</div>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              {gaps.map((g) => {
+                                const added = core.added.includes(g.text);
+                                return (
+                                  <label key={g.text} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, lineHeight: 1.5, color: added ? "var(--rq-text-2)" : "var(--rq-text)", cursor: added ? "default" : "pointer" }}>
+                                    <input type="checkbox" style={{ marginTop: 3 }} checked={added || core.ticked.includes(g.text)} disabled={added || core.status === "loading"} onChange={() => toggle(g.text)} />
+                                    <span>
+                                      <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: g.mustHave ? "var(--rq-warn)" : "var(--rq-text-2)", marginRight: 6 }}>{g.mustHave ? "Must-have" : "Nice-to-have"}</span>
+                                      {g.text}
+                                      {added && <span style={{ color: "var(--rq-accent)", fontWeight: 600 }}> · Added ✓</span>}
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                            <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                              <button
+                                type="button"
+                                style={{ ...styles.primaryButton, ...(!core.ticked.length || core.status === "loading" ? styles.disabledButton : {}) }}
+                                disabled={!core.ticked.length || core.status === "loading"}
+                                onClick={() => addTickedGaps(selectedJob)}
+                              >
+                                {core.status === "loading" ? "Adding to your resume…" : `Add the ticked ones${core.ticked.length ? ` (${core.ticked.length})` : ""}`}
+                              </button>
+                              {!showAssistant && <button type="button" style={undoButtonStyle} onClick={() => setShowAssistant(true)}>Prefer to talk it through? Open the assistant</button>}
+                            </div>
+                            {core.status === "error" && <div style={{ ...small, color: "var(--rq-danger)" }}>Couldn't add them ({core.error}). Try again.</div>}
+                            {core.skipped.length > 0 && (
+                              <ul style={{ ...styles.keyGapsList, color: "var(--rq-text-2)" }}>
+                                {core.skipped.map((x) => <li key={x.gap}>Not added – {x.gap}: {x.reason}</li>)}
+                              </ul>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </div>
+                  );
+                })()}
+                {showAssistant && (
                 <TailoringAssistant
                   key={selectedJob.id}
                   job={selectedJob}
@@ -4791,6 +5231,7 @@ body {
                   onContinue={handleApplyChanges}
                   continueLabel={approvedCount ? `Continue with ${approvedCount} edit${approvedCount === 1 ? "" : "s"} →` : "Continue with original resume →"}
                 />
+                )}
                       <details style={{ border: "1px solid color-mix(in srgb, var(--rq-text) 8%, transparent)", borderRadius: 12, padding: "10px 14px", background: "color-mix(in srgb, var(--rq-text) 2%, transparent)" }}>
                         <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--rq-text-2)" }}>Job description</summary>
                         <div style={{ ...styles.jdScrollBox, marginTop: 10 }}>{selectedJob.jd || "No job description available."}</div>
@@ -4800,24 +5241,31 @@ body {
                 );
               })()}
 
-              <div style={styles.suggestionsFooterRow}>
+              {(() => {
+                const blanks = blanksLeft;
+                return (
+              <div style={styles.suggestionsFooterRow} data-rq-tailor-footer>
                 <div>
-                  {approvedCount
+                  {blanks
+                    ? <>Fill in the <span style={blankStyle}>{blanks} blank{blanks === 1 ? "" : "s"}</span> on your resume to continue – click a line to edit it.</>
+                    : approvedCount
                     ? `${approvedCount} edit${approvedCount === 1 ? "" : "s"} applied`
                     : "No edits applied yet – you can continue with your original resume"}
                 </div>
                 <button
                   type="button"
                   onClick={handleApplyChanges}
-                  disabled={applyingChanges}
+                  disabled={applyingChanges || blanks > 0}
                   style={{
                     ...styles.primaryButton,
-                    ...(applyingChanges ? styles.disabledButton : {}),
+                    ...(applyingChanges || blanks > 0 ? styles.disabledButton : {}),
                   }}
                 >
                   {approvedCount ? `Continue with ${approvedCount} edit${approvedCount === 1 ? "" : "s"} →` : "Continue with original resume →"}
                 </button>
               </div>
+                );
+              })()}
             </section>
           )}
 
@@ -4835,13 +5283,22 @@ body {
                   )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  {FEATURES.autoApply && selectedJob && (() => {
+                    const busy = applyRun.jobId === selectedJob.id && (applyRun.status === "saving" || applyRun.status === "running");
+                    const done = applyRun.jobId === selectedJob.id && applyRun.status === "submitted";
+                    return (
+                      <button type="button" style={{ ...styles.primaryButton, ...(busy || done ? styles.disabledButton : {}) }} disabled={busy || done} onClick={handleApplyWithResume}>
+                        {done ? "Applied ✓" : busy ? "Applying…" : "Apply with this resume"}
+                      </button>
+                    );
+                  })()}
                   {selectedJob?.url && (
                     <a
                       href={selectedJob.url}
                       target="_blank"
                       rel="noopener noreferrer"
                       onClick={() => track("job_posting_opened", { from: "preview", accepted_edits: approvedIds.size })}
-                      style={{ ...styles.primaryButton, textDecoration: "none" }}
+                      style={{ ...styles.ghostButton, textDecoration: "none" }}
                     >
                       View job posting ↗
                     </a>
@@ -4863,6 +5320,32 @@ body {
                   </button>
                 </div>
               </div>
+              {selectedJob && applyRun.jobId === selectedJob.id && applyRun.status !== "idle" && (() => {
+                const run = applyRun;
+                const tone = run.status === "submitted" ? "var(--rq-accent)" : run.status === "needs_review" || run.status === "unsupported" ? "var(--rq-warn)" : run.status === "failed" || run.status === "no_extension" || run.status === "signin" ? "var(--rq-danger)" : "var(--rq-text-2)";
+                return (
+                  <div style={{ borderBottom: "1px solid var(--rq-border)", padding: "10px 20px", display: "flex", flexDirection: "column", gap: 6, fontSize: 13, background: `color-mix(in srgb, ${tone} 6%, var(--rq-bg))` }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                      <span style={{ color: tone, fontWeight: 600 }}>
+                        {run.status === "saving" || run.status === "running" ? run.step || "Applying…" : run.status === "submitted" ? `Application submitted to ${selectedJob.company} ✓` : run.message}
+                      </span>
+                      {run.status === "needs_review" && run.tabId != null && (
+                        <button type="button" style={styles.ghostButton} onClick={() => window.postMessage({ source: "resumeiq-app", type: "autoapply:focus", jobId: selectedJob.id }, window.location.origin)}>
+                          Open the application
+                        </button>
+                      )}
+                      {run.status === "unsupported" && selectedJob.url && (
+                        <a href={selectedJob.url} target="_blank" rel="noopener noreferrer" style={{ ...styles.ghostButton, textDecoration: "none" }}>Open the job ↗</a>
+                      )}
+                    </div>
+                    {(run.checks || []).length > 0 && run.status !== "submitted" && (
+                      <ul style={{ margin: 0, paddingLeft: 18, color: "var(--rq-text)", display: "flex", flexDirection: "column", gap: 2 }}>
+                        {run.checks.map((c, i) => <li key={i}>{c}</li>)}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })()}
               {(() => {
                 // Other roles ranked by the quick estimate against the TAILORED resume (AI scores were for the original).
                 const tailored = getFinalResume();
