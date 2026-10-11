@@ -13,17 +13,33 @@
   const onJobPage = () => location.pathname.startsWith("/jobs/") &&
     (/\/jobs\/view\//.test(location.pathname) || new URL(location.href).searchParams.has("currentJobId"));
 
+  /** The open job's title: from the tab title ("AI Product Manager | Transsion | LinkedIn"). */
+  const jobTitle = () => {
+    const parts = clean(document.title).replace(/^\(\d+\)\s*/, "").split(" | ");
+    return parts.length >= 3 ? parts[0] : "";
+  };
+
   /**
-   * The open job's header block: the smallest element holding both its title (h1) and its Apply
-   * button, but not the description below ("About the job"). The sticker goes right after it.
+   * The open job's header block: from its Apply button – the one with Save next to it (not the
+   * "Easy Apply" search filter) – the smallest element that also holds the job's title (an h1, or
+   * the title text), but not the description below ("About the job"). The sticker goes after it.
    */
   function jobHeader() {
-    const apply = [...document.querySelectorAll("button, a")]
-      .find((b) => visible(b) && !foreign(b) && /^(easy apply|apply)$/i.test(clean(b.innerText)));
-    for (let el = apply?.parentElement, i = 0; el && el !== document.body && i < 12; el = el.parentElement, i += 1) {
-      if (!el.querySelector("h1")) continue;
-      const holdsDescription = [...el.querySelectorAll("h2, h3")].some((h) => /^about the job$/i.test(clean(h.innerText)));
-      return holdsDescription ? null : el;
+    const title = jobTitle().toLowerCase();
+    const holdsTitle = (el) => !!el.querySelector("h1") || (title && clean(el.innerText).toLowerCase().includes(title));
+    const holdsDescription = (el) => [...el.querySelectorAll("h2, h3")].some((h) => /^about the job$/i.test(clean(h.innerText)));
+    const applies = [...document.querySelectorAll("button, a")]
+      .filter((b) => visible(b) && !foreign(b) && /^(easy apply|apply)$/i.test(clean(b.innerText)));
+    for (const apply of applies) {
+      const hasSave = (el) => [...el.querySelectorAll("button")].some((b) => /^save\b/i.test(clean(b.innerText)));
+      let row = apply.parentElement;
+      for (let i = 0; row && i < 6 && !hasSave(row); i += 1) row = row.parentElement;
+      if (!row || row === document.body || !hasSave(row)) continue; // no Save beside it: not the job's Apply
+      for (let el = row, i = 0; el && el !== document.body && i < 12; el = el.parentElement, i += 1) {
+        if (!holdsTitle(el)) continue;
+        if (!holdsDescription(el)) return el;
+        break;
+      }
     }
     return null;
   }
