@@ -146,7 +146,6 @@ async function refresh() {
     await readJob();
     await loading;
     if (document.body.classList.contains("on-application")) await pickGeneratedResume(tab.url);
-    await runPanelAction();
   } else document.body.classList.remove("on-application");
 }
 
@@ -528,7 +527,6 @@ async function generate() {
   await keepDraft();
   showGenerateLabel();
   renderDraft();
-  if (tabId != null) chrome.tabs.sendMessage(tabId, { type: "card:refresh" }).catch(() => {}); // the LinkedIn card's button
 }
 
 $("generate").addEventListener("click", async () => {
@@ -805,23 +803,8 @@ chrome.tabs.onUpdated.addListener((id, info) => {
     urlTimer = setTimeout(refresh, 1500);
   }
 });
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.type === "auth:changed") refresh();
-  if (msg.type === "panel:action") runPanelAction();
-});
+chrome.runtime.onMessage.addListener((msg) => { if (msg.type === "auth:changed") refresh(); });
 
-/**
- * A button on the LinkedIn match card opened the panel for this tab: "generate" runs Generate resume
- * (or opens the one already made), "details" shows the match. Waits for the job to be read first.
- */
-async function runPanelAction() {
-  const { panelAction } = await chrome.storage.session.get("panelAction");
-  if (!panelAction || panelAction.tabId !== tabId || Date.now() - panelAction.at > 60_000) return;
-  if ($("jobCard").hidden || !$("title").value) return; // not read yet: refresh() calls this again
-  await chrome.storage.session.remove("panelAction");
-  if (panelAction.action === "generate") $("generate").click();
-  else $("matchCard").scrollIntoView({ behavior: "smooth", block: "start" });
-}
 // Some sites open the form on the same page when Apply is clicked, and multi-page forms (Workday)
 // move between steps without a new address: keep checking, and start each new step afresh.
 let lastStep = null;
