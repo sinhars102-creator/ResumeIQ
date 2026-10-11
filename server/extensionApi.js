@@ -18,6 +18,7 @@ import { callLLM } from "./llm.js";
 import { fillForm } from "./easyApplyFill.js";
 import { generateResume } from "./generateResume.js";
 import { buildResumePdf, pdfSafeText } from "../src/resumePdf.js";
+import { scoreResume } from "../src/matchScore.js";
 import { jsPDF } from "jspdf";
 import {
   toRow, saveUserJob, setUserJobMatch, getProfile, listUserJobs,
@@ -73,11 +74,6 @@ export function jobIdentity(pageUrl) {
   const hash = createHash("sha1").update(clean).digest("hex").slice(0, 16);
   return { source: "web", sourceJobId: hash, board: host, id: `web-${hash}`, url: pageUrl };
 }
-
-const MATCH_PROMPT = `You compare a candidate's resume with a job and say how well they fit.
-Use only facts in the resume and the job description. Return JSON:
-{"score": <0-100>, "summary": "<one sentence>", "matched": ["<strength that fits>", ...up to 5],
- "gaps": ["<specific thing holding the match back, e.g. 'Asks 8+ years, you have 5' or 'No Kafka in your resume'>", ...up to 5]}`;
 
 function resumeText(resume) {
   if (!resume) return "";
@@ -177,18 +173,16 @@ export function registerExtensionRoutes(app, { userFromRequest, renderJobResumeP
     const { jobId, title, company, description } = req.body || {};
     const profile = await getProfile(user.id);
     if (!profile?.resume) return res.status(409).json({ error: "Upload your resume in ResumeIQ first" });
-    const raw = await callLLM({
-      system: MATCH_PROMPT,
-      user: JSON.stringify({ job: { title, company, description: String(description || "").slice(0, 12000) }, resume: resumeText(profile.resume) }),
-      maxTokens: 900,
-      json: true,
-    });
-    const parsed = JSON.parse(String(raw).replace(/```json|```/g, "").trim());
+    // The website's scorer, so the panel and the site show the same number for a job.
+    const job = { role: title, company, jd: String(description || "").slice(0, 12000) };
+    const scored = await scoreResume(job, profile.resume, undefined, (system, prompt, maxTokens) => callLLM({ system, user: prompt, maxTokens, json: true }));
+    if (scored.unavailable || scored.score == null) throw Object.assign(new Error("Couldn't check your fit – please try again"), { status: 502 });
     const match = {
-      score: Math.max(0, Math.min(100, Math.round(Number(parsed.score) || 0))),
-      summary: String(parsed.summary || ""),
-      matched: [].concat(parsed.matched || []).slice(0, 5).map(String),
-      gaps: [].concat(parsed.gaps || []).slice(0, 5).map(String),
+      score: Math.max(0, Math.min(100, Math.round(scored.score))),
+      summary: scored.summary,
+      matched: scored.mustHaveSkills.filter((m) => m.candidateHas).map((m) => m.skill).slice(0, 5),
+      gaps: scored.keyGaps.slice(0, 5),
+      breakdown: scored.breakdown,
     };
     if (jobId) await setUserJobMatch(user.id, jobId, match);
     return res.json(match);

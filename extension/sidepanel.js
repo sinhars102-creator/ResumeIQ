@@ -20,6 +20,7 @@ function status(el, text, kind = "") {
 }
 
 const MATCH_CACHE_DAYS = 7;
+const MATCHES_KEY = "matches-v2"; // scores from the website's scorer (v1 used a different one)
 let currentMatch = null; // the score shown for the job on this page
 let readSeq = 0; // drops results for a job the user has already moved away from
 
@@ -38,17 +39,17 @@ function jobKey(url) {
 }
 
 async function cachedMatch(key) {
-  const { matches = {} } = await chrome.storage.local.get("matches");
+  const { [MATCHES_KEY]: matches = {} } = await chrome.storage.local.get(MATCHES_KEY);
   const hit = matches[key];
   return hit && Date.now() - hit.at < MATCH_CACHE_DAYS * 864e5 ? hit.match : null;
 }
 
 async function cacheMatch(key, match) {
-  const { matches = {} } = await chrome.storage.local.get("matches");
+  const { [MATCHES_KEY]: matches = {} } = await chrome.storage.local.get(MATCHES_KEY);
   matches[key] = { at: Date.now(), match };
   // Keep the newest 300.
   const keep = Object.entries(matches).sort((a, b) => b[1].at - a[1].at).slice(0, 300);
-  await chrome.storage.local.set({ matches: Object.fromEntries(keep) });
+  await chrome.storage.local.set({ [MATCHES_KEY]: Object.fromEntries(keep) });
 }
 
 function matchPending(text) {
