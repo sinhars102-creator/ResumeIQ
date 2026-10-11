@@ -13,6 +13,8 @@ import { checkEdit, formatResume } from "./assistant.js";
 
 const MAX_JD_CHARS = 8000;
 const MAX_EDITS = 8;
+// One pass with no conversation to fill gaps, so this step uses the stronger model (slower: ~50s).
+const PROVIDER = "anthropic";
 
 const GENERATE_PROMPT = `You tailor one candidate's resume to one job in a single pass. The candidate reviews the result afterwards.
 Change wording only. The candidate can't answer questions now, so use only facts already in the resume.
@@ -198,7 +200,7 @@ CANDIDATE RESUME:
 ${formatResume(resume)}
 
 Return ONLY the JSON object.`;
-  let reply = parse(await callLLM({ system: GENERATE_PROMPT, user, maxTokens: 3000, json: true }));
+  let reply = parse(await callLLM({ system: GENERATE_PROMPT, user, maxTokens: 3000, json: true, provider: PROVIDER }));
   const context = { resume, jd, candidateText: "", decisions: [] };
   let checked = reply.edits.map((edit) => ({ edit, problems: problemsWith(edit, context) }));
 
@@ -213,6 +215,7 @@ Return ONLY the JSON object.`;
         user: `${user}\n\nYour previous reply:\n${JSON.stringify(reply)}\n\nAutomatic checks failed:\n${feedback}\nFix or drop the failing edits (keep passing ones unchanged) and return the full JSON object again.`,
         maxTokens: 3000,
         json: true,
+        provider: PROVIDER,
       }));
       reply = { edits: repaired.edits, realGaps: repaired.realGaps.length ? repaired.realGaps : reply.realGaps };
       checked = reply.edits.map((edit) => ({ edit, problems: problemsWith(edit, context) }));
