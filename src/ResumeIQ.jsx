@@ -2749,15 +2749,18 @@ function ChangeableLine({ text, before, onCommit, as: Tag = "div", style }) {
     window.getSelection()?.removeAllRanges();
     window.getSelection()?.addRange(range);
   }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Separate keys for viewing and editing: the browser changes the editable element's text as you
+  // type, outside React, so reusing it for the view would keep that text next to the redrawn one.
   if (!editing) {
     return (
-      <Tag className="rq-editable" style={{ ...style, cursor: "text" }} title="Click to edit" onClick={() => setEditing(true)}>
+      <Tag key="view" className="rq-editable" style={{ ...style, cursor: "text" }} title="Click to edit" onClick={() => setEditing(true)}>
         <TrackChanges before={before} after={text} />
       </Tag>
     );
   }
   return (
     <Tag
+      key="edit"
       ref={ref}
       contentEditable
       suppressContentEditableWarning
@@ -2797,6 +2800,14 @@ function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
   const editFor = (section, text) => edits.find((e) => e.section === section && e.proposed === text);
   const beforeOf = (e) => (e.type === "Addition" ? "" : e.displayOriginal ?? e.original);
   const snippet = (text) => (text.length > 60 ? `${text.slice(0, 57)}…` : text);
+  // What an edit changed, in a few words: its first added words (else its first removed ones).
+  const whatChanged = (e) => {
+    const parts = wordChanges(beforeOf(e), e.proposed);
+    const added = parts.find((p) => p.kind === "added");
+    if (added) return `added “${snippet(added.text)}”`;
+    const removed = parts.find((p) => p.kind === "removed");
+    return removed ? `removed “${snippet(removed.text)}”` : `“${snippet(e.proposed)}”`;
+  };
 
   return (
     <div style={styles.resumePaper}>
@@ -2821,7 +2832,7 @@ function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
             <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", marginTop: 4 }}>
               {summaryEdits.map((e) => (
                 <button key={e.id} type="button" style={undoButtonStyle} title={`Put back: ${beforeOf(e)}`} onClick={() => onUndo(e.id)}>
-                  Undo “{snippet(e.proposed)}”
+                  Undo: {whatChanged(e)}
                 </button>
               ))}
             </div>
