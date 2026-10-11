@@ -75,34 +75,62 @@
     return host;
   }
 
-  const GAP = 12; // px between the sticker and LinkedIn's content above and below
+  const GAP = 12; // px between the sticker and the buttons above it
+  let host = null;
 
-  /**
-   * Line the sticker up with the job text: from the Apply button's left edge to the header's content
-   * edge on the right, GAP below the buttons – measured, since LinkedIn's header can have side padding
-   * the sticker's container lacks, and can be shorter than the buttons it shows.
-   */
-  function fit({ header, apply }) {
-    const parent = host.parentElement;
-    const ps = getComputedStyle(parent);
-    const pr = parent.getBoundingClientRect();
-    const contentLeft = pr.left + parseFloat(ps.borderLeftWidth) + parseFloat(ps.paddingLeft);
-    const contentRight = pr.right - parseFloat(ps.borderRightWidth) - parseFloat(ps.paddingRight);
-    const hs = getComputedStyle(header);
-    const headerRight = header.getBoundingClientRect().right - parseFloat(hs.borderRightWidth) - parseFloat(hs.paddingRight);
-    const buttonsBottom = apply.getBoundingClientRect().bottom;
-    const currentTop = parseFloat(host.style.marginTop) || 0;
-    const naturalTop = host.getBoundingClientRect().top - currentTop;
-    const margins = {
-      marginLeft: `${Math.max(0, Math.round(apply.getBoundingClientRect().left - contentLeft))}px`,
-      marginRight: `${Math.max(0, Math.round(contentRight - headerRight))}px`,
-      marginTop: `${Math.max(0, Math.round(buttonsBottom + GAP - naturalTop))}px`,
-      marginBottom: `${GAP}px`,
-    };
-    for (const [k, v] of Object.entries(margins)) if (host.style[k] !== v) host.style[k] = v;
+  /** The header's content edges (inside its padding and border). */
+  function contentBox(el) {
+    const r = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    return { left: r.left + parseFloat(cs.borderLeftWidth) + parseFloat(cs.paddingLeft), right: r.right - parseFloat(cs.borderRightWidth) - parseFloat(cs.paddingRight) };
   }
 
-  let host = null;
+  /** Nudge the sticker's margins (from where it actually is) so it spans the job text, GAP below the buttons. */
+  function align({ header, apply }) {
+    const px = (k) => parseFloat(host.style[k]) || 0;
+    const right = contentBox(header).right;
+    let box = host.getBoundingClientRect();
+    host.style.marginLeft = `${Math.round(px("marginLeft") + apply.getBoundingClientRect().left - box.left)}px`;
+    box = host.getBoundingClientRect();
+    host.style.marginRight = `${Math.round(px("marginRight") + box.right - right)}px`;
+    box = host.getBoundingClientRect();
+    host.style.marginTop = `${Math.max(0, Math.round(px("marginTop") + apply.getBoundingClientRect().bottom + GAP - box.top))}px`;
+    host.style.marginBottom = `${GAP}px`;
+  }
+
+  /**
+   * Does it look right where it is: full width of the job text, lined up with it, below the buttons,
+   * one card tall – and not running into what follows (inside the header: within the header's box,
+   * which can be shorter than its contents; after it: above the next section)?
+   */
+  function looksRight({ header, apply }) {
+    const box = host.getBoundingClientRect();
+    const a = apply.getBoundingClientRect();
+    const width = contentBox(header).right - a.left;
+    const limit = header.contains(host)
+      ? header.getBoundingClientRect().bottom
+      : host.nextElementSibling ? host.nextElementSibling.getBoundingClientRect().top : Infinity;
+    return box.width >= 0.6 * width && Math.abs(box.left - a.left) <= 4 && box.top >= a.bottom + GAP / 2 && box.height <= 160 && box.bottom <= limit + 1;
+  }
+
+  /**
+   * Put the sticker in the job header (as its last item), else right after it – whichever ends up
+   * looking right once aligned. LinkedIn's layout isn't known in advance (the header can sit in a row,
+   * be shorter than its buttons…), so each spot is tried and measured; if neither works, no sticker.
+   */
+  function place(found) {
+    const spots = [() => found.header.appendChild(host), () => found.header.insertAdjacentElement("afterend", host)];
+    for (const put of spots) {
+      put();
+      // Its own line in any layout: a full-width flex item, a grid item spanning all columns.
+      Object.assign(host.style, { margin: "0", flex: "0 0 100%", gridColumn: "1 / -1", alignSelf: "stretch", width: "auto" });
+      align(found);
+      if (looksRight(found)) return true;
+    }
+    host.remove();
+    return false;
+  }
+
   // LinkedIn swaps jobs and re-renders the pane without loading a page: keep the sticker in place.
   setInterval(() => {
     const found = onJobPage() ? jobHeader() : null;
@@ -111,7 +139,7 @@
       return;
     }
     host ||= build();
-    if (found.header.nextElementSibling !== host) found.header.insertAdjacentElement("afterend", host);
-    fit(found);
+    if (host.isConnected && looksRight(found)) return; // still fine where it is
+    place(found);
   }, 800);
 })();
