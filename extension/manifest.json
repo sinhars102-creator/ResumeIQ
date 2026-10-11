@@ -11,7 +11,7 @@
   "action": { "default_title": "Open ResumeIQ", "default_icon": { "16": "icons/icon16.png", "32": "icons/icon32.png" } },
   "content_scripts": [
     {
-      "matches": ["http://localhost:5173/*", "https://resume-iq-seven.vercel.app/*"],
+      "matches": ["http://localhost:5173/*", "https://www.myresumeiq.io/*"],
       "js": ["bridge.js"],
       "run_at": "document_idle"
     },

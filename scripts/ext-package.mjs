@@ -1,11 +1,11 @@
 // Builds the extension for testers: a copy of extension/ pointed at the live site, with unfinished
 // features left out, zipped as dist-extension/ResumeIQ-extension.zip (install: Load unpacked).
-//   npm run ext:package            (live site: https://resume-iq-seven.vercel.app)
+//   npm run ext:package            (live site: https://www.myresumeiq.io)
 //   EXT_SITE=https://… npm run ext:package
 import { cpSync, rmSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { execFileSync } from "child_process";
 
-const site = (process.env.EXT_SITE || "https://resume-iq-seven.vercel.app").replace(/\/$/, "");
+const site = (process.env.EXT_SITE || "https://www.myresumeiq.io").replace(/\/$/, "");
 const { VITE_SUPABASE_URL: supabaseUrl, VITE_SUPABASE_ANON_KEY: supabaseAnonKey } = process.env;
 if (!supabaseUrl || !supabaseAnonKey) throw new Error("Set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env first");
 

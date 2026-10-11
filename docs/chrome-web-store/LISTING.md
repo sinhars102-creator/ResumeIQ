@@ -33,7 +33,7 @@ Upload: `dist-extension/ResumeIQ-extension.zip` (build it with `npm run ext:pack
 
 **Small promo tile (440×280):** `promo-small-440x280.png`
 
-**Official URL / homepage:** https://resume-iq-seven.vercel.app
+**Official URL / homepage:** https://www.myresumeiq.io
 **Support:** rahul@myresumeiq.io
 
 ## Privacy practices tab
@@ -69,7 +69,7 @@ Upload: `dist-extension/ResumeIQ-extension.zip` (build it with `npm run ext:pack
 
 **Certify all three:** not sold to third parties; not used or transferred for purposes unrelated to the item's single purpose; not used to determine creditworthiness or for lending.
 
-**Privacy policy URL:** https://resume-iq-seven.vercel.app/privacy.html
+**Privacy policy URL:** https://www.myresumeiq.io/privacy.html
 
 ## Distribution tab
 
@@ -78,6 +78,6 @@ Upload: `dist-extension/ResumeIQ-extension.zip` (build it with `npm run ext:pack
 
 ## Test instructions (for Google's reviewer)
 
-> 1. Go to https://resume-iq-seven.vercel.app/app and sign in with any email address (a sign-in code is emailed). Upload any resume (PDF).
+> 1. Go to https://www.myresumeiq.io/app and sign in with any email address (a sign-in code is emailed). Upload any resume (PDF).
 > 2. Open a job posting, e.g. any job on https://jobs.lever.co, and click the ResumeIQ toolbar icon to open the side panel: it shows the match score. "Generate resume for this job" shows a tailored version for review.
 > 3. Click the job's Apply button to reach the application form; in the panel, click "Autofill this application" – the form is filled and the resume attached. Nothing is submitted; the user submits on the page.

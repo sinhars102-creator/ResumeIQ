@@ -51,7 +51,7 @@ async function fetchJson(url, { timeoutMs = FETCH_TIMEOUT_MS } = {}) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, {
-      headers: { Accept: "application/json", "User-Agent": "ResumeIQ job search (+https://resume-iq-seven.vercel.app)" },
+      headers: { Accept: "application/json", "User-Agent": "ResumeIQ job search (+https://www.myresumeiq.io)" },
       signal: controller.signal,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
