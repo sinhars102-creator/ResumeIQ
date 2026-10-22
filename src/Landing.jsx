@@ -1,5 +1,11 @@
+import { useState } from "react";
 import { track } from "./analytics.js";
+import { payForPlan } from "./razorpayCheckout.js";
 import "./Landing.css";
+
+// Paying for a pack (Razorpay): on when running locally, off on the live site until
+// VITE_FEATURE_PAYMENTS=1 – packs don't unlock anything in the app yet.
+const PAYMENTS = (import.meta.env.VITE_FEATURE_PAYMENTS ?? (import.meta.env.DEV ? "1" : "0")) === "1";
 
 // Set this to the Chrome Web Store listing once the extension is published.
 // Until then the "Add to Chrome" buttons scroll to the extension section.
@@ -58,6 +64,29 @@ export default function Landing({ onStart }) {
     track("landing_cta_clicked", { location: where });
     onStart();
   };
+
+  // Pack checkout: { plan, state: "paying" | "paid" | "error", message }
+  const [payment, setPayment] = useState(null);
+  const buy = (plan, where) => async (e) => {
+    if (!PAYMENTS) return start(where)(e);
+    e.preventDefault();
+    if (payment?.state === "paying") return;
+    track("landing_cta_clicked", { location: where });
+    setPayment({ plan, state: "paying" });
+    try {
+      const r = await payForPlan(plan);
+      track(r.status === "paid" ? "payment_succeeded" : "payment_cancelled", { plan });
+      setPayment(r.status === "paid" ? { plan, state: "paid", message: `Payment received – thank you! Payment ID ${r.paymentId}.` } : null);
+    } catch (err) {
+      track("payment_failed", { plan });
+      setPayment({ plan, state: "error", message: err.message });
+    }
+  };
+  const paying = (plan) => payment?.plan === plan && payment.state === "paying";
+  const paymentNote = (plan) =>
+    payment?.plan === plan && payment.message ? (
+      <p role="status" style={{ marginTop: 10, fontSize: 13, color: payment.state === "error" ? "#B54708" : "inherit" }}>{payment.message}</p>
+    ) : null;
 
   const chromeHref = CHROME_STORE_URL || "#extension";
   const chromeClick = (where) => () => track("landing_chrome_clicked", { location: where });
@@ -316,13 +345,15 @@ export default function Landing({ onStart }) {
               <div className="lp-price-name">Job Search Pack</div>
               <div className="lp-price-amt">₹399</div>
               <ul><li>10 tailored applications</li><li>Extension autofill for all 10</li><li>PDF and DOCX exports</li><li>Application tracker</li><li>Valid for 60 days</li></ul>
-              <a href="/app" className="lp-btn lp-btn-primary" onClick={start("pricing_pack")}>Get the pack</a>
+              <a href="/app" className="lp-btn lp-btn-primary" onClick={buy("pack", "pricing_pack")} aria-busy={paying("pack")}>{paying("pack") ? "Opening payment…" : "Get the pack"}</a>
+              {paymentNote("pack")}
             </div>
             <div className="lp-card lp-price lp-price-dark">
               <div className="lp-price-name">Sprint Pass</div>
               <div className="lp-price-amt">₹799</div>
               <ul><li>Unlimited tailored applications for 30 days</li><li>Unlimited extension autofill</li><li>Daily matches on WhatsApp</li><li>Priority support</li></ul>
-              <a href="/app" className="lp-btn lp-btn-mint" onClick={start("pricing_pass")}>Start my sprint</a>
+              <a href="/app" className="lp-btn lp-btn-mint" onClick={buy("pass", "pricing_pass")} aria-busy={paying("pass")}>{paying("pass") ? "Opening payment…" : "Start my sprint"}</a>
+              {paymentNote("pass")}
             </div>
           </div>
         </section>

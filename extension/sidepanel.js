@@ -1,4 +1,4 @@
-import { extractJob, readForm, fillForm, attachFile, formSignal, expandEmployment } from "./pageScripts.js";
+import { extractJob, readForm, fillForm, attachFile, formSignal, expandEmployment, watchSubmit } from "./pageScripts.js";
 import { jobKey, cachedMatch, cacheMatch } from "./matchCache.js";
 import { CONFIG } from "./config.js";
 
@@ -250,6 +250,8 @@ $("autofill").addEventListener("click", async () => {
       fields: form.fields, answers: answers.data.answers, needsYou: answers.data.needsYou,
       resume: resume.ok ? resume.data : null, coverLetter: cover.ok ? cover.data : null,
     }]);
+    // Remember the answers you submit (in your profile) so the next form fills them in.
+    await runInPage(watchSubmit, [{ fields: form.fields }]).catch(() => {});
     attached.resume = resume.ok && resume.data && form.fields.some((f) => f.id === "resume") ? { ...resume.data, id: $("resumeSelect").value } : null;
     attached.cover = cover.ok && cover.data && coverFieldId ? { fileName: cover.data.fileName, base64: cover.data.base64, mimeType: "application/pdf" } : null;
     showAttached();
@@ -258,7 +260,7 @@ $("autofill").addEventListener("click", async () => {
       $("coverBox").hidden = false;
     } else if (coverFieldId && !cover.ok) status($("coverStatus"), cover.data.error || "Couldn't write a cover letter", "err");
     const left = result.skipped.length;
-    status($("applyStatus"), `Filled ${result.filled} field${result.filled === 1 ? "" : "s"}${left ? ` · ${left} required left for you (outlined in amber on the page)` : ""}. Review the page, then submit it yourself.`, "ok");
+    status($("applyStatus"), `Filled ${result.filled} field${result.filled === 1 ? "" : "s"}${left ? ` · ${left} required left for you (outlined in amber on the page)` : ""}. Review the page, then submit it yourself – ResumeIQ remembers your answers for next time.`, "ok");
     $("skipped").replaceChildren(...result.skipped.map((s) => Object.assign(document.createElement("li"), { textContent: s })));
     $("optional").replaceChildren(...(result.optional || []).map((s) => Object.assign(document.createElement("li"), { textContent: s })));
     $("optionalHead").hidden = !(result.optional || []).length;

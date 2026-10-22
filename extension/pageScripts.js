@@ -541,3 +541,61 @@ export function applicationOutcome() {
   const captcha = [...document.querySelectorAll('iframe[src*="recaptcha"][src*="bframe"], iframe[src*="hcaptcha"], iframe[title*="challenge" i]')].some(visible);
   return { submitted, errors: [...new Set(errors)].slice(0, 8), captcha };
 }
+
+/**
+ * After autofill: when the user submits the application (or moves to its next page), read the
+ * answers as they stand and send them to be remembered in their profile. One listener per page;
+ * a later autofill on the same page replaces the fields it reads.
+ */
+export function watchSubmit({ fields }) {
+  const state = (window.__riqLearn = window.__riqLearn || {});
+  state.fields = fields;
+  if (state.listening) return true;
+  state.listening = true;
+
+  const clean = (t) => String(t || "").replace(/\s+/g, " ").trim();
+  // Personal details, uploads and job history come from the profile and resume already.
+  const SKIP_IDS = /^(first_name|last_name|full_name|email|phone|location|resume|cover_letter|documents)(-|$)/;
+  const read = () => {
+    const out = [];
+    for (const field of state.fields || []) {
+      if (field.type === "file" || field.entry || SKIP_IDS.test(field.id)) continue;
+      const el = document.querySelector(`[data-riq-id="${CSS.escape(field.id)}"]`);
+      if (!el) continue;
+      const labelOf = (v) => field.options?.find((o) => String(o.value) === String(v))?.label || v;
+      let value;
+      if (field.group) {
+        value = [...el.querySelectorAll("[data-riq-option]")].filter((b) => b.checked).map((b) => labelOf(b.getAttribute("data-riq-option")));
+      } else if (el.tagName === "SELECT") {
+        value = el.value ? clean(el.options[el.selectedIndex]?.text) : "";
+      } else if (field.combobox && !field.autocomplete) {
+        // Search-box dropdowns show the chosen option as text next to the (emptied) input.
+        const control = el.closest('[class*="control"]') || el.parentElement;
+        const shown = clean(control?.querySelector('[class*="single-value"], [class*="singleValue"]')?.innerText || control?.innerText);
+        value = field.options?.find((o) => clean(o.label) === shown)?.label || "";
+      } else {
+        value = clean(el.value);
+      }
+      if (Array.isArray(value) ? !value.length : !value) continue;
+      out.push({ label: field.label, type: field.type, options: field.options?.slice(0, 60).map((o) => o.label), value });
+    }
+    return out;
+  };
+
+  let last = 0;
+  const send = () => {
+    if (Date.now() - last < 5000) return;
+    last = Date.now();
+    const answers = read();
+    if (answers.length) chrome.runtime.sendMessage({ type: "learn", answers, url: location.href }).catch(() => {});
+  };
+  const SUBMITS = /^(submit|apply|send|finish|next|continue|review|save (and|&) continue)\b|submit application|send application/i;
+  document.addEventListener("submit", send, true);
+  document.addEventListener("click", (e) => {
+    const b = e.target.closest?.('button, input[type="submit"], [role="button"]');
+    if (!b || b.closest("[data-riq-skip]")) return;
+    const text = clean(b.innerText || b.value || b.getAttribute("aria-label"));
+    if (b.type === "submit" || SUBMITS.test(text)) send();
+  }, true);
+  return true;
+}

@@ -27,11 +27,11 @@ Upload: `dist-extension/ResumeIQ-extension.zip` (build it with `npm run ext:pack
 >
 > ResumeIQ works on company career sites and job boards such as Greenhouse, Lever, Ashby and Workday. Sign in once on the ResumeIQ website and the extension uses the same account.
 
-**Icon:** `extension/icons/icon128.png`
+**Icon:** `store-icon-128.png` (the MyResumeIQ.io artwork inside 96×96 with 16px padding)
 
-**Screenshots (1280×800):** `1-match.png`, `2-tailored-resume.png`, `3-autofill.png` – in that order. They show the real extension with a fictional company and candidate.
+**Screenshots (1280×800, 24-bit PNG):** in this order – `1-home-page.png`, `2-extension-match.png`, `3-extension-tailored-resume.png`, `4-extension-autofill.png`, `5-home-tailored-never-invented.png`. The home page shots are the live site; the extension shots are the real side panel with a fictional company and candidate.
 
-**Small promo tile (440×280):** `promo-small-440x280.png`
+**Small promo tile (440×280):** `promo-small-440x280.png` (the full MyResumeIQ.io logo)
 
 **Official URL / homepage:** https://www.myresumeiq.io
 **Support:** rahul@myresumeiq.io
