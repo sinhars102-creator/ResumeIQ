@@ -2733,7 +2733,10 @@ const countBlanks = (text) => (String(text || "").match(/\[[^\]]+\]/g) || []).le
 /** Scroll to the first [blank] on the Tailor resume, open its line for editing and select the blank. */
 function goToFirstBlank() {
   const line = document.querySelector('[data-rq-tailor-resume] .rq-editable span[title="Fill this in"]')?.closest(".rq-editable");
-  if (!line) return;
+  if (!line) {
+    document.querySelector('[data-rq-tailor-resume] span[title="Fill this in"]')?.scrollIntoView({ behavior: "smooth", block: "center" });
+    return;
+  }
   line.scrollIntoView({ behavior: "smooth", block: "center" });
   line.click();
   // The line re-renders as an editable copy; select its first blank once it's there.
@@ -4170,7 +4173,17 @@ export default function ResumeIQ() {
 
   const approvedCount = approvedIds.size;
   // [Blanks] in accepted edits must be filled before the resume moves on (they'd end up in the PDF).
-  const blanksLeft = suggestions.filter((x) => approvedIds.has(x.id)).reduce((n, x) => n + countBlanks(x.proposed), 0);
+  // Only edits that landed on the resume count – one whose line wasn't found leaves no blank to fill.
+  const blanksLeft = (() => {
+    const accepted = suggestions.filter((x) => approvedIds.has(x.id) && countBlanks(x.proposed));
+    if (!accepted.length) return 0;
+    const working = applyApprovedChangesClientSide(resume, suggestions.filter((x) => approvedIds.has(x.id))) || {};
+    const lines = [working.summary || "", ...(working.experience || []).flatMap((e) => e.bullets || []), ...(working.skills || [])];
+    const strip = (t) => String(t || "").replace(/^\s*[•\-–*]\s*/, "").trim();
+    return accepted
+      .filter((x) => lines.some((l) => l === x.proposed || strip(l) === strip(x.proposed) || l.includes(strip(x.proposed))))
+      .reduce((n, x) => n + countBlanks(x.proposed), 0);
+  })();
 
   return (
     <div className="rq-app-root" style={styles.appRoot}>
