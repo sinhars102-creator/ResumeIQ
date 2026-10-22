@@ -2730,6 +2730,26 @@ function withBlanks(text) {
 }
 const countBlanks = (text) => (String(text || "").match(/\[[^\]]+\]/g) || []).length;
 
+/** Scroll to the first [blank] on the Tailor resume, open its line for editing and select the blank. */
+function goToFirstBlank() {
+  const line = document.querySelector('[data-rq-tailor-resume] .rq-editable span[title="Fill this in"]')?.closest(".rq-editable");
+  if (!line) return;
+  line.scrollIntoView({ behavior: "smooth", block: "center" });
+  line.click();
+  // The line re-renders as an editable copy; select its first blank once it's there.
+  setTimeout(() => {
+    const el = document.activeElement;
+    if (!el?.isContentEditable || !el.firstChild) return;
+    const m = (el.textContent || "").match(/\[[^\]]+\]/);
+    if (!m) return;
+    const range = document.createRange();
+    range.setStart(el.firstChild, m.index);
+    range.setEnd(el.firstChild, m.index + m[0].length);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+  }, 0);
+}
+
 /** `after` shown as track changes against `before`: new words in light blue, removed words struck through. */
 function TrackChanges({ before, after }) {
   if (before == null || before === after) return withBlanks(after);
@@ -2817,7 +2837,7 @@ function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
   };
 
   return (
-    <div style={styles.resumePaper}>
+    <div style={styles.resumePaper} data-rq-tailor-resume>
       <div style={styles.resumeHeaderRow}>
         <div style={styles.resumeHeaderText}>
           <div style={styles.resumeNameText}>{working.name}</div>
@@ -5254,11 +5274,12 @@ body {
                 </div>
                 <button
                   type="button"
-                  onClick={handleApplyChanges}
-                  disabled={applyingChanges || blanks > 0}
+                  // With [blanks] left, Continue takes you to the first one instead of moving on.
+                  onClick={blanks > 0 ? goToFirstBlank : handleApplyChanges}
+                  disabled={applyingChanges}
                   style={{
                     ...styles.primaryButton,
-                    ...(applyingChanges || blanks > 0 ? styles.disabledButton : {}),
+                    ...(applyingChanges ? styles.disabledButton : {}),
                   }}
                 >
                   {approvedCount ? `Continue with ${approvedCount} edit${approvedCount === 1 ? "" : "s"} →` : "Continue with original resume →"}
