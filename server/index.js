@@ -22,6 +22,7 @@ import { fetchEasyApplyForm, easyApplyTarget } from "./easyApply.js";
 import { fillForm } from "./easyApplyFill.js";
 import { rehearse, submit as submitApplication, enterCode } from "./greenhouseSubmit.js";
 import { registerExtensionRoutes } from "./extensionApi.js";
+import { registerPaymentRoutes } from "./payments.js";
 import { searchApiSources, adzunaConfigured, loadCompanies } from "./jobSources.js";
 import { callLLM, llmProvider, llmModel, LLMUserError } from "./llm.js";
 
@@ -43,6 +44,7 @@ const ENV_KEYS = [
   "RAPIDAPI_KEY", "APIFY_TOKEN", "APIFY_API_TOKEN", "RXRESUME_API_KEY", "RXRESUME_URL",
   "GROQ_API_KEY", "GROQ_MODEL", "ANTHROPIC_API_KEY", "VITE_ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_EFFORT", "GROQ_FALLBACK_MODELS", "LLM_PROVIDER",
   "ADZUNA_APP_ID", "ADZUNA_APP_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
+  "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET",
 ];
 
 function loadEnvFile(filePath) {
@@ -1144,6 +1146,8 @@ async function easyApplyUser(req, res) {
   if (!user) res.status(401).json({ error: "Please sign in to apply" });
   return user;
 }
+
+registerPaymentRoutes(app);
 
 registerExtensionRoutes(app, {
   userFromRequest: async (req) =>
