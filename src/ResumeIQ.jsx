@@ -5,11 +5,12 @@ import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import { track, bucket } from "./analytics.js";
 import EasyApplyPanel, { SignIn } from "./easyApply/EasyApplyPanel.jsx";
-import { supabase as supabaseClient, loadProfile } from "./easyApply/supabaseClient.js";
+import { supabase as supabaseClient, loadProfile, saveProfile } from "./easyApply/supabaseClient.js";
 import {
   MAX_BULLETS_PER_EXPERIENCE, PHOTO_WIDTH_MM, PHOTO_HEIGHT_MM, DEFAULT_SECTION_ORDER, DEFAULT_PDF_FORMAT, buildResumePdf,
 } from "./resumePdf.js";
 import UploadStep from "./UploadStep.jsx";
+import AccountStep from "./AccountStep.jsx";
 import {
   computeLocalMatchScore, experienceFromRoles, getCandidateYears, parseJdYearsRange, resumeForAI, scoreResume,
 } from "./matchScore.js";
@@ -1322,6 +1323,8 @@ const styles = {
 
 function getStepOrder(step) {
   switch (step) {
+    case "account":
+      return 0;
     case "upload":
       return 1;
     case "parsing":
@@ -3157,7 +3160,11 @@ function ResumeDocument({ resume, highlights = [], dim = false, afterMode = fals
 const DEFAULT_PARSING_STATUS = { extractText: false, parseStructure: false, findJobs: false };
 
 export default function ResumeIQ() {
-  const [step, setStep] = useState("upload");
+  // Onboarding (/app/onboarding, not linked from anywhere yet): create an account with an emailed
+  // code, then upload – the parsed resume is saved to the account.
+  const [onboarding] = useState(() => window.location.pathname.startsWith("/app/onboarding"));
+  const [step, setStep] = useState(() => (onboarding ? "account" : "upload"));
+
   // Job whose Easy Apply panel is open (Greenhouse roles only, for now).
   const [easyApplyJob, setEasyApplyJob] = useState(null);
   const [easyApplyOnly, setEasyApplyOnly] = useState(false);
@@ -3650,6 +3657,25 @@ export default function ResumeIQ() {
     });
   };
 
+  /** Onboarding: keep the parsed resume (and name/email) in the signed-in user's profile. */
+  const saveResumeToAccount = async (parsed) => {
+    try {
+      const session = supabaseClient ? (await supabaseClient.auth.getSession()).data.session : null;
+      if (!session) return;
+      const [first, ...rest] = String(parsed.name || "").trim().split(/\s+/);
+      const existing = await loadProfile(session.user.id).catch(() => null);
+      await saveProfile(session.user.id, {
+        resume: parsed,
+        email: existing?.email || session.user.email,
+        first_name: existing?.first_name || first || undefined,
+        last_name: existing?.last_name || rest.join(" ") || undefined,
+      });
+      track("onboarding_resume_saved");
+    } catch (e) {
+      console.warn("Couldn't save the resume to your account:", e.message);
+    }
+  };
+
   const handleUploadAndParse = async (file) => {
     if (!file) return;
     const name = file.name || "Resume";
@@ -3699,6 +3725,7 @@ export default function ResumeIQ() {
       setResume(extracted);
       setResumeText(text);
       setParsingStatus((s) => ({ ...s, parseStructure: true }));
+      if (onboarding) saveResumeToAccount(extracted);
 
       // Move to the job grid now instead of blocking on the LinkedIn search —
       // that's a live Apify scrape (server/index.js) that can take 30–180s.
@@ -4323,6 +4350,7 @@ body {
                 if (order === currentStepOrder) state = "active";
                 else if (order < currentStepOrder) state = "past";
                 const goToStep = () => {
+                  if (step === "account") return; // sign in first
                   // From Tailor, Preview is reached the way Continue does: with your edits applied, and
                   // not while [blanks] are left.
                   if (s.id === "preview" && step === "suggestions") {
@@ -4359,6 +4387,9 @@ body {
             <div role="status" style={{ marginBottom: 16, padding: "10px 14px", borderRadius: 10, fontSize: 14, background: "color-mix(in srgb, var(--rq-accent) 10%, transparent)", color: "var(--rq-text)" }}>
               {tailorNotice}
             </div>
+          )}
+          {step === "account" && (
+            <AccountStep homeHref={HOME_URL} onDone={() => setStep("upload")} />
           )}
           {step === "upload" && (
             <UploadStep

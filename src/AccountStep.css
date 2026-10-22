@@ -1,0 +1,24 @@
+/* Onboarding account step (AccountStep.jsx); layout and type come from UploadStep.css. */
+.as-points { margin-top: 28px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 18px; font-size: 15px; line-height: 1.5; color: var(--rq-text-2, var(--rq-text)); }
+.as-points b { display: block; color: var(--rq-text); }
+.as-points + .us-tip { margin-top: 28px; }
+
+.as-form { margin-top: 24px; display: flex; flex-direction: column; gap: 10px; max-width: 420px; }
+.as-label { font-size: 13px; font-weight: 600; color: var(--rq-text); }
+.as-input {
+  font: inherit; font-size: 16px; color: var(--rq-text); background: var(--rq-surface);
+  border: 1px solid var(--rq-border-strong, var(--rq-border)); border-radius: 10px;
+  padding: 12px 14px; min-height: 48px;
+}
+.as-input:focus-visible { outline: 2px solid var(--rq-accent); outline-offset: 1px; border-color: var(--rq-accent); }
+.as-code { font-size: 26px; letter-spacing: 0.3em; font-variant-numeric: tabular-nums; text-align: center; max-width: 320px; }
+.as-code::placeholder { font-size: 16px; letter-spacing: normal; }
+.as-submit { margin-top: 6px; align-self: flex-start; }
+.as-submit:disabled { opacity: 0.55; cursor: not-allowed; filter: none; }
+.as-help { margin-top: 16px; font-size: 13px; color: var(--rq-text-2, var(--rq-text)); }
+.as-help .us-link { padding: 4px 0; }
+.as-help .us-link:disabled { opacity: 0.55; cursor: default; text-decoration: none; }
+
+@media (max-width: 760px) {
+  .as-code { max-width: none; }
+}
