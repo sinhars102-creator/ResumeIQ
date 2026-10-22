@@ -348,6 +348,12 @@ export async function getProfile(userId) {
   return data;
 }
 
+/** Merge changes into a user's applicant profile (creating the row if there's none yet). */
+export async function updateProfile(userId, patch) {
+  const { error } = await db().from("applicant_profiles").upsert({ user_id: userId, ...patch }, { onConflict: "user_id" });
+  if (error) throw new Error(`saving profile failed: ${error.message}`);
+}
+
 /** Save a role for a user: the role into public.jobs (pinned), and the link into user_jobs. */
 export async function saveUserJob(userId, row, { addedFrom = null } = {}) {
   const { error: jobErr } = await db().from("jobs").upsert({ ...row, pinned: true }, { onConflict: "id" });

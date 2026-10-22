@@ -20,6 +20,12 @@ const AGREEING_OPTION = /^\s*(yes,? )?i (understand|agree|acknowledge|accept|con
 const isAcknowledgement = (field) =>
   ACKNOWLEDGE.test(field.label) || field.type === "checkbox" || (field.options || []).some((o) => AGREEING_OPTION.test(o.label));
 
+// Salary and notice questions, in their common wordings ("current annual salary", "CCTC",
+// "annual salary expectations", "expected CTC", "start date/notice period").
+const CURRENT_PAY = /\bcctc\b|\b(current|present)\b.{0,25}\b(ctc|salary|compensation|package|pay)\b/i;
+const EXPECTED_PAY = /\bectc\b|\b(expected|desired)\b.{0,25}\b(ctc|salary|compensation|package|pay)\b|\b(ctc|salary|compensation|package|pay)\b.{0,25}\bexpectations?\b/i;
+const NOTICE = /notice period/i;
+
 /* ---------- Voluntary self-identification and standing consent (from the profile) ---------- */
 
 const DECLINE = /decline|prefer not|do(n't| not) wish|choose not|rather not|not to (say|answer|disclose|self.?identify)/i;
@@ -175,14 +181,14 @@ function ruleAnswer(field, profile, resume) {
       const opt = rangeOption(field.options, n);
       return opt ? { value: opt.value, source: "profile", confidence: "check" } : null;
     };
-    if (/notice period/.test(label)) return pick(profile.notice_period_days);
-    if (/\bcctc\b|current (ctc|salary|compensation|package)/.test(label)) return pick(profile.current_ctc_lpa);
-    if (/\bectc\b|expected (ctc|salary|compensation|package)/.test(label)) return pick(profile.expected_ctc_lpa);
+    if (NOTICE.test(label)) return pick(profile.notice_period_days);
+    if (EXPECTED_PAY.test(label)) return pick(profile.expected_ctc_lpa);
+    if (CURRENT_PAY.test(label)) return pick(profile.current_ctc_lpa);
   }
-  if (/notice period/.test(label) && profile.notice_period_days != null) return value(`${profile.notice_period_days} days`);
+  if (NOTICE.test(label) && profile.notice_period_days != null) return value(`${profile.notice_period_days} days`);
   // Indian forms often write CCTC / ECTC for current / expected CTC.
-  if (/\bcctc\b|current (ctc|salary|compensation|package)/.test(label) && profile.current_ctc_lpa != null) return value(`${profile.current_ctc_lpa} LPA`);
-  if (/\bectc\b|expected (ctc|salary|compensation|package)/.test(label) && profile.expected_ctc_lpa != null) return value(`${profile.expected_ctc_lpa} LPA`);
+  if (EXPECTED_PAY.test(label) && profile.expected_ctc_lpa != null) return value(`${profile.expected_ctc_lpa} LPA`);
+  if (CURRENT_PAY.test(label) && !EXPECTED_PAY.test(label) && profile.current_ctc_lpa != null) return value(`${profile.current_ctc_lpa} LPA`);
   return null;
 }
 
@@ -276,6 +282,22 @@ For free-text questions, write a concise first-person answer (2-5 sentences) gro
 Return JSON: {"answers":[{"id":"<field id>","value":<string|array|null>,"confidence":"high"|"check","reason":"<6-12 words>"}]}`;
 
 /**
+ * A saved answer as this field's value: free text as is; for options, the option whose value or
+ * label matches each saved entry (an array for multiselect). Null when nothing fits.
+ */
+function savedAnswerFor(field, saved) {
+  if (saved == null || saved === "") return null;
+  if (!field.options?.length) return Array.isArray(saved) ? saved.join(", ") : String(saved);
+  const norm = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const picks = [].concat(saved)
+    .map((v) => field.options.find((o) => o.value === v) || field.options.find((o) => norm(o.label) === norm(v)))
+    .filter(Boolean)
+    .map((o) => o.value);
+  if (!picks.length) return null;
+  return field.type === "multiselect" ? [...new Set(picks)] : picks[0];
+}
+
+/**
  * Fill a form. `profile` is the applicant_profiles row (may be partial); `resume` is ResumeIQ's
  * parsed resume; `job` is { title, company }.
  */
@@ -312,10 +334,9 @@ export async function fillForm({ fields, profile = {}, resume = null, job = {} }
       forAi.push({ ...field, label: `Job ${field.entry.index + 1} (${job.role || ""} at ${job.company || ""}) – ${field.label}` });
       continue;
     }
-    const savedAnswer = saved[questionKey(field.label)];
-    const validSaved = savedAnswer != null && (!field.options || field.options.some((o) => o.value === savedAnswer));
-    if (validSaved) {
-      answers[field.id] = { value: savedAnswer, source: "saved", confidence: "high" };
+    const savedValue = savedAnswerFor(field, saved[questionKey(field.label)]);
+    if (savedValue != null) {
+      answers[field.id] = { value: savedValue, source: "saved", confidence: "high" };
       continue;
     }
     const rule = ruleAnswer(field, profile, resume);
@@ -352,4 +373,103 @@ export async function fillForm({ fields, profile = {}, resume = null, job = {} }
     }
   }
   return { answers, needsYou };
+}
+
+/* ---------- Learning: answers the applicant submitted, kept in their profile ---------- */
+
+// Answers written for one company ("Why do you want to work here?") aren't reused elsewhere.
+const ONE_OFF = /\bwhy\b|describe|tell us|explain|cover letter|about yourself|motivat|anything else|additional (information|comments)|summar/i;
+
+/** Lakhs per annum from "28 LPA", "28 lakhs", "₹28,00,000", "2800000"; null for other currencies or unclear text. */
+function parseLpa(text) {
+  const t = String(text).toLowerCase();
+  if (/\$|usd|€|eur|£|gbp|aed|sgd/.test(t)) return null;
+  const m = t.replace(/,/g, "").match(/\d+(\.\d+)?/);
+  if (!m) return null;
+  const n = Number(m[0]);
+  if (/lpa|lakh|lac|\d\s*l\b/.test(t)) return n;
+  if (/\b(cr|crore)/.test(t)) return n * 100;
+  if (n >= 100000) return Math.round((n / 100000) * 100) / 100;
+  return n > 0 && n <= 300 ? n : null;
+}
+
+/** Notice period in days from "30 days", "2 months", "3 weeks", "Immediate"; null for a date or unclear text. */
+function parseNoticeDays(text) {
+  const t = String(text).toLowerCase();
+  if (/immediate|right away|no notice|serving.*(complete|over)/.test(t)) return 0;
+  const m = t.match(/(\d+(\.\d+)?)\s*(day|week|month)/);
+  if (m) return Math.round(Number(m[1]) * (m[3] === "month" ? 30 : m[3] === "week" ? 7 : 1));
+  return /^\d{1,3}$/.test(t.trim()) ? Number(t.trim()) : null;
+}
+
+/** A submitted self-identification answer in the profile column's terms (see selfIdOptionMatches). */
+function storedSelfId(kind, values) {
+  const picked = values.filter((v) => !/^custom$/i.test(v));
+  if (!picked.length) return null;
+  if (picked.some((v) => DECLINE.test(v))) return "decline";
+  const first = picked[0];
+  const l = first.toLowerCase();
+  switch (kind) {
+    case "gender":
+      if (/non.?binary/.test(l)) return "non_binary";
+      if (/^(female|woman)\b|cis.?gender woman/.test(l)) return "female";
+      if (/^(male|man)\b|cis.?gender man/.test(l)) return "male";
+      return first;
+    case "veteran_status":
+      if (/\bnot\b|^no\b|i am not/.test(l)) return "not_veteran";
+      return /veteran|^yes\b/.test(l) ? "veteran" : null;
+    case "disability_status":
+      if (/^no\b|do(n't| not) have/.test(l)) return "no";
+      return /^yes\b|have a disability/.test(l) ? "yes" : null;
+    case "race_ethnicity":
+      return picked.join(", ");
+    default:
+      return first;
+  }
+}
+
+/**
+ * The profile changes from a submitted form: self-identification, salary and notice period into
+ * their columns, and every reusable answer into saved_answers (option answers as labels).
+ * `answers`: [{ label, type, options?: [label], value: string | [string] }]. Returns a patch, or null.
+ */
+export function learnFromForm(answers, profile = {}) {
+  const patch = {};
+  const saved = { ...(profile?.saved_answers || {}) };
+  let changed = false;
+  for (const a of answers || []) {
+    const label = String(a?.label || "").replace(/\s+/g, " ").trim().slice(0, 300);
+    const values = [].concat(a?.value ?? []).map((v) => String(v).replace(/\s+/g, " ").trim()).filter(Boolean).slice(0, 20);
+    if (!label || !values.length) continue;
+    const text = values.join(", ");
+    const field = { label, type: a.type, options: (a.options || []).map((o) => ({ value: o, label: o })) };
+    // Consent stays per form (standing consent is its own setting); one-off and long answers aren't kept.
+    if (isAcknowledgement(field) || ONE_OFF.test(label) || text.length > 200) continue;
+
+    const kind = selfIdKind(label);
+    if (kind) {
+      const stored = storedSelfId(kind, values);
+      if (stored) patch[kind] = stored;
+      continue;
+    }
+    if (EXPECTED_PAY.test(label)) {
+      const n = parseLpa(text);
+      if (n != null) patch.expected_ctc_lpa = n;
+    } else if (CURRENT_PAY.test(label)) {
+      const n = parseLpa(text);
+      if (n != null) patch.current_ctc_lpa = n;
+    }
+    if (NOTICE.test(label)) {
+      const d = parseNoticeDays(text);
+      if (d != null) patch.notice_period_days = d;
+    }
+    const key = questionKey(label);
+    const value = a.options?.length ? (a.type === "multiselect" ? values : values[0]) : text;
+    if (JSON.stringify(saved[key]) !== JSON.stringify(value)) {
+      saved[key] = value;
+      changed = true;
+    }
+  }
+  if (changed) patch.saved_answers = saved;
+  return Object.keys(patch).length ? patch : null;
 }

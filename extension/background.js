@@ -117,6 +117,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, reply) => {
     openApp().then(() => reply(true));
     return true;
   }
+  // Answers submitted on an application page (pageScripts.js watchSubmit), saved to the profile.
+  if (msg.type === "learn" && Array.isArray(msg.answers)) {
+    api("/api/ext/learn", { method: "POST", body: { answers: msg.answers, url: msg.url } })
+      .then((r) => { if (!r.ok) console.warn("[ResumeIQ] couldn't save your answers:", r.data?.error); });
+    return false;
+  }
   if (msg.type === "api") {
     api(msg.path, msg.options).then(reply);
     return true;

@@ -424,3 +424,46 @@ test("Easy Apply fills self-identification and, with consent, declarations from 
   const off = await fillForm({ fields, profile: { ...profile, auto_acknowledge: false } });
   assert.ok(!off.answers.acc);
 });
+
+test("Answers submitted on a form are remembered in the profile and fill the next form", async () => {
+  const { learnFromForm, fillForm } = await import("./easyApplyFill.js");
+  // The answers as the extension reads them off a submitted form (Vendavo, on Workable).
+  const submitted = [
+    { label: "Pronouns", type: "multiselect", options: ["He/him", "She/her", "They/them", "Custom"], value: ["He/him"] },
+    { label: "What is your current annual salary?", type: "textarea", value: "28 LPA" },
+    { label: "What are your annual salary expectations?", type: "textarea", value: "₹38,00,000" },
+    { label: "Do you have experience in the SaaS industry?", type: "select", options: ["Yes", "No"], value: "Yes" },
+    { label: "What is your anticipated start date/notice period?", type: "textarea", value: "2 months" },
+    { label: "What languages do you speak fluently?", type: "textarea", value: "English, Hindi" },
+    { label: "As part of our recruitment process, we require all candidates to review and acknowledge our NDA", type: "multiselect", options: ["Yes, I have read and acknowledge the NDA."], value: ["Yes, I have read and acknowledge the NDA."] },
+    { label: "I identify my ethnicity as", type: "multiselect", options: ["White / Caucasian", "Asian"], value: ["Asian"] },
+    { label: "What gender do you identify as?", type: "select", options: ["Female", "Male", "Non-binary"], value: "Male" },
+    { label: "Why do you want to work at Vendavo?", type: "textarea", value: "I like pricing software." },
+  ];
+  const patch = learnFromForm(submitted, { saved_answers: { "older question": "kept" } });
+  assert.equal(patch.pronouns, "He/him");
+  assert.equal(patch.current_ctc_lpa, 28);
+  assert.equal(patch.expected_ctc_lpa, 38);
+  assert.equal(patch.notice_period_days, 60);
+  assert.equal(patch.race_ethnicity, "Asian");
+  assert.equal(patch.gender, "male");
+  assert.equal(patch.saved_answers["do you have experience in the saas industry"], "Yes");
+  assert.equal(patch.saved_answers["what languages do you speak fluently"], "English, Hindi");
+  assert.equal(patch.saved_answers["older question"], "kept");
+  assert.ok(!Object.keys(patch.saved_answers).some((k) => /nda|why/.test(k)), "consent and one-off answers aren't kept");
+  assert.equal(learnFromForm([{ label: "Expected salary", type: "text", value: "$120,000" }]).expected_ctc_lpa, undefined);
+
+  // Another site: different option values, same question – the saved label picks the option.
+  const opts = (labels) => labels.map((label, i) => ({ value: `opt-${i}`, label }));
+  const fields = [
+    { id: "saas", label: "Do you have experience in the SaaS industry?", type: "select", required: true, section: "application", options: opts(["No", "Yes"]) },
+    { id: "lang", label: "What languages do you speak fluently?", type: "textarea", required: true, section: "application" },
+    { id: "cur", label: "Current annual salary (CTC)", type: "text", required: true, section: "application" },
+    { id: "pr", label: "Pronouns", type: "multiselect", required: false, section: "application", options: opts(["She/her", "He/him"]) },
+  ];
+  const { answers } = await fillForm({ fields, profile: patch });
+  assert.equal(answers.saas.value, "opt-1");
+  assert.equal(answers.lang.value, "English, Hindi");
+  assert.equal(answers.cur.value, "28 LPA");
+  assert.deepEqual(answers.pr.value, ["opt-1"]);
+});

@@ -13,16 +13,17 @@
  *   POST /api/ext/generated-resume/pdf   that resume as a PDF in the fixed template (preview)
  *   POST /api/ext/generated-resume/use   save that PDF as the resume for the role (autofill attaches it)
  *   POST /api/ext/applications           record an auto apply run (submitted / needs review / failed)
+ *   POST /api/ext/learn                  answers the user submitted on a form, remembered in their profile
  */
 import { createHash } from "crypto";
 import { callLLM } from "./llm.js";
-import { fillForm } from "./easyApplyFill.js";
+import { fillForm, learnFromForm } from "./easyApplyFill.js";
 import { generateResume } from "./generateResume.js";
 import { buildResumePdf, pdfSafeText } from "../src/resumePdf.js";
 import { scoreResume } from "../src/matchScore.js";
 import { jsPDF } from "jspdf";
 import {
-  toRow, saveUserJob, setUserJobMatch, getProfile, listUserJobs,
+  toRow, saveUserJob, setUserJobMatch, getProfile, updateProfile, listUserJobs,
   listResumeFiles, addResumeFile, setDefaultResumeFile, deleteResumeFile, getResumeFile, saveTailoredResumeFile,
   recordApplication,
 } from "./jobStore.js";
@@ -196,6 +197,17 @@ export function registerExtensionRoutes(app, { userFromRequest, renderJobResumeP
     const profile = await getProfile(user.id);
     if (!profile) return res.status(409).json({ error: "Set up your application profile in ResumeIQ first" });
     return res.json(await fillForm({ fields: fields.slice(0, 120), profile, resume: profile.resume, job: job || {} }));
+  }));
+
+  // Answers submitted on an application (extension watchSubmit): kept in the profile so the next
+  // form fills them in – self-identification, salary, notice period, and the rest as saved answers.
+  app.post("/api/ext/learn", withUser(async (req, res, user) => {
+    const { answers } = req.body || {};
+    if (!Array.isArray(answers) || !answers.length) return res.status(400).json({ error: "No answers to save" });
+    const profile = await getProfile(user.id);
+    const patch = learnFromForm(answers.slice(0, 150), profile || {});
+    if (patch) await updateProfile(user.id, patch);
+    return res.json({ saved: patch ? Object.keys(patch) : [] });
   }));
 
   // The resume to attach: an uploaded file exactly as uploaded (?id=, else the default); a PDF
