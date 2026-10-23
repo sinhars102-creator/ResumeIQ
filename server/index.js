@@ -6,7 +6,8 @@
 import express from "express";
 import cors from "cors";
 import { readFileSync, existsSync } from "fs";
-import { createHash } from "crypto";
+import { createHash, createHmac } from "crypto";
+import { AsyncLocalStorage } from "async_hooks";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import * as cheerio from "cheerio";
@@ -16,6 +17,7 @@ import {
   jobStoreConfigured, toRow, inScope, upsertJobs, findStoredJobs, recordDemand, markDemandCollected, linkedInJobsForQuery,
   userFromToken, recordApplication, updateApplication, getJobById,
   getTailorSession, saveTailorSession, saveTailoredResumeFile, getProfile,
+  getEditorAccount, saveEditorAccount, userEmail,
 } from "./jobStore.js";
 import { normalizeQuery, FRESH_HOURS } from "./searchDemand.js";
 import { fetchEasyApplyForm, easyApplyTarget } from "./easyApply.js";
@@ -41,7 +43,7 @@ const serverEnv = resolve(__dirname, ".env");
 const cwdEnv = resolve(process.cwd(), ".env");
 
 const ENV_KEYS = [
-  "RAPIDAPI_KEY", "APIFY_TOKEN", "APIFY_API_TOKEN", "RXRESUME_API_KEY", "RXRESUME_URL",
+  "RAPIDAPI_KEY", "APIFY_TOKEN", "APIFY_API_TOKEN", "RXRESUME_API_KEY", "RXRESUME_URL", "RXRESUME_SSO_SECRET",
   "GROQ_API_KEY", "GROQ_MODEL", "ANTHROPIC_API_KEY", "VITE_ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_EFFORT", "GROQ_FALLBACK_MODELS", "LLM_PROVIDER",
   "ADZUNA_APP_ID", "ADZUNA_APP_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
   "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET",
@@ -550,8 +552,54 @@ app.get("/api/linkedin-jobs", async (req, res) => {
 const RX_APP_URL = (process.env.RXRESUME_URL || "https://rxresu.me").replace(/\/$/, "");
 const RX_BASE = `${RX_APP_URL}/api/openapi`;
 
+/*
+ * Editor accounts. With RXRESUME_SSO_SECRET set (shared with the editor's ResumeIQ sign-in add-on),
+ * each signed-in ResumeIQ user gets their own editor account: their resumes are made with their own
+ * editor API key and the embedded editor opens through a short-lived sign-in link – no second login,
+ * and nobody else's resumes in view. Without it, everything uses the one RXRESUME_API_KEY account.
+ */
+const editorKeyStore = new AsyncLocalStorage(); // the editor API key for the current request, if any
+
+function editorSsoSecret() {
+  const secret = (process.env.RXRESUME_SSO_SECRET || "").trim();
+  return secret.length >= 32 ? secret : null;
+}
+
+/** The user's own editor API key – their editor account is made (and its key saved) on first use. */
+async function editorKeyFor(userId, email = null) {
+  if (!editorSsoSecret() || !jobStoreConfigured()) return null;
+  const saved = await getEditorAccount(userId);
+  if (saved) return saved.api_key;
+  const address = email || (await userEmail(userId));
+  if (!address) throw new Error("This account has no email for the editor");
+  const r = await fetch(`${RX_APP_URL}/api/auth/resumeiq/provision`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${editorSsoSecret()}` },
+    body: JSON.stringify({ email: address }),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok || !data.apiKey) throw new Error(`Making the editor account failed (${r.status}${data.message ? `: ${data.message}` : ""})`);
+  await saveEditorAccount(userId, { rxUserId: data.userId, apiKey: data.apiKey });
+  return data.apiKey;
+}
+
+/** Run fn with the user's editor key for every editor call inside it (falls back to the shared key). */
+async function asEditorUser(userId, email, fn) {
+  const key = await editorKeyFor(userId, email);
+  return key ? editorKeyStore.run(key, fn) : fn();
+}
+
+/** A 2-minute link that signs the user in to the editor and opens their resume there. */
+function editorSignInUrl(email, resumeId) {
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  const now = Math.floor(Date.now() / 1000);
+  const unsigned = `${b64({ alg: "HS256", typ: "JWT" })}.${b64({ iss: "resumeiq", aud: "resumeiq-editor", iat: now, exp: now + 120, email, redirect: `/builder/${resumeId}` })}`;
+  const token = `${unsigned}.${createHmac("sha256", editorSsoSecret()).update(unsigned).digest("base64url")}`;
+  return `${RX_APP_URL}/api/auth/resumeiq/sign-in?token=${token}`;
+}
+
 async function rxFetch(path, options = {}) {
-  const key = getRxResumeKey();
+  const key = editorKeyStore.getStore() || getRxResumeKey();
   const response = await fetch(`${RX_BASE}${path}`, {
     ...options,
     headers: {
@@ -777,7 +825,7 @@ async function importIntoRxResume(resumeData, template = "azurill") {
 
 /** Fetch a binary PDF from Reactive Resume (rxFetch assumes JSON/text, which corrupts binary content). */
 async function rxFetchBinary(path) {
-  const key = getRxResumeKey();
+  const key = editorKeyStore.getStore() || getRxResumeKey();
   const response = await fetch(`${RX_BASE}${path}`, { headers: { "x-api-key": key } });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
@@ -992,21 +1040,31 @@ app.post("/api/rxresume/open-in-builder", async (req, res) => {
     return res.status(400).json({ error: "resumeData is required." });
   }
   try {
-    const user = jobId ? await optionalUser(req) : null;
+    const user = await optionalUser(req);
+    const userKey = user ? await editorKeyFor(user.id, user.email) : null;
+    // Their own editor account: open through the sign-in link, so the embedded editor is already signed in.
+    const reply = (resumeId, extra) => builderReply(resumeId, { ...extra, ...(userKey ? { builderUrl: editorSignInUrl(user.email, resumeId) } : {}) });
+    return await editorKeyStore.run(userKey || key, () => openInBuilder({ user: jobId ? user : null, reply }));
+  } catch (err) {
+    console.error("Reactive Resume open-in-builder error:", err);
+    return res.status(502).json({ error: "Failed to open resume in Reactive Resume", details: err.message });
+  }
+
+  async function openInBuilder({ user, reply }) {
     const contentHash = createHash("sha256").update(JSON.stringify(resumeData)).digest("hex");
     const session = user ? await getTailorSession(user.id, String(jobId)).catch((err) => (console.warn("[tailor] session lookup:", err.message), null)) : null;
     if (session) {
       const existing = await rxFetch(`/resumes/${session.rx_resume_id}`, { method: "GET" });
       if (existing.ok && existing.data?.data) {
         const changed = session.content_hash !== contentHash;
-        if (!changed || !refresh) return res.json(builderReply(session.rx_resume_id, { reused: true, contentChanged: changed }));
+        if (!changed || !refresh) return res.json(reply(session.rx_resume_id, { reused: true, contentChanged: changed }));
         // New edits from ResumeIQ: replace the content, keep the template, layout and styling chosen in the editor.
         const design = existing.data.data.metadata;
         const data = { ...mapToRxResumeData(resumeData, design?.template), ...(design ? { metadata: design } : {}) };
         const updated = await rxFetch(`/resumes/${session.rx_resume_id}`, { method: "PUT", body: JSON.stringify({ data }) });
         if (!updated.ok) throw new Error(updated.data?.message || `Updating the editor resume failed (${updated.status})`);
         await saveTailorSession(user.id, String(jobId), { rxResumeId: session.rx_resume_id, contentHash });
-        return res.json(builderReply(session.rx_resume_id, { reused: true, updated: true }));
+        return res.json(reply(session.rx_resume_id, { reused: true, updated: true }));
       }
       // The editor resume was deleted in the editor: make a new one below.
     }
@@ -1021,10 +1079,7 @@ app.post("/api/rxresume/open-in-builder", async (req, res) => {
       await saveTailorSession(user.id, String(jobId), { rxResumeId: resumeId, contentHash })
         .catch((err) => console.warn("[tailor] saving the session failed:", err.message)); // the editor still opens
     }
-    return res.json(builderReply(resumeId, { reused: false }));
-  } catch (err) {
-    console.error("Reactive Resume open-in-builder error:", err);
-    return res.status(502).json({ error: "Failed to open resume in Reactive Resume", details: err.message });
+    return res.json(reply(resumeId, { reused: false }));
   }
 });
 
@@ -1041,7 +1096,7 @@ app.post("/api/tailored/use", async (req, res) => {
   try {
     const session = await getTailorSession(user.id, jobId);
     if (!session) return res.status(404).json({ error: "Open this job's resume in the editor first" });
-    const pdf = await rxFetchBinary(`/resumes/${session.rx_resume_id}/pdf`);
+    const pdf = await asEditorUser(user.id, user.email, () => rxFetchBinary(`/resumes/${session.rx_resume_id}/pdf`));
     if (pdf.subarray(0, 5).toString() !== "%PDF-") throw new Error("the editor didn't return a PDF");
     const [job, profile] = await Promise.all([getJobById(jobId).catch(() => null), getProfile(user.id).catch(() => null)]);
     // The site's job ids aren't always the jobs table's: fall back to what the page sent.
@@ -1062,8 +1117,12 @@ app.post("/api/tailored/use", async (req, res) => {
  * its PDF exactly as the editor renders it. Used by the extension's "Generate resume", which always
  * uses one fixed template.
  */
-async function renderJobResumePdf(userId, jobId, resumeData, { template, name }) {
+async function renderJobResumePdf(userId, jobId, resumeData, options) {
   if (!getRxResumeKey()) throw new Error("RXRESUME_API_KEY not configured on the server (.env)");
+  return asEditorUser(userId, null, () => renderJobResumePdfAsUser(userId, jobId, resumeData, options));
+}
+
+async function renderJobResumePdfAsUser(userId, jobId, resumeData, { template, name }) {
   const session = await getTailorSession(userId, jobId);
   let rxResumeId = null;
   if (session) {

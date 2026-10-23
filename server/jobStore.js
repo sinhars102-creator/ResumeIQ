@@ -475,6 +475,25 @@ export async function saveTailorSession(userId, jobId, { rxResumeId, contentHash
   if (error) throw new Error(`saving your tailoring session failed: ${error.message}`);
 }
 
+/** The user's own design-editor account (id + API key), or null before it's made. Server only. */
+export async function getEditorAccount(userId) {
+  const { data, error } = await db().from("editor_accounts").select("rx_user_id, api_key").eq("user_id", userId).maybeSingle();
+  if (error) throw new Error(`reading the editor account failed: ${error.message}`);
+  return data;
+}
+
+export async function saveEditorAccount(userId, { rxUserId, apiKey }) {
+  const { error } = await db().from("editor_accounts").upsert({ user_id: userId, rx_user_id: rxUserId, api_key: apiKey }, { onConflict: "user_id" });
+  if (error) throw new Error(`saving the editor account failed: ${error.message}`);
+}
+
+/** A ResumeIQ user's email (for making their editor account). */
+export async function userEmail(userId) {
+  const { data, error } = await db().auth.admin.getUserById(userId);
+  if (error) throw new Error(`reading the user failed: ${error.message}`);
+  return data.user?.email || null;
+}
+
 /** A user's resume file (the chosen one, else the default) as bytes, or null when they have none. */
 export async function getResumeFile(userId, id = null) {
   let q = db().from("resume_files").select("storage_path, file_name, mime_type").eq("user_id", userId);
