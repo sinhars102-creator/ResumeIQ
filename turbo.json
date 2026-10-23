@@ -45,6 +45,7 @@
 		}
 	},
 	"globalEnv": [
+		"RESUMEIQ_SSO_SECRET",
 		"PORT",
 		"SERVER_PORT",
 		"APP_URL",

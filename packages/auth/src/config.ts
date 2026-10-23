@@ -25,6 +25,7 @@ import { generateId, toUsername } from "@reactive-resume/utils/string";
 import { isAllowedOAuthRedirectUri } from "@reactive-resume/utils/url-security.node";
 import { createGithubProfileMapper, createProfileMapper } from "./oauth-profile";
 import { authRateLimitStorage } from "./rate-limit";
+import { resumeiqSso, setResumeiqApiKeyCreator } from "./resumeiq-sso";
 import { getTrustedOrigins } from "./trusted-origins";
 
 const authBaseUrl = env.APP_URL;
@@ -338,6 +339,8 @@ const getAuthConfig = () => {
 				usernameValidator: (username) => /^[a-z0-9._-]+$/.test(username),
 				validationOrder: { username: "post-normalization", displayUsername: "post-normalization" },
 			}),
+			// ResumeIQ single sign-on (off unless RESUMEIQ_SSO_SECRET is set) – see resumeiq-sso.ts.
+			resumeiqSso(),
 			...(env.BETTER_AUTH_API_KEY
 				? [dash({ apiKey: env.BETTER_AUTH_API_KEY, activityTracking: { enabled: true } })]
 				: []),
@@ -368,6 +371,8 @@ export const auth: Auth = new Proxy({} as Auth, {
 		return Reflect.get(instance, property, instance);
 	},
 });
+
+setResumeiqApiKeyCreator(async (userId) => (await auth.api.createApiKey({ body: { userId, name: "ResumeIQ" } })).key);
 
 export async function initializeAuth(): Promise<void> {
 	await auth.$context;

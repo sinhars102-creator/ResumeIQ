@@ -46,6 +46,8 @@ export const env = createEnv({
 		// Authentication
 		AUTH_SECRET: z.string().min(1),
 		BETTER_AUTH_API_KEY: z.string().min(1).optional(),
+		// ResumeIQ single sign-on (packages/auth/src/resumeiq-sso.ts): shared with the ResumeIQ server.
+		RESUMEIQ_SSO_SECRET: z.string().min(32).optional(),
 
 		// Social Auth (Google)
 		GOOGLE_CLIENT_ID: z.string().min(1).optional(),
