@@ -3678,6 +3678,41 @@ export default function ResumeIQ() {
     }
   };
 
+  /** Fill the job board for a resume: its target roles (else its title) and years of experience. */
+  const startJobSearch = (r) => {
+    const roles = r.targetRoles && r.targetRoles.length ? r.targetRoles : [(r.title || "").trim() || "Product Manager"];
+    setSuggestedRoles(roles);
+    const years = getCandidateYears(r);
+    setCandidateYears(years != null ? String(years) : "");
+    setLinkedInSearchKeywords(roles[0]);
+    handleSearchLinkedInJobs(roles[0], years);
+  };
+
+  // Signed in with a saved resume: open the job board straight away instead of asking for the resume
+  // again (links from the extension – ?tailor, ?easyApply, ?signin – and /app/onboarding keep their own flow).
+  const [restoringAccount, setRestoringAccount] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return !!supabaseClient && !onboarding && !["tailor", "easyApply", "signin"].some((k) => params.has(k));
+  });
+  useEffect(() => {
+    if (!restoringAccount) return;
+    (async () => {
+      try {
+        const session = (await supabaseClient.auth.getSession()).data.session;
+        const profile = session ? await loadProfile(session.user.id).catch(() => null) : null;
+        if (profile?.resume && !resume) {
+          setResume(profile.resume);
+          setStep("select");
+          startJobSearch(profile.resume);
+          track("returning_user_job_board");
+        }
+      } finally {
+        setRestoringAccount(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on opening the app
+  }, []);
+
   const handleUploadAndParse = async (file) => {
     if (!file) return;
     const name = file.name || "Resume";
@@ -3742,16 +3777,7 @@ export default function ResumeIQ() {
         track("account_step_after_upload");
       }
       setParsingStatus((s) => ({ ...s, findJobs: true }));
-
-      const roles = extracted.targetRoles && extracted.targetRoles.length
-        ? extracted.targetRoles
-        : [(extracted.title || "").trim() || "Product Manager"];
-      setSuggestedRoles(roles);
-      const years = getCandidateYears(extracted);
-      setCandidateYears(years != null ? String(years) : "");
-      const keywords = roles[0];
-      setLinkedInSearchKeywords(keywords);
-      handleSearchLinkedInJobs(keywords, years);
+      startJobSearch(extracted);
     } catch (err) {
       console.error("Upload/parse error:", err);
       const msg = err.message || "Something went wrong";
@@ -4410,7 +4436,10 @@ body {
               }}
             />
           )}
-          {step === "upload" && (
+          {step === "upload" && restoringAccount && (
+            <p style={{ textAlign: "center", padding: "80px 0", color: "var(--rq-text-2)" }} aria-live="polite">Loading your job matches…</p>
+          )}
+          {step === "upload" && !restoringAccount && (
             <UploadStep
               homeHref={HOME_URL}
               error={parsingError}
