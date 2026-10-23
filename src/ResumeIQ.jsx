@@ -11,6 +11,7 @@ import {
 } from "./resumePdf.js";
 import UploadStep from "./UploadStep.jsx";
 import AccountStep from "./AccountStep.jsx";
+import ResumeFilesDialog, { storeResumeFile } from "./ResumeFiles.jsx";
 import {
   computeLocalMatchScore, experienceFromRoles, getCandidateYears, parseJdYearsRange, resumeForAI, scoreResume,
 } from "./matchScore.js";
@@ -3166,6 +3167,15 @@ export default function ResumeIQ() {
   const [step, setStep] = useState(() => (onboarding ? "account" : "upload"));
   // Signed out after uploading: the account step comes between reading the resume and the job board.
   const [accountAfterUpload, setAccountAfterUpload] = useState(false);
+  // The uploaded file, kept with the account once signed in (see storeResumeFile).
+  const uploadedFileRef = useRef(null);
+  const keepUploadedFile = () => {
+    const file = uploadedFileRef.current;
+    if (!file) return;
+    uploadedFileRef.current = null;
+    storeResumeFile(file).catch((e) => console.warn("Couldn't keep the resume file with your account:", e.message));
+  };
+  const [showResumeFiles, setShowResumeFiles] = useState(false);
 
   // Job whose Easy Apply panel is open (Greenhouse roles only, for now).
   const [easyApplyJob, setEasyApplyJob] = useState(null);
@@ -3714,6 +3724,7 @@ export default function ResumeIQ() {
   }, []);
 
   const handleUploadAndParse = async (file) => {
+    uploadedFileRef.current = file;
     if (!file) return;
     const name = file.name || "Resume";
     const size = file.size ? `${(file.size / 1024).toFixed(1)} KB` : "";
@@ -3765,7 +3776,10 @@ export default function ResumeIQ() {
       // Signed in: the resume is saved to the account and the job grid opens. Signed out: create an
       // account (or sign in) first – the job search below keeps running meanwhile.
       const session = supabaseClient ? (await supabaseClient.auth.getSession()).data.session : null;
-      if (session) saveResumeToAccount(extracted);
+      if (session) {
+        saveResumeToAccount(extracted);
+        keepUploadedFile();
+      }
 
       // Move to the job grid now instead of blocking on the LinkedIn search —
       // that's a live Apify scrape (server/index.js) that can take 30–180s.
@@ -4424,6 +4438,7 @@ body {
               {tailorNotice}
             </div>
           )}
+          {showResumeFiles && <ResumeFilesDialog onClose={() => setShowResumeFiles(false)} />}
           {step === "account" && (
             <AccountStep
               homeHref={accountAfterUpload ? null : HOME_URL}
@@ -4431,6 +4446,7 @@ body {
               onDone={() => {
                 if (!accountAfterUpload) return setStep("upload");
                 saveResumeToAccount(resume);
+                keepUploadedFile();
                 setAccountAfterUpload(false);
                 setStep("select");
               }}
@@ -4494,6 +4510,7 @@ body {
                 {[
                   { id: "jobs", label: "Jobs", icon: <><rect x="3" y="7" width="18" height="13" rx="2" /><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2" /><path d="M3 13h18" /></>, active: true },
                   { id: "resume", label: "Resume", icon: <><path d="M7 3h7l5 5v13H7z" /><path d="M14 3v5h5" /><path d="M10 13h6M10 17h4" /></>, onClick: () => setStep("preview") },
+                  { id: "files", label: "My resume files", icon: <><path d="M4 5h6l2 2h8v12H4z" /><path d="M9 13h6" /></>, onClick: () => setShowResumeFiles(true) },
                   { id: "upload", label: "Upload new resume", icon: <><path d="M12 16V4" /><path d="M6 10l6-6 6 6" /><path d="M4 20h16" /></>, onClick: handleReset },
                   { id: "home", label: "Home", icon: <><path d="M3 11l9-8 9 8" /><path d="M5 10v10h14V10" /></>, href: HOME_URL },
                 ].map((item) => {

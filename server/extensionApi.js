@@ -235,8 +235,15 @@ export function registerExtensionRoutes(app, { userFromRequest, renderJobResumeP
     // A PDF must really be one (starts with %PDF-); Word files start with their own signatures.
     if (mimeType === "application/pdf" && bytes.subarray(0, 5).toString() !== "%PDF-") return res.status(400).json({ error: "That file isn't a valid PDF" });
     const label = String(name || "").trim().slice(0, 60) || String(fileName).replace(/\.[^.]+$/, "").slice(0, 60);
-    const saved = await addResumeFile(user.id, { name: label, fileName: String(fileName).slice(0, 120), mimeType, bytes });
-    return res.json({ resume: saved });
+    // The same file uploaded again (same name and size – e.g. from the website after the extension) isn't stored twice.
+    const same = (await listResumeFiles(user.id)).find((f) => (f.source || "upload") === "upload" && f.file_name === String(fileName).slice(0, 120) && f.size_bytes === bytes.length);
+    const saved = same || await addResumeFile(user.id, { name: label, fileName: String(fileName).slice(0, 120), mimeType, bytes });
+    // makeDefault: the website's upload is "your resume", so autofill attaches it from now on.
+    if (req.body?.makeDefault && !saved.is_default) {
+      await setDefaultResumeFile(user.id, saved.id);
+      saved.is_default = true;
+    }
+    return res.json({ resume: saved, duplicate: !!same });
   }));
 
   app.post("/api/ext/resumes/:id/default", withUser(async (req, res, user) => {
