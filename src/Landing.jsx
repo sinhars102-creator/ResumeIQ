@@ -7,9 +7,9 @@ import "./Landing.css";
 // VITE_FEATURE_PAYMENTS=1 – packs don't unlock anything in the app yet.
 const PAYMENTS = (import.meta.env.VITE_FEATURE_PAYMENTS ?? (import.meta.env.DEV ? "1" : "0")) === "1";
 
-// Set this to the Chrome Web Store listing once the extension is published.
-// Until then the "Add to Chrome" buttons scroll to the extension section.
-const CHROME_STORE_URL = null;
+// The extension's Chrome Web Store listing (published). Without it the "Add to Chrome" buttons would
+// scroll to the extension section.
+const CHROME_STORE_URL = "https://chromewebstore.google.com/detail/ahdhgkmnggeaibdpglffindgklfgidgp";
 
 const Check = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#17573F" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -89,6 +89,7 @@ export default function Landing({ onStart }) {
     ) : null;
 
   const chromeHref = CHROME_STORE_URL || "#extension";
+  const chromeTarget = CHROME_STORE_URL ? { target: "_blank", rel: "noopener noreferrer" } : {};
   const chromeClick = (where) => () => track("landing_chrome_clicked", { location: where });
 
   return (
@@ -129,7 +130,7 @@ export default function Landing({ onStart }) {
                 Try it now — it's free
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14" /><path d="M13 6l6 6-6 6" /></svg>
               </a>
-              <a href={chromeHref} className="lp-btn lp-btn-outline lp-btn-lg" onClick={chromeClick("hero")}>
+              <a href={chromeHref} {...chromeTarget} className="lp-btn lp-btn-outline lp-btn-lg" onClick={chromeClick("hero")}>
                 <ChromeIcon /> Add to Chrome
               </a>
             </div>
@@ -289,7 +290,7 @@ export default function Landing({ onStart }) {
                 <li><Check />Logs every application to your tracker automatically</li>
               </ul>
               <div style={{ marginTop: 24 }}>
-                <a href={chromeHref} className="lp-btn lp-btn-dark" onClick={chromeClick("extension_section")}>Add to Chrome — it's free</a>
+                <a href={chromeHref} {...chromeTarget} className="lp-btn lp-btn-dark" onClick={chromeClick("extension_section")}>Add to Chrome — it's free</a>
               </div>
             </div>
           </div>
