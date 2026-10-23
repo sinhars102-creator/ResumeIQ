@@ -11,10 +11,11 @@ const AUTO_SUBMIT_MS = 700; // a complete code submits itself this long after th
 const RESEND_AFTER_S = 30;
 
 /**
- * Onboarding, first step: create an account (or sign in) with an emailed 6-digit code. The same
- * ResumeIQ account signs you in to the resume editor. Calls onDone(session) once signed in.
+ * Create an account (or sign in) with an emailed 6-digit code. The same ResumeIQ account signs you
+ * in to the resume editor. Calls onDone(session) once signed in. afterUpload: shown between reading
+ * the resume and the job board, so the copy says the matches are ready.
  */
-export default function AccountStep({ onDone, homeHref }) {
+export default function AccountStep({ onDone, homeHref, afterUpload = false }) {
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [stage, setStage] = useState(supabase ? "checking" : "email"); // "checking" | "signedIn" | "email" | "code"
@@ -116,7 +117,7 @@ export default function AccountStep({ onDone, homeHref }) {
             <span aria-hidden="true">←</span> Back to home
           </a>
         )}
-        <p className="us-eyebrow">Step 1 of 2</p>
+        <p className="us-eyebrow">{afterUpload ? "Last step" : "Step 1 of 2"}</p>
         {stage === "checking" ? (
           <p className="us-sub" aria-live="polite">One moment…</p>
         ) : stage === "signedIn" ? (
@@ -133,8 +134,11 @@ export default function AccountStep({ onDone, homeHref }) {
           </>
         ) : stage === "email" ? (
           <>
-            <h1 className="us-title">Create your account</h1>
-            <p className="us-sub">Enter your email and we'll send you a 6-digit code. Already have an account? Same here – it signs you in.</p>
+            <h1 className="us-title">{afterUpload ? "Your job matches are ready" : "Create your account"}</h1>
+            <p className="us-sub">
+              {afterUpload ? "Create your free account to see them – enter" : "Enter"} your email and we'll send you a 6-digit code.
+              Already have an account? Same here – it signs you in.
+            </p>
             {error && <div className="us-error" role="alert">{error}</div>}
             <form className="as-form" onSubmit={sendCode}>
               <label htmlFor="as-email" className="as-label">Email</label>

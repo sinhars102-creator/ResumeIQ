@@ -3164,6 +3164,8 @@ export default function ResumeIQ() {
   // code, then upload – the parsed resume is saved to the account.
   const [onboarding] = useState(() => window.location.pathname.startsWith("/app/onboarding"));
   const [step, setStep] = useState(() => (onboarding ? "account" : "upload"));
+  // Signed out after uploading: the account step comes between reading the resume and the job board.
+  const [accountAfterUpload, setAccountAfterUpload] = useState(false);
 
   // Job whose Easy Apply panel is open (Greenhouse roles only, for now).
   const [easyApplyJob, setEasyApplyJob] = useState(null);
@@ -3725,12 +3727,20 @@ export default function ResumeIQ() {
       setResume(extracted);
       setResumeText(text);
       setParsingStatus((s) => ({ ...s, parseStructure: true }));
-      if (onboarding) saveResumeToAccount(extracted);
+      // Signed in: the resume is saved to the account and the job grid opens. Signed out: create an
+      // account (or sign in) first – the job search below keeps running meanwhile.
+      const session = supabaseClient ? (await supabaseClient.auth.getSession()).data.session : null;
+      if (session) saveResumeToAccount(extracted);
 
       // Move to the job grid now instead of blocking on the LinkedIn search —
       // that's a live Apify scrape (server/index.js) that can take 30–180s.
       // Fetch it in the background and stream results into the grid once ready.
-      setStep("select");
+      if (session || !supabaseClient) setStep("select");
+      else {
+        setAccountAfterUpload(true);
+        setStep("account");
+        track("account_step_after_upload");
+      }
       setParsingStatus((s) => ({ ...s, findJobs: true }));
 
       const roles = extracted.targetRoles && extracted.targetRoles.length
@@ -4133,7 +4143,7 @@ export default function ResumeIQ() {
     };
   }, [editorWorkspace]);
 
-  const currentStepOrder = getStepOrder(step);
+  const currentStepOrder = step === "account" && accountAfterUpload ? getStepOrder("parsing") : getStepOrder(step);
 
   const renderScoreCircle = () => {
     const value = typeof score === "number" ? score : 0;
@@ -4389,7 +4399,16 @@ body {
             </div>
           )}
           {step === "account" && (
-            <AccountStep homeHref={HOME_URL} onDone={() => setStep("upload")} />
+            <AccountStep
+              homeHref={accountAfterUpload ? null : HOME_URL}
+              afterUpload={accountAfterUpload}
+              onDone={() => {
+                if (!accountAfterUpload) return setStep("upload");
+                saveResumeToAccount(resume);
+                setAccountAfterUpload(false);
+                setStep("select");
+              }}
+            />
           )}
           {step === "upload" && (
             <UploadStep
