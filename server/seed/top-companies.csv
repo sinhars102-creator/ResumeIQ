@@ -1,0 +1,308 @@
+tier,company,category,collected_now,career_board,open_india_jobs_career_page,open_india_jobs_linkedin
+1,Google,Big Tech & software,partly – LinkedIn only,none found,0,8
+1,Microsoft,Big Tech & software,partly – LinkedIn only,none found,0,5
+1,Amazon,Big Tech & software,partly – LinkedIn only,none found,0,23
+1,Apple,Big Tech & software,partly – LinkedIn only,none found,0,4
+1,Meta,Big Tech & software,no,none found,0,0
+1,Netflix,Big Tech & software,no,,0,0
+1,Adobe,Big Tech & software,partly – LinkedIn only,none found,0,1
+1,Salesforce,Big Tech & software,partly – LinkedIn only,none found,0,2
+1,Oracle,Big Tech & software,no,none found,0,0
+1,SAP,Big Tech & software,partly – LinkedIn only,none found,0,1
+1,NVIDIA,Big Tech & software,partly – LinkedIn only,none found,0,1
+1,Intel,Big Tech & software,no,none found,0,0
+1,Qualcomm,Big Tech & software,partly – LinkedIn only,none found,0,3
+1,AMD,Big Tech & software,no,none found,0,0
+1,Cisco,Big Tech & software,partly – LinkedIn only,none found,0,2
+1,IBM,Big Tech & software,no,none found,0,0
+1,Atlassian,Big Tech & software,partly – LinkedIn only,none found,0,5
+1,Uber,Big Tech & software,partly – LinkedIn only,none found,0,2
+1,LinkedIn,Big Tech & software,yes – career page,lever,14,2
+1,Intuit,Big Tech & software,no,none found,0,0
+1,ServiceNow,Big Tech & software,partly – LinkedIn only,none found,0,1
+1,Workday,Big Tech & software,no,none found,0,0
+1,Autodesk,Big Tech & software,partly – LinkedIn only,none found,0,5
+1,VMware by Broadcom,Big Tech & software,no,,0,0
+1,Broadcom,Big Tech & software,no,,0,0
+1,Texas Instruments,Big Tech & software,no,none found,0,0
+1,Micron Technology,Big Tech & software,no,none found,0,0
+1,Samsung R&D Institute India,Big Tech & software,no,,0,0
+1,Dell Technologies,Big Tech & software,no,,0,0
+1,HP,Big Tech & software,partly – LinkedIn only,none found,0,1
+1,Hewlett Packard Enterprise,Big Tech & software,partly – LinkedIn only,none found,0,1
+1,NetApp,Big Tech & software,no,,0,0
+1,Nutanix,Big Tech & software,no,none found,0,0
+1,Palo Alto Networks,Big Tech & software,partly – LinkedIn only,none found,0,2
+1,Zscaler,Big Tech & software,yes – career page,greenhouse,70,3
+1,CrowdStrike,Big Tech & software,no,none found,0,0
+1,Okta,Big Tech & software,yes – career page,greenhouse,96,0
+1,Databricks,Big Tech & software,yes – career page,greenhouse,89,3
+1,Snowflake,Big Tech & software,yes – career page,ashby,7,0
+1,MongoDB,Big Tech & software,yes – career page,greenhouse,83,2
+1,Stripe,Big Tech & software,yes – career page,greenhouse,46,2
+1,Rippling,Big Tech & software,partly – LinkedIn only,none found,0,6
+1,Twilio,Big Tech & software,yes – career page,greenhouse,10,0
+1,Arista Networks,Big Tech & software,no,,0,0
+1,Juniper Networks,Big Tech & software,no,,0,0
+1,Siemens,Big Tech & software,partly – LinkedIn only,none found,0,4
+1,Bosch,Big Tech & software,no,,0,0
+1,Philips,Big Tech & software,no,none found,0,0
+1,GE HealthCare,Big Tech & software,partly – LinkedIn only,none found,0,2
+1,GE Aerospace,Big Tech & software,no,,0,0
+1,Honeywell,Big Tech & software,partly – LinkedIn only,none found,0,5
+1,Expedia Group,Big Tech & software,partly – LinkedIn only,none found,0,3
+1,Booking Holdings,Big Tech & software,no,none found,0,0
+1,Wise,Big Tech & software,no,,0,0
+1,Coinbase,Big Tech & software,yes – career page,greenhouse,9,0
+1,Thoughtworks,Big Tech & software,no,,0,0
+1,Publicis Sapient,Big Tech & software,partly – LinkedIn only,none found,0,2
+1,Freshworks,Big Tech & software,no,none found,0,0
+1,Zoho,Big Tech & software,no,none found,0,0
+1,PayPal,Payments & fintech (global),partly – LinkedIn only,none found,0,1
+1,Visa,Payments & fintech (global),partly – LinkedIn only,none found,0,3
+1,Mastercard,Payments & fintech (global),partly – LinkedIn only,none found,0,5
+1,American Express,Payments & fintech (global),no,none found,0,0
+1,Flipkart,Indian startups & unicorns,no,none found,0,0
+1,Myntra,Indian startups & unicorns,no,none found,0,0
+1,Swiggy,Indian startups & unicorns,partly – LinkedIn only,none found,0,2
+1,Zomato (Eternal),Indian startups & unicorns,no,none found,0,0
+1,Blinkit,Indian startups & unicorns,no,none found,0,0
+1,Zepto,Indian startups & unicorns,no,none found,0,0
+1,PhonePe,Indian startups & unicorns,partly – LinkedIn only,none found,0,5
+1,Paytm,Indian startups & unicorns,yes – career page,lever,628,0
+1,Razorpay,Indian startups & unicorns,partly – LinkedIn only,none found,0,1
+1,CRED,Indian startups & unicorns,yes – career page,lever,8,0
+1,Meesho,Indian startups & unicorns,yes – career page,lever,57,5
+1,Nykaa,Indian startups & unicorns,partly – LinkedIn only,none found,0,1
+1,Groww,Indian startups & unicorns,yes – career page,greenhouse,10,0
+1,Zerodha,Indian startups & unicorns,no,none found,0,0
+1,Dream Sports (Dream11),Indian startups & unicorns,no,none found,0,0
+1,Ola,Indian startups & unicorns,no,none found,0,0
+1,Ola Electric,Indian startups & unicorns,no,none found,0,0
+1,Ather Energy,Indian startups & unicorns,no,none found,0,0
+1,MakeMyTrip,Indian startups & unicorns,partly – LinkedIn only,none found,0,2
+1,OYO,Indian startups & unicorns,no,none found,0,0
+1,Urban Company,Indian startups & unicorns,partly – LinkedIn only,none found,0,3
+1,Lenskart,Indian startups & unicorns,no,none found,0,0
+1,PB Fintech (Policybazaar),Indian startups & unicorns,no,none found,0,0
+1,Delhivery,Indian startups & unicorns,partly – LinkedIn only,none found,0,1
+1,Rapido,Indian startups & unicorns,no,none found,0,0
+1,ShareChat,Indian startups & unicorns,no,none found,0,0
+1,InMobi,Indian startups & unicorns,yes – career page,greenhouse,50,0
+1,Glance,Indian startups & unicorns,no,,0,0
+1,Postman,Indian startups & unicorns,no,none found,0,0
+1,BrowserStack,Indian startups & unicorns,partly – LinkedIn only,none found,0,2
+1,Chargebee,Indian startups & unicorns,partly – LinkedIn only,none found,0,1
+1,Druva,Indian startups & unicorns,yes – career page,greenhouse,12,1
+1,Innovaccer,Indian startups & unicorns,no,none found,0,0
+1,Icertis,Indian startups & unicorns,no,none found,0,0
+1,Sprinklr,Indian startups & unicorns,no,none found,0,0
+1,Darwinbox,Indian startups & unicorns,no,none found,0,0
+1,Juspay,Indian startups & unicorns,no,none found,0,0
+1,Pine Labs,Indian startups & unicorns,no,,0,0
+1,Cashfree Payments,Indian startups & unicorns,no,none found,0,0
+1,Navi,Indian startups & unicorns,no,,0,0
+1,Upstox,Indian startups & unicorns,no,none found,0,0
+1,Tata 1mg,Indian startups & unicorns,no,none found,0,0
+1,Cult.fit,Indian startups & unicorns,no,,0,0
+1,Games24x7,Indian startups & unicorns,no,none found,0,0
+1,BigBasket,Indian startups & unicorns,no,none found,0,0
+1,Swiggy Instamart,Indian startups & unicorns,no,,0,0
+1,Uniphore,Indian startups & unicorns,no,none found,0,0
+1,Whatfix,Indian startups & unicorns,partly – LinkedIn only,none found,0,1
+1,MindTickle,Indian startups & unicorns,yes – career page,lever,17,0
+1,Hasura,Indian startups & unicorns,no,none found,0,0
+1,Physics Wallah,Indian startups & unicorns,no,,0,0
+1,upGrad,Indian startups & unicorns,partly – LinkedIn only,none found,0,2
+1,Cars24,Indian startups & unicorns,no,none found,0,0
+1,Spinny,Indian startups & unicorns,no,none found,0,0
+1,Zetwerk,Indian startups & unicorns,no,,0,0
+1,OfBusiness,Indian startups & unicorns,no,,0,0
+1,Licious,Indian startups & unicorns,no,none found,0,0
+1,FirstCry,Indian startups & unicorns,no,none found,0,0
+1,Walmart Global Tech India,Global capability centres (GCCs),partly – LinkedIn only,none found,0,6
+1,Target India,Global capability centres (GCCs),partly – LinkedIn only,none found,0,1
+1,Lowe's India,Global capability centres (GCCs),partly – LinkedIn only,none found,0,2
+1,Tesco Technology,Global capability centres (GCCs),no,none found,0,0
+1,JPMorgan Chase,Global capability centres (GCCs),no,none found,0,0
+1,Goldman Sachs,Global capability centres (GCCs),no,none found,0,0
+1,Morgan Stanley,Global capability centres (GCCs),no,none found,0,0
+1,Citi,Global capability centres (GCCs),partly – LinkedIn only,none found,0,3
+1,Wells Fargo,Global capability centres (GCCs),partly – LinkedIn only,none found,0,1
+1,Bank of America,Global capability centres (GCCs),partly – LinkedIn only,none found,0,1
+1,Barclays,Global capability centres (GCCs),partly – LinkedIn only,none found,0,3
+1,HSBC,Global capability centres (GCCs),partly – LinkedIn only,none found,0,2
+1,Deutsche Bank,Global capability centres (GCCs),no,none found,0,0
+1,UBS,Global capability centres (GCCs),no,,0,0
+1,Standard Chartered,Global capability centres (GCCs),no,none found,0,0
+1,BNY,Global capability centres (GCCs),partly – LinkedIn only,none found,0,1
+1,State Street,Global capability centres (GCCs),no,none found,0,0
+1,Fidelity Investments,Global capability centres (GCCs),no,,0,0
+1,BlackRock,Global capability centres (GCCs),no,,0,0
+1,Optum (UnitedHealth Group),Global capability centres (GCCs),partly – LinkedIn only,none found,0,8
+1,Fiserv,Global capability centres (GCCs),no,,0,0
+1,Mercedes-Benz R&D India,Global capability centres (GCCs),no,,0,0
+1,Shell,Global capability centres (GCCs),no,none found,0,0
+1,AB InBev GCC India,Global capability centres (GCCs),no,,0,0
+1,Novartis,Global capability centres (GCCs),partly – LinkedIn only,none found,0,1
+1,AstraZeneca,Global capability centres (GCCs),no,,0,0
+1,Eli Lilly,Global capability centres (GCCs),no,,0,0
+1,Maersk,Global capability centres (GCCs),no,,0,0
+1,McKinsey & Company,Consulting & strategy,no,none found,0,0
+1,Boston Consulting Group,Consulting & strategy,partly – LinkedIn only,none found,0,1
+1,Bain & Company,Consulting & strategy,partly – LinkedIn only,none found,0,1
+1,Kearney,Consulting & strategy,no,,0,0
+1,ZS Associates,Consulting & strategy,no,none found,0,0
+1,Reliance Jio,Top Indian companies,no,none found,0,0
+1,Reliance Industries,Top Indian companies,no,,0,0
+1,Tata Digital (Tata Neu),Top Indian companies,no,none found,0,0
+1,Hindustan Unilever,Top Indian companies,no,none found,0,0
+1,ITC,Top Indian companies,no,none found,0,0
+1,Asian Paints,Top Indian companies,no,none found,0,0
+1,Titan Company,Top Indian companies,no,,0,0
+1,Mahindra & Mahindra,Top Indian companies,no,,0,0
+1,Tata Motors,Top Indian companies,no,none found,0,0
+1,Bajaj Finance,Top Indian companies,no,,0,0
+1,HDFC Bank,Top Indian companies,no,none found,0,0
+1,ICICI Bank,Top Indian companies,no,none found,0,0
+1,Bharti Airtel,Top Indian companies,no,,0,0
+1,Nestlé India,Top Indian companies,no,,0,0
+1,Maruti Suzuki,Top Indian companies,no,none found,0,0
+2,Tata Consultancy Services,IT services & engineering,partly – LinkedIn only,none found,0,10
+2,Infosys,IT services & engineering,partly – LinkedIn only,none found,0,4
+2,Wipro,IT services & engineering,partly – LinkedIn only,none found,0,1
+2,HCLTech,IT services & engineering,partly – LinkedIn only,none found,0,2
+2,Tech Mahindra,IT services & engineering,no,none found,0,0
+2,LTIMindtree,IT services & engineering,no,none found,0,0
+2,Accenture,IT services & engineering,partly – LinkedIn only,none found,0,39
+2,Capgemini,IT services & engineering,no,none found,0,0
+2,Cognizant,IT services & engineering,no,none found,0,0
+2,Persistent Systems,IT services & engineering,partly – LinkedIn only,none found,0,1
+2,Coforge,IT services & engineering,partly – LinkedIn only,none found,0,1
+2,Mphasis,IT services & engineering,no,none found,0,0
+2,Zensar Technologies,IT services & engineering,partly – LinkedIn only,none found,0,1
+2,Happiest Minds,IT services & engineering,no,,0,0
+2,KPIT Technologies,IT services & engineering,no,,0,0
+2,Tata Elxsi,IT services & engineering,no,,0,0
+2,Cyient,IT services & engineering,no,none found,0,0
+2,L&T Technology Services,IT services & engineering,no,,0,0
+2,Virtusa,IT services & engineering,partly – LinkedIn only,none found,0,29
+2,EPAM Systems,IT services & engineering,partly – LinkedIn only,none found,0,4
+2,Globant,IT services & engineering,no,,0,0
+2,Nagarro,IT services & engineering,no,,0,0
+2,Sasken Technologies,IT services & engineering,no,,0,0
+2,Mu Sigma,Analytics,no,none found,0,0
+2,Fractal Analytics,Analytics,no,none found,0,0
+2,Tiger Analytics,Analytics,yes – career page,workable,4,0
+2,LatentView Analytics,Analytics,no,,0,0
+2,EXL,Analytics,partly – LinkedIn only,none found,0,4
+2,Genpact,Analytics,no,none found,0,0
+2,Deloitte,Big 4 & advisory,partly – LinkedIn only,none found,0,6
+2,EY,Big 4 & advisory,partly – LinkedIn only,none found,0,6
+2,KPMG,Big 4 & advisory,partly – LinkedIn only,none found,0,6
+2,PwC,Big 4 & advisory,partly – LinkedIn only,none found,0,2
+2,Grant Thornton Bharat,Big 4 & advisory,no,,0,0
+2,Alvarez & Marsal,Big 4 & advisory,no,none found,0,0
+2,Gartner,Big 4 & advisory,no,none found,0,0
+2,Axis Bank,Banks & financial services,no,none found,0,0
+2,Kotak Mahindra Bank,Banks & financial services,partly – LinkedIn only,none found,0,4
+2,State Bank of India,Banks & financial services,no,,0,0
+2,IDFC FIRST Bank,Banks & financial services,partly – LinkedIn only,none found,0,6
+2,Yes Bank,Banks & financial services,no,,0,0
+2,IndusInd Bank,Banks & financial services,no,none found,0,0
+2,Bajaj Finserv,Banks & financial services,no,none found,0,0
+2,HDFC Life,Banks & financial services,no,,0,0
+2,ICICI Lombard,Banks & financial services,partly – LinkedIn only,none found,0,1
+2,Aditya Birla Capital,Banks & financial services,no,none found,0,0
+2,Tata Capital,Banks & financial services,no,,0,0
+2,Jio Financial Services,Banks & financial services,no,,0,0
+2,Northern Trust,Banks & financial services,no,none found,0,0
+2,Nomura,Banks & financial services,no,,0,0
+2,FIS,Banks & financial services,no,none found,0,0
+2,Synchrony,Banks & financial services,no,,0,0
+2,Larsen & Toubro,Conglomerates & industry,partly – LinkedIn only,none found,0,2
+2,Tata Steel,Conglomerates & industry,no,,0,0
+2,Aditya Birla Group,Conglomerates & industry,no,none found,0,0
+2,Adani Group,Conglomerates & industry,no,,0,0
+2,JSW Group,Conglomerates & industry,no,,0,0
+2,Godrej Group,Conglomerates & industry,partly – LinkedIn only,none found,0,1
+2,Hero MotoCorp,Conglomerates & industry,no,none found,0,0
+2,Bajaj Auto,Conglomerates & industry,no,,0,0
+2,TVS Motor,Conglomerates & industry,no,,0,0
+2,Ashok Leyland,Conglomerates & industry,no,,0,0
+2,Cummins India,Conglomerates & industry,no,none found,0,0
+2,Caterpillar,Conglomerates & industry,no,none found,0,0
+2,John Deere,Conglomerates & industry,no,,0,0
+2,Volvo Group,Conglomerates & industry,no,none found,0,0
+2,Ford,Conglomerates & industry,no,,0,0
+2,Schneider Electric,Conglomerates & industry,partly – LinkedIn only,none found,0,1
+2,ABB,Conglomerates & industry,no,none found,0,0
+2,Sun Pharma,Conglomerates & industry,no,,0,0
+2,Dr. Reddy's Laboratories,Conglomerates & industry,no,none found,0,0
+2,Cipla,Conglomerates & industry,no,,0,0
+2,Biocon,Conglomerates & industry,no,,0,0
+2,Marico,Consumer brands,no,,0,0
+2,Dabur,Consumer brands,no,,0,0
+2,Britannia,Consumer brands,no,,0,0
+2,Procter & Gamble,Consumer brands,no,none found,0,0
+2,PepsiCo,Consumer brands,no,none found,0,0
+2,Coca-Cola,Consumer brands,no,,0,0
+2,Unilever,Consumer brands,no,,0,0
+2,Diageo India,Consumer brands,partly – LinkedIn only,none found,0,1
+2,Honasa Consumer (Mamaearth),Consumer brands,no,none found,0,0
+2,boAt,Consumer brands,no,none found,0,0
+2,Purplle,Consumer brands,partly – LinkedIn only,none found,0,3
+2,Vodafone Idea,Telecom & media,partly – LinkedIn only,none found,0,1
+2,Times Internet,Telecom & media,no,none found,0,0
+2,JioStar,Telecom & media,partly – LinkedIn only,none found,0,1
+2,Zee Entertainment,Telecom & media,no,,0,0
+2,Info Edge (Naukri),Indian startups (mid-stage),no,,0,0
+2,Unacademy,Indian startups (mid-stage),no,none found,0,0
+2,Eruditus,Indian startups (mid-stage),no,none found,0,0
+2,Practo,Indian startups (mid-stage),no,none found,0,0
+2,PharmEasy,Indian startups (mid-stage),no,none found,0,0
+2,HealthifyMe,Indian startups (mid-stage),no,,0,0
+2,CarDekho,Indian startups (mid-stage),no,none found,0,0
+2,Udaan,Indian startups (mid-stage),no,none found,0,0
+2,Infra.Market,Indian startups (mid-stage),no,,0,0
+2,Moglix,Indian startups (mid-stage),no,,0,0
+2,Rebel Foods,Indian startups (mid-stage),partly – LinkedIn only,none found,0,1
+2,MobiKwik,Indian startups (mid-stage),no,none found,0,0
+2,BharatPe,Indian startups (mid-stage),no,none found,0,0
+2,KreditBee,Indian startups (mid-stage),no,none found,0,0
+2,slice,Indian startups (mid-stage),no,,0,0
+2,Jupiter,Indian startups (mid-stage),partly – LinkedIn only,none found,0,1
+2,Jar,Indian startups (mid-stage),no,none found,0,0
+2,M2P Fintech,Indian startups (mid-stage),partly – LinkedIn only,none found,0,1
+2,Perfios,Indian startups (mid-stage),no,none found,0,0
+2,Lendingkart,Indian startups (mid-stage),no,none found,0,0
+2,LeadSquared,Indian startups (mid-stage),no,none found,0,0
+2,Gupshup,Indian startups (mid-stage),no,none found,0,0
+2,Yellow.ai,Indian startups (mid-stage),no,none found,0,0
+2,Haptik,Indian startups (mid-stage),no,none found,0,0
+2,Apna,Indian startups (mid-stage),no,,0,0
+2,Mobile Premier League (MPL),Indian startups (mid-stage),no,none found,0,0
+2,Tekion,Indian startups (mid-stage),yes – career page,ashby,70,2
+2,Hevo Data,Indian startups (mid-stage),yes – career page,lever,51,0
+2,Capco,Indian startups (mid-stage),yes – career page,greenhouse,138,0
+2,Truecaller,Indian startups (mid-stage),yes – career page,greenhouse,14,0
+2,Vedantu,Indian startups (mid-stage),partly – LinkedIn only,none found,0,1
+2,Pocket FM,Indian startups (mid-stage),yes – career page,lever,2,2
+2,Kuku FM,Indian startups (mid-stage),no,none found,0,0
+2,Acko,Indian startups (mid-stage),no,none found,0,0
+2,Digit Insurance,Indian startups (mid-stage),no,none found,0,0
+2,InsuranceDekho,Indian startups (mid-stage),no,none found,0,0
+2,Shiprocket,Indian startups (mid-stage),no,none found,0,0
+2,Porter,Indian startups (mid-stage),partly – LinkedIn only,,0,2
+2,Atlan,Indian startups (mid-stage),yes – career page,ashby,4,0
+2,Fyle,Indian startups (mid-stage),no,,0,0
+2,Sarvam AI,Indian startups (mid-stage),no,,0,0
+2,Krutrim,Indian startups (mid-stage),no,none found,0,0
+2,Ultrahuman,Indian startups (mid-stage),no,,0,0
+2,Exotel,Indian startups (mid-stage),no,none found,0,0
+2,CleverTap,Indian startups (mid-stage),no,none found,0,0
+2,MoEngage,Indian startups (mid-stage),no,none found,0,0
+2,WebEngage,Indian startups (mid-stage),partly – LinkedIn only,none found,0,1
+2,Signzy,Indian startups (mid-stage),no,none found,0,0
+2,Setu,Indian startups (mid-stage),no,none found,0,0
+2,Zeta,Indian startups (mid-stage),yes – career page,greenhouse,59,0
