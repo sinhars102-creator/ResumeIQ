@@ -22,7 +22,7 @@ tier,company,category,collected_now,career_board,open_india_jobs_career_page,ope
 1,ServiceNow,Big Tech & software,partly – LinkedIn only,none found,0,1
 1,Workday,Big Tech & software,no,none found,0,0
 1,Autodesk,Big Tech & software,partly – LinkedIn only,none found,0,5
-1,VMware by Broadcom,Big Tech & software,no,,0,0
+1,VMware,Big Tech & software,no,,0,0
 1,Broadcom,Big Tech & software,no,,0,0
 1,Texas Instruments,Big Tech & software,no,none found,0,0
 1,Micron Technology,Big Tech & software,no,none found,0,0
@@ -51,7 +51,7 @@ tier,company,category,collected_now,career_board,open_india_jobs_career_page,ope
 1,GE Aerospace,Big Tech & software,no,,0,0
 1,Honeywell,Big Tech & software,partly – LinkedIn only,none found,0,5
 1,Expedia Group,Big Tech & software,partly – LinkedIn only,none found,0,3
-1,Booking Holdings,Big Tech & software,no,none found,0,0
+1,"Booking Holdings (NASDAQ: BKNG)",Big Tech & software,no,none found,0,0
 1,Wise,Big Tech & software,no,,0,0
 1,Coinbase,Big Tech & software,yes – career page,greenhouse,9,0
 1,Thoughtworks,Big Tech & software,no,,0,0
@@ -107,7 +107,6 @@ tier,company,category,collected_now,career_board,open_india_jobs_career_page,ope
 1,Cult.fit,Indian startups & unicorns,no,,0,0
 1,Games24x7,Indian startups & unicorns,no,none found,0,0
 1,BigBasket,Indian startups & unicorns,no,none found,0,0
-1,Swiggy Instamart,Indian startups & unicorns,no,,0,0
 1,Uniphore,Indian startups & unicorns,no,none found,0,0
 1,Whatfix,Indian startups & unicorns,partly – LinkedIn only,none found,0,1
 1,MindTickle,Indian startups & unicorns,yes – career page,lever,17,0
@@ -134,7 +133,7 @@ tier,company,category,collected_now,career_board,open_india_jobs_career_page,ope
 1,HSBC,Global capability centres (GCCs),partly – LinkedIn only,none found,0,2
 1,Deutsche Bank,Global capability centres (GCCs),no,none found,0,0
 1,UBS,Global capability centres (GCCs),no,,0,0
-1,Standard Chartered,Global capability centres (GCCs),no,none found,0,0
+1,Standard Chartered India,Global capability centres (GCCs),no,none found,0,0
 1,BNY,Global capability centres (GCCs),partly – LinkedIn only,none found,0,1
 1,State Street,Global capability centres (GCCs),no,none found,0,0
 1,Fidelity Investments,Global capability centres (GCCs),no,,0,0
@@ -144,7 +143,7 @@ tier,company,category,collected_now,career_board,open_india_jobs_career_page,ope
 1,Mercedes-Benz R&D India,Global capability centres (GCCs),no,,0,0
 1,Shell,Global capability centres (GCCs),no,none found,0,0
 1,AB InBev GCC India,Global capability centres (GCCs),no,,0,0
-1,Novartis,Global capability centres (GCCs),partly – LinkedIn only,none found,0,1
+1,Novartis India,Global capability centres (GCCs),partly – LinkedIn only,none found,0,1
 1,AstraZeneca,Global capability centres (GCCs),no,,0,0
 1,Eli Lilly,Global capability centres (GCCs),no,,0,0
 1,Maersk,Global capability centres (GCCs),no,,0,0
@@ -225,7 +224,7 @@ tier,company,category,collected_now,career_board,open_india_jobs_career_page,ope
 2,Aditya Birla Group,Conglomerates & industry,no,none found,0,0
 2,Adani Group,Conglomerates & industry,no,,0,0
 2,JSW Group,Conglomerates & industry,no,,0,0
-2,Godrej Group,Conglomerates & industry,partly – LinkedIn only,none found,0,1
+2,Godrej,Conglomerates & industry,partly – LinkedIn only,none found,0,1
 2,Hero MotoCorp,Conglomerates & industry,no,none found,0,0
 2,Bajaj Auto,Conglomerates & industry,no,,0,0
 2,TVS Motor,Conglomerates & industry,no,,0,0
@@ -296,7 +295,7 @@ tier,company,category,collected_now,career_board,open_india_jobs_career_page,ope
 2,Porter,Indian startups (mid-stage),partly – LinkedIn only,,0,2
 2,Atlan,Indian startups (mid-stage),yes – career page,ashby,4,0
 2,Fyle,Indian startups (mid-stage),no,,0,0
-2,Sarvam AI,Indian startups (mid-stage),no,,0,0
+2,Sarvam,Indian startups (mid-stage),no,,0,0
 2,Krutrim,Indian startups (mid-stage),no,none found,0,0
 2,Ultrahuman,Indian startups (mid-stage),no,,0,0
 2,Exotel,Indian startups (mid-stage),no,none found,0,0
@@ -306,3 +305,91 @@ tier,company,category,collected_now,career_board,open_india_jobs_career_page,ope
 2,Signzy,Indian startups (mid-stage),no,none found,0,0
 2,Setu,Indian startups (mid-stage),no,none found,0,0
 2,Zeta,Indian startups (mid-stage),yes – career page,greenhouse,59,0
+1,Paytm Payments Services,Indian startups & unicorns,yes – career page,,,
+1,Airbnb,Big Tech & software,yes – career page,,,
+1,Agoda,Big Tech & software,yes – career page,,,
+1,Anthropic,Big Tech & software,yes – career page,,,
+1,Figma,Big Tech & software,yes – career page,,,
+1,Notion,Big Tech & software,yes – career page,,,
+1,Spotify,Big Tech & software,yes – career page,,,
+1,Waymo,Big Tech & software,yes – career page,,,
+1,GitLab,Big Tech & software,yes – career page,,,
+1,Rubrik,Big Tech & software,yes – career page,,,
+1,Cursor,Big Tech & software,yes – career page,,,
+1,Harvey,Big Tech & software,yes – career page,,,
+1,Together AI,Big Tech & software,yes – career page,,,
+1,Roku,Big Tech & software,yes – career page,,,
+1,Toast,Big Tech & software,yes – career page,,,
+1,Smartsheet,Big Tech & software,yes – career page,,,
+1,Veeva Systems,Big Tech & software,yes – career page,,,
+1,Anaplan,Big Tech & software,yes – career page,,,
+1,Flexport,Big Tech & software,yes – career page,,,
+1,Circle,Big Tech & software,yes – career page,,,
+1,PayPay India,Indian startups & unicorns,yes – career page,,,
+2,Highradius,Software & SaaS,yes – career page,,,
+2,PubMatic,Software & SaaS,yes – career page,,,
+2,Zenoti,Software & SaaS,yes – career page,,,
+2,NiCE,Software & SaaS,yes – career page,,,
+2,Zeta Global,Software & SaaS,yes – career page,,,
+2,ZoomInfo,Software & SaaS,yes – career page,,,
+2,OneTrust,Software & SaaS,yes – career page,,,
+2,Appian,Software & SaaS,yes – career page,,,
+2,Commvault,Software & SaaS,yes – career page,,,
+2,JFrog,Software & SaaS,yes – career page,,,
+2,6sense,Software & SaaS,yes – career page,,,
+2,Apollo.io,Software & SaaS,yes – career page,,,
+2,AppsFlyer,Software & SaaS,yes – career page,,,
+2,Wrike,Software & SaaS,yes – career page,,,
+2,SmartBear,Software & SaaS,yes – career page,,,
+2,Redwood Software,Software & SaaS,yes – career page,,,
+2,Kaseya,Software & SaaS,yes – career page,,,
+2,ConnectWise,Software & SaaS,yes – career page,,,
+2,Entrata,Software & SaaS,yes – career page,,,
+2,Smarsh,Software & SaaS,yes – career page,,,
+2,Cognite,Software & SaaS,yes – career page,,,
+2,ION,Software & SaaS,yes – career page,,,
+2,PDI Technologies,Software & SaaS,yes – career page,,,
+2,HG Insights,Software & SaaS,yes – career page,,,
+2,"FourKites, Inc.",Software & SaaS,yes – career page,,,
+2,CommerceIQ,Software & SaaS,yes – career page,,,
+2,Acceldata,Software & SaaS,yes – career page,,,
+2,Observe.AI,Software & SaaS,yes – career page,,,
+2,Sigmoid,Software & SaaS,yes – career page,,,
+2,Scopely,Software & SaaS,yes – career page,,,
+2,Handshake,Software & SaaS,yes – career page,,,
+2,Astronomer,Software & SaaS,yes – career page,,,
+2,Cyara,Software & SaaS,yes – career page,,,
+2,Plume,Software & SaaS,yes – career page,,,
+2,SonicWall,Security,yes – career page,,,
+2,Saviynt,Security,yes – career page,,,
+2,Bitwarden,Security,yes – career page,,,
+2,JumpCloud,Security,yes – career page,,,
+2,HackerOne,Security,yes – career page,,,
+2,Jumio Corporation,Security,yes – career page,,,
+2,Menlo Security Inc.,Security,yes – career page,,,
+2,Orca Security,Security,yes – career page,,,
+2,Tide,Banks & financial services,yes – career page,,,
+2,Payoneer,Banks & financial services,yes – career page,,,
+2,BitGo,Banks & financial services,yes – career page,,,
+2,FalconX,Banks & financial services,yes – career page,,,
+2,EarnIn,Banks & financial services,yes – career page,,,
+2,Fam,Banks & financial services,yes – career page,,,
+2,Greenlight,Banks & financial services,yes – career page,,,
+2,Inovalon,Health & science,yes – career page,,,
+2,ValGenesis,Health & science,yes – career page,,,
+2,Truveta,Health & science,yes – career page,,,
+2,Schrödinger,Health & science,yes – career page,,,
+2,Atlys,Indian startups (mid-stage),yes – career page,,,
+2,Bureau,Indian startups (mid-stage),yes – career page,,,
+2,SpotDraft,Indian startups (mid-stage),yes – career page,,,
+2,Netomi,Indian startups (mid-stage),yes – career page,,,
+2,WPP,Agencies, data & others,yes – career page,,,
+2,VML Enterprise Solutions,Agencies, data & others,yes – career page,,,
+2,Valtech,Agencies, data & others,yes – career page,,,
+2,DEPT®,Agencies, data & others,yes – career page,,,
+2,Dun & Bradstreet,Agencies, data & others,yes – career page,,,
+2,Elsevier,Agencies, data & others,yes – career page,,,
+2,Mintel,Agencies, data & others,yes – career page,,,
+2,TELUS Digital,Agencies, data & others,yes – career page,,,
+2,Flex,Agencies, data & others,yes – career page,,,
+2,THG Ingenuity,Agencies, data & others,yes – career page,,,
