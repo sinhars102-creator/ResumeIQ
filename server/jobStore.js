@@ -254,14 +254,27 @@ export function fromRow(row) {
     url: row.source_url || "",
     postedAt: row.posted_at,
     lastSeenAt: row.last_seen_at ? Date.parse(row.last_seen_at) : null,
+    firstSeenAt: row.first_seen_at ? Date.parse(row.first_seen_at) : null,
   };
 }
 
-const READ_COLUMNS = "id, source, source_job_id, source_board, source_url, company, title, location, salary, description, posted_at, last_seen_at";
+const READ_COLUMNS = "id, source, source_job_id, source_board, source_url, company, title, location, salary, description, posted_at, first_seen_at, last_seen_at";
+
+/** Every company's name, tier and status (for ranking the job board – see companyTiers.js). */
+export async function listCompanyTiers() {
+  const rows = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db().from("companies").select("name, tier, status").or("tier.not.is.null,status.eq.blocked").range(from, from + 999);
+    if (error) throw new Error(`reading company tiers failed: ${error.message}`);
+    rows.push(...data);
+    if (data.length < 1000) return rows;
+  }
+}
 
 /**
- * Open roles whose title (or company) contains every word of the search, newest first.
- * The repository is India-only, so "India" needs no location filter; a city narrows it.
+ * Open roles whose title (or company) contains every word of the search, most recently seen first
+ * (a pool – the caller ranks it). The repository is India-only, so "India" needs no location
+ * filter; a city narrows it.
  */
 export async function findStoredJobs({ keywords = "", location = "", limit = 60 } = {}) {
   const words = String(keywords).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1);

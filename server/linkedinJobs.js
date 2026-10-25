@@ -89,6 +89,8 @@ export function normalizeJob(raw, index) {
     source: "linkedin",
     jd: jd || "",
     url: raw.url ?? raw.jobUrl ?? raw.link ?? "",
+    // When LinkedIn says the role was posted (an ISO date) – the board ranks newest first within a tier.
+    postedAt: [raw.postedDate, raw.postedAt, raw.listedAt, raw.publishedAt].find((d) => d && !Number.isNaN(Date.parse(d))) || null,
   };
 }
 

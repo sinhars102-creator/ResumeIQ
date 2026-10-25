@@ -20,6 +20,7 @@ import {
   getEditorAccount, saveEditorAccount, userEmail,
 } from "./jobStore.js";
 import { normalizeQuery, FRESH_HOURS } from "./searchDemand.js";
+import { withTiers, byTierThenNewest } from "./companyTiers.js";
 import { fetchEasyApplyForm, easyApplyTarget } from "./easyApply.js";
 import { fillForm } from "./easyApplyFill.js";
 import { rehearse, submit as submitApplication, enterCode } from "./greenhouseSubmit.js";
@@ -310,7 +311,10 @@ app.get("/api/jobs/saved", async (req, res) => {
   // The Supabase jobs repository (every source) when configured; otherwise the local file.
   if (jobStoreConfigured()) {
     try {
-      const jobs = await findStoredJobs({ keywords, location, limit: Math.min(Number(req.query.limit) || 100, 200) });
+      // A wide pool of matching roles, then the best by company tier and recency (see companyTiers.js).
+      const limit = Math.min(Number(req.query.limit) || 100, 200);
+      const pool = await withTiers(await findStoredJobs({ keywords, location, limit: 800 }));
+      const jobs = pool.sort(byTierThenNewest).slice(0, limit);
       return res.json({ jobs, repository: "supabase" });
     } catch (err) {
       console.warn("[jobs-db] saved roles lookup failed, using the local file:", err.message);
@@ -348,6 +352,7 @@ app.get("/api/jobs/sources", async (req, res) => {
   const limit = Math.min(Number(req.query.limit) || 100, 200);
   try {
     const result = await searchApiSources({ keywords, location, limit });
+    result.jobs = await withTiers(result.jobs);
     const { added, total } = saveJobs(result.jobs, { location, levels: parseExperienceLevels(req.query.experienceLevel) });
     console.log(
       `[job-sources] "${keywords}" in ${location} – ${result.jobs.length} roles ` +
@@ -402,7 +407,7 @@ app.post("/api/linkedin-jobs/start", async (req, res) => {
         const jobs = await linkedInJobsForQuery(key);
         if (jobs.length) {
           console.log(`[jobs-db] "${key}" served from repository – ${jobs.length} roles, no live run`);
-          return res.json({ cached: true, jobs });
+          return res.json({ cached: true, jobs: await withTiers(jobs) });
         }
       }
     } catch (err) {
@@ -464,7 +469,7 @@ app.get("/api/linkedin-jobs/results", async (req, res) => {
     });
     console.log(`[jobs-repo] live search – ${jobs.length} roles, ${added} new, ${total} in repository`);
     await storeLinkedInResults(jobs, req.query.keywords, location);
-    return res.json({ jobs });
+    return res.json({ jobs: await withTiers(jobs) });
   } catch (err) {
     console.warn("[linkedin-jobs] results failed:", err.message);
     return res.status(502).json({ error: "Could not load search results" });
@@ -488,7 +493,7 @@ app.get("/api/linkedin-jobs", async (req, res) => {
     const { added, total } = saveJobs(result.jobs, { location, levels: experienceLevels });
     console.log(`[jobs-repo] saved search – ${added} new roles, ${total} in repository`);
     await storeLinkedInResults(result.jobs, keywords, location);
-    return res.json(result);
+    return res.json({ ...result, jobs: await withTiers(result.jobs) });
   };
 
   console.log("[linkedin-jobs] request – Apify:", !!apifyToken, "RapidAPI:", !!rapidKey, "keywords:", keywords, "experienceLevel:", experienceLevels.join(",") || "any");

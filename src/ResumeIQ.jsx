@@ -3359,7 +3359,7 @@ export default function ResumeIQ() {
     return map;
   }, [jobs, resume, analyzedScores, resumeHash, matchYears]);
 
-  const [jobSortBy, setJobSortBy] = useState("match");
+  const [jobSortBy, setJobSortBy] = useState("recommended");
 
   const yearsNum = Number(candidateYears) || null;
   const belowLevelJobIds = useMemo(
@@ -3369,7 +3369,11 @@ export default function ResumeIQ() {
 
   const sortedJobs = useMemo(() => {
     const list = showBelowLevelJobs ? [...jobs] : jobs.filter((job) => !belowLevelJobIds.has(job.id));
-    if (jobSortBy === "match") {
+    if (jobSortBy === "recommended") {
+      // Company tier first (1 most wanted, 2 established, then the rest), then the most recently posted.
+      const posted = (job) => Date.parse(job.postedAt || 0) || job.firstSeenAt || 0;
+      list.sort((a, b) => (a.tier ?? 3) - (b.tier ?? 3) || posted(b) - posted(a));
+    } else if (jobSortBy === "match") {
       list.sort((a, b) => (jobMatchScores.get(b.id)?.score ?? 0) - (jobMatchScores.get(a.id)?.score ?? 0));
     } else if (jobSortBy === "company") {
       list.sort((a, b) => (a.company || "").localeCompare(b.company || ""));
@@ -3462,11 +3466,18 @@ export default function ResumeIQ() {
    * Returns how many were added.
    */
   const mergeJobs = (incoming, { markFresh = false } = {}) => {
-    // The same role often appears on LinkedIn and on the company's own career page:
-    // match on company + title + city and keep one card, with the longest description.
+    // The same role often appears on LinkedIn and on the company's own career page, and companies
+    // post one role once per city: match on company + title and keep one card, with the longest
+    // description and every location.
     const dupKey = (job) => {
       const norm = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-      return `${norm(job.company)}|${norm(job.role)}|${norm(String(job.location || "").split(",")[0])}`;
+      return `${norm(job.company)}|${norm(job.role)}`;
+    };
+    const city = (job) => String(job.location || "").split(",")[0].trim();
+    const withLocation = (job, cities) => {
+      const list = [...new Set(cities.filter(Boolean))];
+      if (list.length <= 1) return { ...job, locations: list };
+      return { ...job, locations: list, location: list.length > 2 ? `${list.slice(0, 2).join(" · ")} +${list.length - 2} more` : list.join(" · ") };
     };
     const shownIds = new Set(jobsRef.current.map((job) => job.id));
     const shownKeys = new Set(jobsRef.current.map(dupKey));
@@ -3481,16 +3492,18 @@ export default function ResumeIQ() {
         const existing = existingId ? byId.get(existingId) : null;
         if (existing) {
           const longer = (job.jd || "").length > (existing.jd || "").length;
-          byId.set(existingId, {
+          byId.set(existingId, withLocation({
             ...existing,
             ...(existingId === job.id ? job : {}),
             jd: longer ? job.jd : existing.jd,
             url: existing.url || job.url,
             salary: existing.salary || job.salary,
             badge: existing.badge,
-          });
+            tier: existing.tier ?? job.tier,
+            postedAt: [existing.postedAt, job.postedAt].filter(Boolean).sort().pop() || existing.postedAt,
+          }, [...(existing.locations || [city(existing)]), city(job)]));
         } else {
-          byId.set(job.id, { ...job, source: job.source || "linkedin", badge: markFresh ? "Just in" : null });
+          byId.set(job.id, withLocation({ ...job, source: job.source || "linkedin", badge: markFresh ? "Just in" : null }, [city(job)]));
           idByKey.set(dupKey(job), job.id);
         }
       }
@@ -4551,6 +4564,7 @@ body {
                     onChange={(e) => setJobSortBy(e.target.value)}
                     style={{ ...styles.input, width: 160, padding: "8px 10px" }}
                   >
+                    <option value="recommended">Recommended</option>
                     <option value="match">Best Match</option>
                     <option value="company">Company (A–Z)</option>
                     <option value="original">Original order</option>
