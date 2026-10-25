@@ -15,7 +15,8 @@
     "check-sources": "node scripts/check-job-sources.mjs",
     "collect": "node --env-file-if-exists=.env server/collectJobs.js",
     "ext:config": "node --env-file-if-exists=.env scripts/ext-config.mjs",
-    "ext:package": "node --env-file-if-exists=.env scripts/ext-package.mjs"
+    "ext:package": "node --env-file-if-exists=.env scripts/ext-package.mjs",
+    "seed:companies": "node --env-file-if-exists=.env server/seedTopCompanies.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
