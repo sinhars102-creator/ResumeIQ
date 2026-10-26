@@ -16,7 +16,8 @@
     "collect": "node --env-file-if-exists=.env server/collectJobs.js",
     "ext:config": "node --env-file-if-exists=.env scripts/ext-config.mjs",
     "ext:package": "node --env-file-if-exists=.env scripts/ext-package.mjs",
-    "seed:companies": "node --env-file-if-exists=.env server/seedTopCompanies.js"
+    "seed:companies": "node --env-file-if-exists=.env server/seedTopCompanies.js",
+    "ads": "node scripts/ad-images.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
