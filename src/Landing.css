@@ -53,7 +53,7 @@
 .lp-nav-links { display: flex; gap: 28px; flex-wrap: wrap; font-size: 15px; font-weight: 500; color: var(--lp-ink-2); }
 .lp-nav-links a:hover { color: var(--lp-ink); }
 .lp-nav-cta { display: flex; align-items: center; gap: 8px; }
-.lp-signin { font-weight: 600; font-size: 15px; padding: 12px 8px; background: none; border: none; color: var(--lp-ink); }
+.lp-signin { font: inherit; font-weight: 600; font-size: 15px; padding: 12px 8px; background: none; border: none; color: var(--lp-ink); cursor: pointer; }
 
 /* Hero */
 .lp-hero { display: flex; flex-wrap: wrap; gap: 56px; align-items: center; padding-top: 72px; padding-bottom: 56px; }

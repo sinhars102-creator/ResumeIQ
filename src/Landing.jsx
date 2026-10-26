@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { track } from "./analytics.js";
+import { supabase } from "./easyApply/supabaseClient.js";
 import { payForPlan } from "./razorpayCheckout.js";
 import "./Landing.css";
 
@@ -88,6 +89,20 @@ export default function Landing({ onStart }) {
       <p role="status" style={{ marginTop: 10, fontSize: 13, color: payment.state === "error" ? "#B54708" : "inherit" }}>{payment.message}</p>
     ) : null;
 
+  // Signed in on this browser: the top bar offers their job matches and Sign out instead of Sign in.
+  const [account, setAccount] = useState(null); // the signed-in user, or null
+  useEffect(() => {
+    if (!supabase) return undefined;
+    supabase.auth.getSession().then(({ data }) => setAccount(data.session?.user ?? null));
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => setAccount(session?.user ?? null));
+    return () => data.subscription.unsubscribe();
+  }, []);
+  const signOut = async () => {
+    track("signed_out", { location: "landing" });
+    await supabase.auth.signOut();
+    setAccount(null);
+  };
+
   const chromeHref = CHROME_STORE_URL || "#extension";
   const chromeTarget = CHROME_STORE_URL ? { target: "_blank", rel: "noopener noreferrer" } : {};
   const chromeClick = (where) => () => track("landing_chrome_clicked", { location: where });
@@ -108,8 +123,17 @@ export default function Landing({ onStart }) {
             <a href="#faq">FAQ</a>
           </div>
           <div className="lp-nav-cta">
-            <a href="/app" className="lp-signin" onClick={start("nav_signin")}>Sign in</a>
-            <a href="/app" className="lp-btn lp-btn-primary" onClick={start("nav")}>Try it now</a>
+            {account ? (
+              <>
+                <button type="button" className="lp-signin" onClick={signOut} title={`Signed in as ${account.email}`}>Sign out</button>
+                <a href="/app" className="lp-btn lp-btn-primary" onClick={start("nav_my_matches")}>My job matches</a>
+              </>
+            ) : (
+              <>
+                <a href="/app/onboarding" className="lp-signin" onClick={start("nav_signin")}>Sign in</a>
+                <a href="/app" className="lp-btn lp-btn-primary" onClick={start("nav")}>Try it now</a>
+              </>
+            )}
           </div>
         </nav>
       </header>

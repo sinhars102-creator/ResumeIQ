@@ -3176,6 +3176,19 @@ export default function ResumeIQ() {
     storeResumeFile(file).catch((e) => console.warn("Couldn't keep the resume file with your account:", e.message));
   };
   const [showResumeFiles, setShowResumeFiles] = useState(false);
+  // Signed in on this browser (for "Sign out" in the menu).
+  const [signedIn, setSignedIn] = useState(false);
+  useEffect(() => {
+    if (!supabaseClient) return undefined;
+    supabaseClient.auth.getSession().then(({ data }) => setSignedIn(!!data.session));
+    const { data } = supabaseClient.auth.onAuthStateChange((_event, session) => setSignedIn(!!session));
+    return () => data.subscription.unsubscribe();
+  }, []);
+  const handleSignOut = async () => {
+    track("signed_out", { location: "app" });
+    await supabaseClient.auth.signOut();
+    window.location.href = HOME_URL; // a fresh start: nothing from the account stays on screen
+  };
 
   // Job whose Easy Apply panel is open (Greenhouse roles only, for now).
   const [easyApplyJob, setEasyApplyJob] = useState(null);
@@ -4456,8 +4469,16 @@ body {
             <AccountStep
               homeHref={accountAfterUpload ? null : HOME_URL}
               afterUpload={accountAfterUpload}
-              onDone={() => {
-                if (!accountAfterUpload) return setStep("upload");
+              onDone={(session) => {
+                if (!accountAfterUpload) {
+                  // Signing in (e.g. "Sign in" on the home page): a saved resume opens the job board.
+                  return void loadProfile(session.user.id).catch(() => null).then((profile) => {
+                    if (!profile?.resume) return setStep("upload");
+                    setResume(profile.resume);
+                    setStep("select");
+                    startJobSearch(profile.resume);
+                  });
+                }
                 saveResumeToAccount(resume);
                 keepUploadedFile();
                 setAccountAfterUpload(false);
@@ -4526,6 +4547,7 @@ body {
                   { id: "files", label: "My resume files", icon: <><path d="M4 5h6l2 2h8v12H4z" /><path d="M9 13h6" /></>, onClick: () => setShowResumeFiles(true) },
                   { id: "upload", label: "Upload new resume", icon: <><path d="M12 16V4" /><path d="M6 10l6-6 6 6" /><path d="M4 20h16" /></>, onClick: handleReset },
                   { id: "home", label: "Home", icon: <><path d="M3 11l9-8 9 8" /><path d="M5 10v10h14V10" /></>, href: HOME_URL },
+                  ...(signedIn ? [{ id: "signout", label: "Sign out", icon: <><path d="M15 4h4v16h-4" /><path d="M10 8l-4 4 4 4" /><path d="M6 12h10" /></>, onClick: handleSignOut }] : []),
                 ].map((item) => {
                   const content = (
                     <>
