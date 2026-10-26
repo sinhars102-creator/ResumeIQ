@@ -10,3 +10,5 @@ The website's mark (document with a tick) on the site's green (#17573f). Wordmar
 | extension-icon-128/48/32/16.png | 128, 48, 32, 16 | Chrome extension icons (manifest "icons" / "action") |
 | myresumeiq-logo-with-name-1200.png | 1200×1200 (1:1) | Logo + "MyResumeIQ.io" on the site's light background (social profiles, ad logos with name) |
 | myresumeiq-wordmark-1200.png | 1200×1200 (1:1) | "MyResumeIQ.io" wordmark on green (profile pictures, square ad slots) |
+| resumeiq-icon-400.png | 400×400 | Icon, square green background (ad platforms, profile pictures that crop to a circle) |
+| resumeiq-icon-rounded-400.png | 400×400 | Icon, rounded tile on transparent (places that show the image as is) |
