@@ -12,3 +12,5 @@ The website's mark (document with a tick) on the site's green (#17573f). Wordmar
 | myresumeiq-wordmark-1200.png | 1200×1200 (1:1) | "MyResumeIQ.io" wordmark on green (profile pictures, square ad slots) |
 | resumeiq-icon-400.png | 400×400 | Icon, square green background (ad platforms, profile pictures that crop to a circle) |
 | resumeiq-icon-rounded-400.png | 400×400 | Icon, rounded tile on transparent (places that show the image as is) |
+| myresumeiq-logo-with-name-400.png | 400×400 | Logo + "MyResumeIQ.io" on light background |
+| myresumeiq-logo-with-name-green-400.png | 400×400 | Logo + "MyResumeIQ.io" in white on green |
