@@ -9,6 +9,22 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <!-- Google tag (gtag.js). Measures ad sign-ups on the live site only; ad cookies stay off until
+         the visitor accepts the cookie notice (Consent Mode). Conversions: src/googleAds.js. -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=AW-18537655280"></script>
+    <script>
+      (function () {
+        if (!/(^|\.)myresumeiq\.io$/.test(location.hostname)) return;
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = function () { dataLayer.push(arguments); };
+        gtag("consent", "default", { ad_storage: "denied", ad_user_data: "denied", ad_personalization: "denied", analytics_storage: "denied", wait_for_update: 500 });
+        try {
+          if (localStorage.getItem("riq_ad_consent") === "granted") gtag("consent", "update", { ad_storage: "granted", ad_user_data: "granted", ad_personalization: "granted" });
+        } catch (e) {}
+        gtag("js", new Date());
+        gtag("config", "AW-18537655280");
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

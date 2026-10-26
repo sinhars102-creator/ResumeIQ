@@ -18,22 +18,7 @@ function readConsent() {
 }
 
 const granted = { ad_storage: "granted", ad_user_data: "granted", ad_personalization: "granted" };
-
-export function initGoogleAds() {
-  if (!LIVE || window.gtag) return;
-  window.dataLayer = window.dataLayer || [];
-  window.gtag = function gtag() {
-    window.dataLayer.push(arguments); // eslint-disable-line prefer-rest-params -- gtag expects the arguments object
-  };
-  window.gtag("consent", "default", { ad_storage: "denied", ad_user_data: "denied", ad_personalization: "denied", analytics_storage: "denied", wait_for_update: 500 });
-  if (readConsent() === "granted") window.gtag("consent", "update", granted);
-  const script = document.createElement("script");
-  script.async = true;
-  script.src = `https://www.googletagmanager.com/gtag/js?id=${ADS_ID}`;
-  document.head.appendChild(script);
-  window.gtag("js", new Date());
-  window.gtag("config", ADS_ID);
-}
+// The tag itself loads from index.html (so Google's tag checker finds it in the page).
 
 /** Whether to show the cookie notice: live site, and the visitor hasn't chosen yet. */
 export function needsAdConsent() {
