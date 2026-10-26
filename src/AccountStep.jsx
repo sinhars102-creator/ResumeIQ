@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "./easyApply/supabaseClient.js";
 import { track } from "./analytics.js";
+import { trackSignUp } from "./googleAds.js";
 import "./UploadStep.css";
 import "./AccountStep.css";
 
@@ -86,6 +87,7 @@ export default function AccountStep({ onDone, homeHref, afterUpload = false }) {
       return;
     }
     track("signin_completed");
+    trackSignUp(data.session.user); // Google Ads "Sign up" – new accounts only
     onDone(data.session);
   };
 

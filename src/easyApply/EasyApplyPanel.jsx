@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { trackSignUp } from "../googleAds.js";
 import { supabase, loadProfile, saveProfile } from "./supabaseClient.js";
 import { buildResumePdf } from "../resumePdf.js";
 import "./EasyApplyPanel.css";
@@ -80,9 +81,10 @@ export function SignIn() {
     e.preventDefault();
     setBusy(true);
     setError("");
-    const { error: err } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" });
+    const { data, error: err } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" });
     setBusy(false);
     if (err) setError(err.message);
+    else trackSignUp(data?.user); // Google Ads "Sign up" – new accounts only
   };
 
   return (
