@@ -8,3 +8,5 @@ The website's mark (document with a tick) on the site's green (#17573f). Wordmar
 | google-ads-logo-landscape-1200x300.png | 1200×300 (4:1) | Google Ads landscape logo |
 | extension-store-icon-128.png | 128×128, artwork 96×96 + 16 px transparent padding | Chrome Web Store icon |
 | extension-icon-128/48/32/16.png | 128, 48, 32, 16 | Chrome extension icons (manifest "icons" / "action") |
+| myresumeiq-logo-with-name-1200.png | 1200×1200 (1:1) | Logo + "MyResumeIQ.io" on the site's light background (social profiles, ad logos with name) |
+| myresumeiq-wordmark-1200.png | 1200×1200 (1:1) | "MyResumeIQ.io" wordmark on green (profile pictures, square ad slots) |
