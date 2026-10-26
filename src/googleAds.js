@@ -4,7 +4,7 @@
 const ADS_ID = "AW-18537655280";
 // From Google Ads → Goals → Conversions → Sign up → Tag setup → event snippet: the part after the
 // slash in send_to ("AW-18537655280/<label>"). Until it's set, no conversion is sent.
-const SIGNUP_LABEL = "";
+const SIGNUP_LABEL = "saUQCLXUjKodEPDXuIdF";
 
 const CONSENT_KEY = "riq_ad_consent"; // "granted" | "denied"
 const LIVE = typeof window !== "undefined" && /(^|\.)myresumeiq\.io$/.test(window.location.hostname);
@@ -48,5 +48,5 @@ export function trackSignUp(user) {
   } catch {
     // fine – at worst a duplicate on a browser without storage
   }
-  window.gtag("event", "conversion", { send_to: `${ADS_ID}/${SIGNUP_LABEL}` });
+  window.gtag("event", "conversion", { send_to: `${ADS_ID}/${SIGNUP_LABEL}`, value: 1.0, currency: "INR" });
 }
