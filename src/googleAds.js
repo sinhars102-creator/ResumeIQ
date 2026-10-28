@@ -32,6 +32,9 @@ export function setAdConsent(accepted) {
     // private mode: the choice lasts for this page only
   }
   if (accepted && window.gtag) window.gtag("consent", "update", granted);
+  // Microsoft Clarity (index.html) follows the same choice.
+  const state = accepted ? "granted" : "denied";
+  if (window.clarity) window.clarity("consentv2", { ad_Storage: state, analytics_Storage: state });
 }
 
 /**

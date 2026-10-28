@@ -2844,7 +2844,7 @@ function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
   };
 
   return (
-    <div style={styles.resumePaper} data-rq-tailor-resume>
+    <div style={styles.resumePaper} data-rq-tailor-resume data-clarity-mask="True">
       <div style={styles.resumeHeaderRow}>
         <div style={styles.resumeHeaderText}>
           <div style={styles.resumeNameText}>{working.name}</div>
@@ -2964,7 +2964,7 @@ function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
 function ResumeDocument({ resume, highlights = [], dim = false, afterMode = false, editable = false, onEdit }) {
   if (!resume || typeof resume !== "object") {
     return (
-      <div style={{ ...styles.resumePaper, opacity: dim ? 0.55 : 1, color: "#888" }}>
+      <div style={{ ...styles.resumePaper, opacity: dim ? 0.55 : 1, color: "#888" }} data-clarity-mask="True">
         No resume data to display.
       </div>
     );
@@ -2986,7 +2986,7 @@ function ResumeDocument({ resume, highlights = [], dim = false, afterMode = fals
 
   if (!editable) {
     return (
-      <div style={{ ...styles.resumePaper, opacity: dim ? 0.55 : 1 }}>
+      <div style={{ ...styles.resumePaper, opacity: dim ? 0.55 : 1 }} data-clarity-mask="True">
         <div style={styles.resumeHeaderRow}>
           {photoUrl && (
             <img
@@ -3066,7 +3066,7 @@ function ResumeDocument({ resume, highlights = [], dim = false, afterMode = fals
 
   // Editable (WYSIWYG) rendering: same visual layout, but every field is click-to-edit in place.
   return (
-    <div style={{ ...styles.resumePaper, opacity: dim ? 0.55 : 1 }}>
+    <div style={{ ...styles.resumePaper, opacity: dim ? 0.55 : 1 }} data-clarity-mask="True">
       <div style={styles.resumeHeaderRow}>
         {photoUrl && (
           <img

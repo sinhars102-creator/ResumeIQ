@@ -95,7 +95,7 @@ export default function ResumeFilesDialog({ onClose }) {
         {error && <div role="alert" style={{ fontSize: 13, color: "var(--rq-danger, #b5534a)", marginBottom: 10 }}>{error}</div>}
         {files === null && !error && <p style={{ fontSize: 14, color: "var(--rq-text-2)" }}>Loading…</p>}
         {files?.length === 0 && <p style={{ fontSize: 14, color: "var(--rq-text-2)" }}>No files yet – upload your resume and it's kept here.</p>}
-        <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+        <ul data-clarity-mask="True" style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 8 }}>
           {(files || []).map((f) => (
             <li key={f.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", border: "1px solid var(--rq-border)", borderRadius: 10 }}>
               <div style={{ minWidth: 0, flex: 1 }}>
