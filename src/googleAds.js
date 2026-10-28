@@ -6,6 +6,10 @@ const ADS_ID = "AW-18537655280";
 // slash in send_to ("AW-18537655280/<label>"). Until it's set, no conversion is sent.
 const SIGNUP_LABEL = "saUQCLXUjKodEPDXuIdF";
 
+// LinkedIn: Campaign Manager → Conversion tracking → "Sign up" (Insight Tag, event-specific) → the
+// conversion_id in `window.lintrk('track', { conversion_id: … })`. Until it's set, no LinkedIn conversion is sent.
+const LINKEDIN_SIGNUP_CONVERSION_ID = null;
+
 const CONSENT_KEY = "riq_ad_consent"; // "granted" | "denied"
 const LIVE = typeof window !== "undefined" && /(^|\.)myresumeiq\.io$/.test(window.location.hostname);
 
@@ -32,6 +36,8 @@ export function setAdConsent(accepted) {
     // private mode: the choice lasts for this page only
   }
   if (accepted && window.gtag) window.gtag("consent", "update", granted);
+  // LinkedIn Insight Tag (index.html) loads only after consent.
+  if (accepted && window.riqLoadLinkedIn) window.riqLoadLinkedIn();
   // Microsoft Clarity (index.html) follows the same choice.
   const state = accepted ? "granted" : "denied";
   if (window.clarity) window.clarity("consentv2", { ad_Storage: state, analytics_Storage: state });
@@ -42,7 +48,7 @@ export function setAdConsent(accepted) {
  * user signing in again doesn't count), once per account on this browser.
  */
 export function trackSignUp(user) {
-  if (!LIVE || !SIGNUP_LABEL || !window.gtag || !user?.created_at) return;
+  if (!LIVE || !user?.created_at) return;
   if (Date.now() - Date.parse(user.created_at) > 30 * 60 * 1000) return;
   const key = `riq_signup_sent_${user.id}`;
   try {
@@ -51,5 +57,7 @@ export function trackSignUp(user) {
   } catch {
     // fine – at worst a duplicate on a browser without storage
   }
-  window.gtag("event", "conversion", { send_to: `${ADS_ID}/${SIGNUP_LABEL}`, value: 1.0, currency: "INR" });
+  if (SIGNUP_LABEL && window.gtag) window.gtag("event", "conversion", { send_to: `${ADS_ID}/${SIGNUP_LABEL}`, value: 1.0, currency: "INR" });
+  // LinkedIn only has its tag when the visitor accepted cookies.
+  if (LINKEDIN_SIGNUP_CONVERSION_ID && window.lintrk) window.lintrk("track", { conversion_id: LINKEDIN_SIGNUP_CONVERSION_ID });
 }

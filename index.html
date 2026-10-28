@@ -25,6 +25,30 @@
         gtag("config", "AW-18537655280");
       })();
     </script>
+    <!-- LinkedIn Insight Tag (partner 10283228). Live site only, and loaded only once the visitor
+         accepts the cookie notice (LinkedIn has no cookieless mode). Sign-up conversion: src/googleAds.js. -->
+    <script>
+      (function () {
+        if (!/(^|\.)myresumeiq\.io$/.test(location.hostname)) return;
+        window.riqLoadLinkedIn = function () {
+          if (window._linkedin_partner_id) return;
+          window._linkedin_partner_id = "10283228";
+          window._linkedin_data_partner_ids = window._linkedin_data_partner_ids || [];
+          window._linkedin_data_partner_ids.push(window._linkedin_partner_id);
+          if (!window.lintrk) {
+            window.lintrk = function (a, b) { window.lintrk.q.push([a, b]); };
+            window.lintrk.q = [];
+          }
+          var b = document.createElement("script");
+          b.async = true;
+          b.src = "https://snap.licdn.com/li.lms-analytics/insight.min.js";
+          document.head.appendChild(b);
+        };
+        try {
+          if (localStorage.getItem("riq_ad_consent") === "granted") window.riqLoadLinkedIn();
+        } catch (e) {}
+      })();
+    </script>
     <!-- Microsoft Clarity (session insights). Live site only; follows the cookie notice through
          Clarity's consent setting (see src/googleAds.js). Resume content is masked (data-clarity-mask). -->
     <script>
