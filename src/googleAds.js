@@ -8,7 +8,7 @@ const SIGNUP_LABEL = "saUQCLXUjKodEPDXuIdF";
 
 // LinkedIn: Campaign Manager → Conversion tracking → "Sign up" (Insight Tag, event-specific) → the
 // conversion_id in `window.lintrk('track', { conversion_id: … })`. Until it's set, no LinkedIn conversion is sent.
-const LINKEDIN_SIGNUP_CONVERSION_ID = null;
+const LINKEDIN_SIGNUP_CONVERSION_ID = 30150740;
 
 const CONSENT_KEY = "riq_ad_consent"; // "granted" | "denied"
 const LIVE = typeof window !== "undefined" && /(^|\.)myresumeiq\.io$/.test(window.location.hostname);
