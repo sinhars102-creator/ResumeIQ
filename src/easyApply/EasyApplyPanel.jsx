@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { trackSignUp } from "../googleAds.js";
+import { track } from "../analytics.js";
 import { supabase, loadProfile, saveProfile } from "./supabaseClient.js";
 import { buildResumePdf } from "../resumePdf.js";
 import "./EasyApplyPanel.css";
@@ -74,6 +75,7 @@ export function SignIn() {
       options: { shouldCreateUser: true, emailRedirectTo: `${window.location.origin}/app` },
     });
     setBusy(false);
+    track("signin_email_submitted", { where: "easy_apply", result: err ? "error" : "sent" });
     if (err) setError(err.message);
     else setSent(true);
   };
@@ -83,6 +85,7 @@ export function SignIn() {
     setError("");
     const { data, error: err } = await supabase.auth.verifyOtp({ email: email.trim(), token: code.trim(), type: "email" });
     setBusy(false);
+    track("signin_code_entered", { where: "easy_apply", result: err ? "wrong_or_expired" : "correct" });
     if (err) setError(err.message);
     else trackSignUp(data?.user); // Google Ads "Sign up" – new accounts only
   };

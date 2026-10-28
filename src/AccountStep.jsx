@@ -5,6 +5,15 @@ import { trackSignUp } from "./googleAds.js";
 import "./UploadStep.css";
 import "./AccountStep.css";
 
+/** A short label for why a code email couldn't be sent (for analytics – never the address). */
+function sendErrorKind(message) {
+  if (/after \d+ seconds?/i.test(message)) return "wait_a_minute";
+  if (/rate limit/i.test(message)) return "hourly_limit";
+  if (/invalid|valid email|format/i.test(message)) return "invalid_email";
+  if (/sending|smtp|mail/i.test(message)) return "send_failed";
+  return "other";
+}
+
 // Supabase sends 6-digit codes (its setting); up to 8 are accepted in case that setting changes.
 const MIN_CODE = 6;
 const MAX_CODE = 8;
@@ -59,6 +68,7 @@ export default function AccountStep({ onDone, homeHref, afterUpload = false }) {
     setError("");
     const { error: err } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { shouldCreateUser: true } });
     setBusy(false);
+    track("signin_email_submitted", { where: afterUpload ? "after_upload" : "sign_in", result: err ? sendErrorKind(err.message) : "sent" });
     if (err) {
       // Supabase allows one code per email a minute ("…after 42 seconds") and a set number of sign-in emails an hour.
       const wait = err.message.match(/after (\d+) seconds?/i)?.[1];
@@ -80,13 +90,14 @@ export default function AccountStep({ onDone, homeHref, afterUpload = false }) {
     setError("");
     const { data, error: err } = await supabase.auth.verifyOtp({ email: email.trim(), token: value, type: "email" });
     setBusy(false);
+    track("signin_code_entered", { where: afterUpload ? "after_upload" : "sign_in", result: err || !data?.session ? "wrong_or_expired" : "correct" });
     if (err || !data?.session) {
       setError("That code isn't right or has expired – check the latest email, or send a new code.");
       setCode("");
       codeRef.current?.focus();
       return;
     }
-    track("signin_completed");
+    track("signin_completed", { new_account: Date.now() - Date.parse(data.session.user.created_at) < 30 * 60 * 1000 });
     trackSignUp(data.session.user); // Google Ads "Sign up" – new accounts only
     onDone(data.session);
   };
