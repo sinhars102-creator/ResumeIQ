@@ -117,6 +117,22 @@
 .us-browse:focus-visible, .us-link:focus-visible { outline: 2px solid var(--rq-accent); outline-offset: 2px; }
 .us-drop-types { margin-top: 12px; font-size: 12px; opacity: 0.65; }
 .us-hidden { display: none; }
+.us-drop { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+/* Touch screens can't drag files in: just the button. */
+@media (hover: none) and (pointer: coarse) {
+  .us-drop-label-drag, .us-drop-or { display: none; }
+  .us-drop .us-browse { margin-top: 14px; }
+}
+
+.us-inapp { margin-top: 20px; padding: 16px; border-radius: 12px; font-size: 14px; line-height: 1.5; color: var(--rq-text); background: color-mix(in srgb, #c98a2b 14%, transparent); border: 1px solid color-mix(in srgb, #c98a2b 40%, transparent); }
+.us-inapp-title { display: block; font-size: 16px; }
+.us-inapp p { margin-top: 6px; }
+.us-inapp-open { margin-top: 14px; display: flex; align-items: center; justify-content: center; width: 100%; text-decoration: none; }
+.us-inapp-open, .us-inapp-open:visited, .us-inapp-open:active { color: #fff; }
+.us-inapp-manual { margin-top: 12px; padding: 12px; border-radius: 10px; font-size: 13px; background: var(--rq-surface); border: 1px solid var(--rq-border); }
+.us-inapp-manual .us-inapp-copy { margin-top: 10px; }
+.us-inapp-alt { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 0 6px; align-items: center; font-size: 13px; color: var(--rq-text-2, var(--rq-text)); }
+.us-inapp-copy { display: inline-flex; align-items: center; text-decoration: none; font: inherit; font-weight: 700; min-height: 44px; padding: 0 16px; border-radius: 10px; cursor: pointer; color: var(--rq-text); background: var(--rq-surface); border: 1px solid var(--rq-border); }
 
 .us-trust { margin-top: 20px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--rq-text-2, var(--rq-text)); }
 .us-trust li::before { content: "✓"; color: var(--rq-accent); font-weight: 700; margin-right: 8px; }
@@ -161,3 +177,13 @@
   .us-guide { border-right: none; border-top: 1px solid var(--rq-border); padding: 28px 20px; }
   .us-art { margin-left: 0; }
 }
+
+/* Paste the resume as text (no file picker needed) */
+.us-paste { margin-top: 20px; display: flex; flex-direction: column; gap: 8px; }
+.us-paste-label { font-size: 15px; font-weight: 700; color: var(--rq-text); }
+.us-paste-hint { font-size: 13px; color: var(--rq-text-2, var(--rq-text)); }
+.us-paste-text { font: inherit; font-size: 16px; width: 100%; padding: 12px; border-radius: 10px; border: 1px solid var(--rq-border-strong, var(--rq-border)); background: var(--rq-surface); color: var(--rq-text); resize: vertical; }
+.us-paste-text:focus { outline: 2px solid var(--rq-accent); outline-offset: 1px; }
+.us-paste .us-browse { align-self: flex-start; }
+.us-browse:disabled { opacity: 0.5; cursor: not-allowed; filter: none; }
+.us-paste-link { margin-top: 14px; padding-top: 0; border-top: none; }

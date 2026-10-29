@@ -161,7 +161,8 @@ export default function Landing({ onStart }) {
             <p className="lp-hero-note">No signup for your first matches · 1 tailored resume free · Pay by UPI</p>
           </div>
 
-          <div className="lp-hero-visual" aria-hidden="true">
+          {/* The product mockups look tappable, so a tap opens the upload screen instead of doing nothing. */}
+          <div className="lp-hero-visual lp-mock-link" aria-hidden="true" onClick={start("mock_hero")}>
             <div className="lp-card lp-mock">
               <div className="lp-mock-head">
                 <div>
@@ -239,7 +240,7 @@ export default function Landing({ onStart }) {
               <h3 className="lp-h3">See why a role fits, not just a number</h3>
               <p className="lp-body">Every role is marked Strong, Good or Stretch, with the skills that matched and the gaps that didn't. Duplicates and expired listings are filtered out, and roles far above or below your level stay out of the way.</p>
             </div>
-            <div className="lp-feature-visual lp-card lp-fit" aria-hidden="true">
+            <div className="lp-feature-visual lp-card lp-fit lp-mock-link" aria-hidden="true" onClick={start("mock_fit")}>
               <div className="lp-fit-head"><span>Senior PM, Payments · Paybridge</span><span className="lp-tag lp-tag-strong">Strong</span></div>
               <div className="lp-bars">
                 <div><div className="lp-bar-row"><span>Skills</span><span>9 of 10 matched</span></div><div className="lp-bar"><div style={{ width: "90%" }} /></div></div>
@@ -251,7 +252,7 @@ export default function Landing({ onStart }) {
           </div>
 
           <div className="lp-feature lp-feature-rev">
-            <div className="lp-feature-visual lp-card lp-edits" aria-hidden="true">
+            <div className="lp-feature-visual lp-card lp-edits lp-mock-link" aria-hidden="true" onClick={start("mock_edits")}>
               <div className="lp-edit-item"><div className="lp-mini-label">Keyword from JD</div><p>Moved "experimentation" and "SQL" into your summary.</p><span className="lp-tag lp-tag-good">Accepted</span></div>
               <div className="lp-edit-item"><div className="lp-mini-label">Reworded bullet</div><p>Led a 6-person pod shipping the merchant onboarding revamp.</p><span className="lp-tag lp-tag-good">Accepted</span></div>
               <div className="lp-edit-item lp-edit-item-blocked"><div className="lp-mini-label">Blocked</div><p>"Kafka" isn't in your resume, so we won't add it. Add it yourself if you've used it.</p></div>
@@ -269,7 +270,7 @@ export default function Landing({ onStart }) {
               <h3 className="lp-h3">CTC, notice period and city, built in</h3>
               <p className="lp-body">Tell us your current and expected CTC, notice period and preferred cities once. Matches respect them, and you get copy-ready answers for the screening questions every Indian application asks.</p>
             </div>
-            <div className="lp-feature-visual lp-card lp-india" aria-hidden="true">
+            <div className="lp-feature-visual lp-card lp-india lp-mock-link" aria-hidden="true" onClick={start("mock_india")}>
               <div className="lp-india-cell"><small>Current CTC</small><div>₹28 LPA</div></div>
               <div className="lp-india-cell"><small>Expected CTC</small><div>₹36–42 LPA</div></div>
               <div className="lp-india-cell"><small>Notice period</small><div>60 days</div></div>
@@ -280,7 +281,7 @@ export default function Landing({ onStart }) {
 
           {/* Chrome extension */}
           <div id="extension" className="lp-feature lp-feature-rev">
-            <div className="lp-feature-visual lp-card lp-browser" aria-hidden="true">
+            <div className="lp-feature-visual lp-card lp-browser lp-mock-link" aria-hidden="true" onClick={start("mock_extension")}>
               <div className="lp-browser-bar">
                 <span className="lp-dot" /><span className="lp-dot" /><span className="lp-dot" />
                 <span className="lp-url">careers.paybridge.in/apply/senior-pm-payments</span>

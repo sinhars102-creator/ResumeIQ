@@ -213,3 +213,6 @@
   .lp-final-box { padding: 40px 24px; }
   .lp-edit { width: 100%; margin-top: 16px; }
 }
+
+/* Product mockups open the upload screen when tapped */
+.lp-mock-link { cursor: pointer; -webkit-tap-highlight-color: transparent; }

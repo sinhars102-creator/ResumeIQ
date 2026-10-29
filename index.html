@@ -63,6 +63,12 @@
           var choice = localStorage.getItem("riq_ad_consent");
           if (choice) clarity("consentv2", { ad_Storage: choice, analytics_Storage: choice });
         } catch (e) {}
+        // Tags to filter recordings and heatmaps by: in-app browsers (Android WebView, Facebook, Instagram,
+        // LinkedIn) often can't open the file picker, and Clarity reports them as ordinary Chrome or Safari.
+        var ua = navigator.userAgent || "";
+        clarity("set", "browser_kind", /; wv\)|FBAN|FBAV|FB_IAB|Instagram|LinkedInApp/i.test(ua) ? "in-app" : "normal");
+        var gad = /[?&]gad_source=(\d+)/.exec(location.search);
+        if (gad) clarity("set", "gad_source", gad[1]);
       })();
     </script>
   </head>
