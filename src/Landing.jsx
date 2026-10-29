@@ -8,6 +8,9 @@ import "./Landing.css";
 // VITE_FEATURE_PAYMENTS=1 – packs don't unlock anything in the app yet.
 const PAYMENTS = (import.meta.env.VITE_FEATURE_PAYMENTS ?? (import.meta.env.DEV ? "1" : "0")) === "1";
 
+// The pricing section and its nav link are hidden for now; set to true to bring them back.
+const SHOW_PRICING = false;
+
 // The extension's Chrome Web Store listing (published). Without it the "Add to Chrome" buttons would
 // scroll to the extension section.
 const CHROME_STORE_URL = "https://chromewebstore.google.com/detail/ahdhgkmnggeaibdpglffindgklfgidgp";
@@ -60,10 +63,15 @@ const FAQS = [
 ];
 
 export default function Landing({ onStart }) {
-  const start = (where) => (e) => {
+  // Opens the app without a page reload.
+  const openApp = (e) => {
     e.preventDefault();
-    track("landing_cta_clicked", { location: where });
     onStart();
+  };
+  // Buttons that take a signed-out visitor to the upload screen: the only landing clicks that are logged.
+  const start = (where) => (e) => {
+    track("upload_cta_clicked", { location: where });
+    openApp(e);
   };
 
   // Pack checkout: { plan, state: "paying" | "paid" | "error", message }
@@ -72,7 +80,6 @@ export default function Landing({ onStart }) {
     if (!PAYMENTS) return start(where)(e);
     e.preventDefault();
     if (payment?.state === "paying") return;
-    track("landing_cta_clicked", { location: where });
     setPayment({ plan, state: "paying" });
     try {
       const r = await payForPlan(plan);
@@ -119,18 +126,18 @@ export default function Landing({ onStart }) {
             <a href="#features">Features</a>
             <a href="#extension">Chrome extension</a>
             <a href="#how">How it works</a>
-            <a href="#pricing">Pricing</a>
+            {SHOW_PRICING && <a href="#pricing">Pricing</a>}
             <a href="#faq">FAQ</a>
           </div>
           <div className="lp-nav-cta">
             {account ? (
               <>
                 <button type="button" className="lp-signin" onClick={signOut} title={`Signed in as ${account.email}`}>Sign out</button>
-                <a href="/app" className="lp-btn lp-btn-primary" onClick={start("nav_my_matches")}>My job matches</a>
+                <a href="/app" className="lp-btn lp-btn-primary" onClick={openApp}>My job matches</a>
               </>
             ) : (
               <>
-                <a href="/app/onboarding" className="lp-signin" onClick={start("nav_signin")}>Sign in</a>
+                <a href="/app/onboarding" className="lp-signin">Sign in</a>
                 <a href="/app" className="lp-btn lp-btn-primary" onClick={start("nav")}>Try it now</a>
               </>
             )}
@@ -354,7 +361,8 @@ export default function Landing({ onStart }) {
           </div>
         </section>
 
-        {/* Pricing */}
+        {/* Pricing (hidden for now: SHOW_PRICING) */}
+        {SHOW_PRICING && (
         <section id="pricing" className="lp-wrap lp-section">
           <p className="lp-eyebrow">Pricing</p>
           <h2 className="lp-h2">Pay once. No subscription.</h2>
@@ -383,6 +391,7 @@ export default function Landing({ onStart }) {
             </div>
           </div>
         </section>
+        )}
 
         {/* FAQ */}
         <section id="faq" className="lp-wrap lp-section lp-faq">
