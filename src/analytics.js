@@ -1,10 +1,10 @@
 /**
  * Product analytics (PostHog). Off unless VITE_POSTHOG_KEY is set.
  *
- * Privacy: resumes are personal data, so nothing captures page content. Autocapture (clicked
- * element text), session recording and surveys are disabled; only the explicit events below are
- * sent, and their properties are counts, scores and categories – never resume text, names,
- * contact details or job description text. Visitors get an anonymous ID per browser.
+ * Privacy: resumes are personal data. Autocapture (clicked element text) and surveys are disabled;
+ * session recordings mask every form field and all resume content (see initAnalytics). Events carry
+ * counts, scores and categories – never resume text, names, contact details or job description
+ * text. Visitors get an anonymous ID per browser.
  */
 import posthog from "posthog-js";
 
@@ -47,7 +47,15 @@ export function initAnalytics() {
     capture_exceptions: false,
     capture_pageview: true,
     capture_pageleave: true,
-    disable_session_recording: true,
+    // Session recordings: every form field, plus anything marked data-clarity-mask (resume text, file
+    // names), is replaced with asterisks before it leaves the browser. Console logs stay out, as error
+    // messages can quote resume text. The resume editor is a separate site in an iframe and isn't recorded.
+    disable_session_recording: false,
+    session_recording: {
+      maskAllInputs: true,
+      maskTextSelector: "[data-clarity-mask]",
+    },
+    enable_recording_console_log: false,
     disable_surveys: true,
     mask_all_text: true,
     mask_all_element_attributes: true,
