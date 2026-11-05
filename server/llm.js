@@ -138,7 +138,7 @@ async function callAnthropic({ system, user, maxTokens }, model) {
 }
 
 /**
- * Run one prompt, falling back across models/providers when one is rate limited.
+ * Run one prompt, falling back across models/providers when one is rate limited or fails.
  * `provider` ("groq" | "anthropic") puts that provider first for this call only – e.g. a step where
  * quality matters more than speed – with the other still as the fallback.
  */
@@ -150,14 +150,19 @@ export async function callLLM({ system, user, maxTokens = 1500, json = false, pr
   const anthropic = anthropicKey() ? [() => callAnthropic(prompt, process.env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL)] : [];
   const attempts = provider === "anthropic" ? [...anthropic, ...groq] : [...groq, ...anthropic];
   let lastLimit;
+  let lastError;
   for (const attempt of attempts) {
     try {
       return await attempt();
     } catch (err) {
-      if (!(err instanceof RateLimitedError)) throw err;
+      // Messages meant for the user (declined, too long) stand; any other failure – a rate limit, or a
+      // provider outage, billing or key problem – moves on to the next model so users still get an answer.
+      if (err instanceof LLMUserError) throw err;
       console.warn(`[llm] ${err.message.slice(0, 160)} – trying next model`);
-      lastLimit = err;
+      if (err instanceof RateLimitedError) lastLimit = err;
+      else lastError = err;
     }
   }
+  if (lastError && !lastLimit) throw lastError;
   throw new LLMUserError(BUSY_MESSAGE, { status: 429, cause: lastLimit });
 }

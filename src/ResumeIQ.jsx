@@ -3957,11 +3957,13 @@ export default function ResumeIQ() {
         body: JSON.stringify({ resume: resumeForAI(resume), job: { role: job.role, company: job.company, jd: job.jd } }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.error || `the request failed (${response.status})`);
+      if (!response.ok) throw Object.assign(new Error(data?.error || `the request failed (${response.status})`), { status: response.status });
       writeCachedScore(cacheKey, data);
       applyResult(data);
       track("resume_reworded", { changes: (data.changes || []).length, must_have_gaps: (data.realGaps || []).filter((g) => g.mustHave).length });
     } catch (e) {
+      // Failures show only on screen, so record them (status: the server's HTTP code, or "network").
+      track("resume_reword_failed", { status: e.status || "network" });
       if (tailorJobRef.current === job.id) setGeneration({ jobId: job.id, status: "error", realGaps: [], error: e.message });
     }
   };
@@ -4009,7 +4011,7 @@ export default function ResumeIQ() {
         body: JSON.stringify({ resume: resumeForAI(working), job: { role: job.role, company: job.company, jd: job.jd }, gaps: ticked }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data?.error || `the request failed (${response.status})`);
+      if (!response.ok) throw Object.assign(new Error(data?.error || `the request failed (${response.status})`), { status: response.status });
       if (tailorJobRef.current !== job.id) return;
       const stamp = Date.now();
       const edits = (data.edits || []).map((e, i) => ({
@@ -4035,6 +4037,7 @@ export default function ResumeIQ() {
       }));
       track("core_edits_added", { ticked: ticked.length, added: added.length, blanks: edits.reduce((n, e) => n + countBlanks(e.proposed), 0) });
     } catch (e) {
+      track("core_edits_failed", { status: e.status || "network" });
       if (tailorJobRef.current === job.id) setCoreEdits((prev) => ({ ...prev, status: "error", error: e.message }));
     }
   };
