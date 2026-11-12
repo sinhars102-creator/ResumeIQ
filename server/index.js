@@ -15,7 +15,7 @@ import { saveJobs, findJobs, repositorySize } from "./jobRepository.js";
 import { htmlToText, normalizeJob, fetchJobsApify, fetchJobsValig } from "./linkedinJobs.js";
 import {
   jobStoreConfigured, toRow, inScope, upsertJobs, findStoredJobs, recordDemand, markDemandCollected, linkedInJobsForQuery,
-  userFromToken, recordApplication, updateApplication, getJobById,
+  userFromToken, recordApplication, updateApplication, setApplicationStatus, getJobById,
   getTailorSession, saveTailorSession, saveTailoredResumeFile, getProfile,
   getEditorAccount, saveEditorAccount, userEmail,
 } from "./jobStore.js";
@@ -718,7 +718,55 @@ function rxPhotoUrl(photoUrl) {
 }
 
 /** Map ResumeIQ's resumeData shape into Reactive Resume's ResumeData schema. */
+/**
+ * Roles the parser keeps without a title or company (bullets that ran onto the next page) are folded
+ * into the role before them, so their bullets aren't lost.
+ */
+function rxRoles(experience) {
+  const roles = [];
+  for (const e of rxList(experience)) {
+    if (rxText(e?.company) || rxText(e?.role) || !roles.length) roles.push({ ...e, bullets: [...rxList(e?.bullets)] });
+    else roles[roles.length - 1].bullets.push(...rxList(e?.bullets));
+  }
+  return roles.filter((e) => rxText(e?.company) || rxText(e?.role) || rxList(e?.bullets).length);
+}
+
+/** Every section ResumeIQ carries over, placed on the page – the editor only prints sections in its layout. */
+function rxLayoutFor(sections, customSections) {
+  const has = (id) => (sections[id]?.items || []).length > 0;
+  return [
+    {
+      fullWidth: false,
+      main: ["summary", "experience", "projects", "education", "volunteer", "publications", ...customSections.map((c) => c.id)].filter((id) => id === "summary" || id === "experience" || id === "education" || has(id) || customSections.some((c) => c.id === id)),
+      sidebar: ["skills", "certifications", "awards", "languages", "interests", "references"],
+    },
+  ];
+}
+
+/**
+ * A layout the user arranged in the editor, plus any section with content it doesn't place yet
+ * (the editor only prints sections in its layout) – appended to the first page, sidebar for short lists.
+ */
+function withEveryFilledSection(metadata, data) {
+  const pages = (metadata?.layout?.pages || []).map((p) => ({ ...p, main: [...(p.main || [])], sidebar: [...(p.sidebar || [])] }));
+  if (!pages.length) return metadata;
+  const placed = new Set(pages.flatMap((p) => [...p.main, ...p.sidebar]));
+  const sidebarIds = new Set(["skills", "certifications", "awards", "languages", "interests", "references"]);
+  for (const [id, section] of Object.entries(data.sections || {})) {
+    if (placed.has(id) || !(section?.items || []).length) continue;
+    (sidebarIds.has(id) ? pages[0].sidebar : pages[0].main).push(id);
+  }
+  for (const c of data.customSections || []) if (!placed.has(c.id)) pages[0].main.push(c.id);
+  return { ...metadata, layout: { ...metadata.layout, pages } };
+}
+
 function mapToRxResumeData(resumeData, template = "azurill") {
+  const data = mapToRxResumeSections(resumeData, template);
+  data.metadata.layout.pages = rxLayoutFor(data.sections, data.customSections);
+  return data;
+}
+
+function mapToRxResumeSections(resumeData, template) {
   const contact = rxText(resumeData.contact);
   const emailMatch = contact.match(/[\w.+-]+@[\w-]+\.[\w.-]+/);
   return {
@@ -747,12 +795,11 @@ function mapToRxResumeData(resumeData, template = "azurill") {
       profiles: rxEmptySection("Profiles"),
       experience: {
         ...rxEmptySection("Experience"),
-        items: rxList(resumeData.experience)
-          .filter((e) => rxText(e?.company) || rxText(e?.role))
+        items: rxRoles(resumeData.experience)
           .map((e) => ({
           id: crypto.randomUUID(),
           hidden: false,
-          company: rxText(e?.company) || rxText(e?.role),
+          company: rxText(e?.company) || rxText(e?.role) || "Experience",
           position: rxText(e?.role),
           location: rxText(e?.location),
           period: rxText(e?.period),
@@ -771,14 +818,19 @@ function mapToRxResumeData(resumeData, template = "azurill") {
           school: rxText(ed?.school) || rxText(ed?.degree),
           degree: rxText(ed?.degree),
           area: "",
-          grade: "",
-          location: "",
+          grade: rxText(ed?.grade),
+          location: rxText(ed?.location),
           period: rxText(ed?.year),
           website: RX_EMPTY_WEBSITE,
-          description: "",
+          description: bulletsToHtml(rxList(ed?.details).map(rxText)),
         })),
       },
-      projects: rxEmptySection("Projects"),
+      projects: {
+        ...rxEmptySection("Projects"),
+        items: rxList(resumeData.projects)
+          .filter((x) => rxText(x?.name) || rxList(x?.bullets).length)
+          .map((x) => ({ id: crypto.randomUUID(), hidden: false, name: rxText(x?.name) || "Project", period: rxText(x?.period), website: RX_EMPTY_WEBSITE, description: bulletsToHtml(rxList(x?.bullets).map(rxText)) })),
+      },
       skills: {
         ...rxEmptySection("Skills"),
         items: rxList(resumeData.skills).map(rxText).filter(Boolean).map((s) => ({ id: crypto.randomUUID(), hidden: false, icon: "", iconColor: "", name: s, proficiency: "", level: 0 })),
@@ -799,8 +851,16 @@ function mapToRxResumeData(resumeData, template = "azurill") {
         ...rxEmptySection("Certifications"),
         items: rxList(resumeData.certifications).map(rxText).filter(Boolean).map((title) => ({ id: crypto.randomUUID(), hidden: false, title, issuer: "", date: "", website: RX_EMPTY_WEBSITE, description: "" })),
       },
-      publications: rxEmptySection("Publications"),
-      volunteer: rxEmptySection("Volunteer"),
+      publications: {
+        ...rxEmptySection("Publications"),
+        items: rxList(resumeData.publications).map(rxText).filter(Boolean).map((title) => ({ id: crypto.randomUUID(), hidden: false, title, publisher: "", date: "", website: RX_EMPTY_WEBSITE, description: "" })),
+      },
+      volunteer: {
+        ...rxEmptySection("Volunteer"),
+        items: rxList(resumeData.volunteer)
+          .filter((x) => rxText(x?.organization) || rxList(x?.bullets).length)
+          .map((x) => ({ id: crypto.randomUUID(), hidden: false, organization: rxText(x?.organization) || rxText(x?.role) || "Volunteer", location: "", period: rxText(x?.period), website: RX_EMPTY_WEBSITE, description: bulletsToHtml([rxText(x?.role) && rxText(x?.organization) ? rxText(x.role) : "", ...rxList(x?.bullets).map(rxText)].filter(Boolean)) })),
+      },
       references: {
         ...rxEmptySection("References"),
         items: rxList(resumeData.references)
@@ -808,7 +868,15 @@ function mapToRxResumeData(resumeData, template = "azurill") {
           .map((r) => ({ id: crypto.randomUUID(), hidden: false, name: rxText(typeof r === "object" && r ? r.name : r), position: rxText(r?.title), website: RX_EMPTY_WEBSITE, phone: "", description: "" })),
       },
     },
-    customSections: [],
+    // Sections with no place of their own ("Positions of Responsibility", …): one text section each, verbatim.
+    customSections: rxList(resumeData.otherSections)
+      .filter((x) => rxText(x?.title) && rxList(x?.items).length)
+      .map((x) => ({
+        ...rxEmptySection(rxText(x.title)),
+        id: `custom-${createHash("sha1").update(rxText(x.title).toLowerCase()).digest("hex").slice(0, 12)}`, // stable across re-imports, so saved layouts keep finding it
+        type: "summary",
+        items: [{ id: crypto.randomUUID(), hidden: false, content: bulletsToHtml(rxList(x.items).map(rxText)) }],
+      })),
     metadata: rxMetadataForTemplate(template),
   };
 }
@@ -831,7 +899,7 @@ async function importIntoRxResume(resumeData, template = "azurill") {
 /** Fetch a binary PDF from Reactive Resume (rxFetch assumes JSON/text, which corrupts binary content). */
 async function rxFetchBinary(path) {
   const key = editorKeyStore.getStore() || getRxResumeKey();
-  const response = await fetch(`${RX_BASE}${path}`, { headers: { "x-api-key": key } });
+  const response = await fetch(`${RX_BASE}${path}`, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(90_000) });
   if (!response.ok) {
     const text = await response.text().catch(() => "");
     throw new Error(`Reactive Resume PDF request failed (${response.status}): ${text.slice(0, 200)}`);
@@ -1065,7 +1133,8 @@ app.post("/api/rxresume/open-in-builder", async (req, res) => {
         if (!changed || !refresh) return res.json(reply(session.rx_resume_id, { reused: true, contentChanged: changed }));
         // New edits from ResumeIQ: replace the content, keep the template, layout and styling chosen in the editor.
         const design = existing.data.data.metadata;
-        const data = { ...mapToRxResumeData(resumeData, design?.template), ...(design ? { metadata: design } : {}) };
+        const fresh = mapToRxResumeData(resumeData, design?.template);
+        const data = { ...fresh, ...(design ? { metadata: withEveryFilledSection(design, fresh) } : {}) };
         const updated = await rxFetch(`/resumes/${session.rx_resume_id}`, { method: "PUT", body: JSON.stringify({ data }) });
         if (!updated.ok) throw new Error(updated.data?.message || `Updating the editor resume failed (${updated.status})`);
         await saveTailorSession(user.id, String(jobId), { rxResumeId: session.rx_resume_id, contentHash });
@@ -1098,10 +1167,14 @@ app.post("/api/tailored/use", async (req, res) => {
   if (!user) return res.status(401).json({ error: "Sign in to ResumeIQ to save this resume for applying" });
   const jobId = String(req.body?.jobId || "");
   if (!jobId) return res.status(400).json({ error: "Which job is this resume for?" });
+  const started = Date.now();
+  const step = (what) => console.log(`[tailor] save for applying: ${what} (${((Date.now() - started) / 1000).toFixed(1)}s)`);
   try {
     const session = await getTailorSession(user.id, jobId);
     if (!session) return res.status(404).json({ error: "Open this job's resume in the editor first" });
+    step("found the job's editor resume");
     const pdf = await asEditorUser(user.id, user.email, () => rxFetchBinary(`/resumes/${session.rx_resume_id}/pdf`));
+    step(`got the PDF from the editor (${pdf.length} bytes)`);
     if (pdf.subarray(0, 5).toString() !== "%PDF-") throw new Error("the editor didn't return a PDF");
     const [job, profile] = await Promise.all([getJobById(jobId).catch(() => null), getProfile(user.id).catch(() => null)]);
     // The site's job ids aren't always the jobs table's: fall back to what the page sent.
@@ -1110,10 +1183,53 @@ app.post("/api/tailored/use", async (req, res) => {
     const person = [profile?.first_name, profile?.last_name].filter(Boolean).join("_") || "Resume";
     const fileName = `${person}_${company || "tailored"}`.replace(/[^A-Za-z0-9_-]+/g, "_").replace(/_+/g, "_").slice(0, 80) + ".pdf";
     const resume = await saveTailoredResumeFile(user.id, { jobId, rxResumeId: session.rx_resume_id, name: `${label} (tailored)`.slice(0, 90), fileName, bytes: pdf });
+    step("saved to the user's resume files");
     return res.json({ resume, jobUrl: job?.url || null });
   } catch (err) {
     console.error("[tailor] saving the tailored resume failed:", err.message);
     return res.status(502).json({ error: "Couldn't save the resume from the editor – please try again", details: err.message });
+  }
+});
+
+/**
+ * "Apply now" on Preview: one row in the user's applications ("opened" – the application page was
+ * opened with this tailored resume saved and downloaded), then "submitted" or "not_yet" when they say.
+ */
+app.post("/api/applications", async (req, res) => {
+  const user = await optionalUser(req);
+  if (!user) return res.status(401).json({ error: "Sign in to ResumeIQ to track this application" });
+  const { jobId, company, title, applyUrl, resumeFileId } = req.body || {};
+  if (!jobId) return res.status(400).json({ error: "Which job is this application for?" });
+  try {
+    const id = await recordApplication({
+      user_id: user.id,
+      job_id: String(jobId).slice(0, 200),
+      source: "web",
+      company: String(company || "").slice(0, 200),
+      title: String(title || "").slice(0, 200),
+      apply_url: /^https?:\/\//i.test(String(applyUrl || "")) ? String(applyUrl).slice(0, 500) : "",
+      status: "opened",
+      details: resumeFileId ? { resumeFileId: String(resumeFileId).slice(0, 100) } : null,
+      submitted_at: null,
+    });
+    return res.json({ id });
+  } catch (err) {
+    console.error("[apply] recording the application failed:", err.message);
+    return res.status(502).json({ error: "Couldn't record this application – please try again" });
+  }
+});
+
+app.post("/api/applications/:id/status", async (req, res) => {
+  const user = await optionalUser(req);
+  if (!user) return res.status(401).json({ error: "Sign in to ResumeIQ to update this application" });
+  const status = String(req.body?.status || "");
+  if (!["submitted", "not_yet"].includes(status)) return res.status(400).json({ error: "status must be submitted or not_yet" });
+  try {
+    const ok = await setApplicationStatus(user.id, String(req.params.id), status);
+    return ok ? res.json({ ok: true }) : res.status(404).json({ error: "Application not found" });
+  } catch (err) {
+    console.error("[apply] updating the application failed:", err.message);
+    return res.status(502).json({ error: "Couldn't update this application – please try again" });
   }
 });
 

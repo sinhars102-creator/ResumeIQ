@@ -26,7 +26,9 @@ const API_BASE = import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://
 const feature = (flag) => (flag ?? (import.meta.env.DEV ? "1" : "0")) === "1";
 const FEATURES = {
   easyApply: feature(import.meta.env.VITE_FEATURE_EASY_APPLY), // submitting Greenhouse applications needs the worker server
-  autoApply: feature(import.meta.env.VITE_FEATURE_AUTO_APPLY), // "Apply with this resume" on Preview (RES-54, in progress)
+  // The extension's "Apply with this resume" (RES-54, in progress) – off unless set to 1, even locally:
+  // "Apply now" is the Apply button everyone gets.
+  autoApply: import.meta.env.VITE_FEATURE_AUTO_APPLY === "1",
 };
 
 // The marketing landing page, served by this app at "/" (the product lives at /app).
@@ -1632,14 +1634,18 @@ async function extractResumeFromText(pastedText) {
     }
   ],
   "education": [
-    { "degree": "degree name", "school": "school name", "year": "graduation year" }
+    { "degree": "degree name", "school": "school name", "year": "graduation year", "grade": "CGPA / percentage / class if mentioned", "location": "city if mentioned", "details": ["any other line under it, verbatim"] }
   ],
   "skills": ["skill1", "skill2", ...],
   "certifications": ["each certification exactly as written, e.g. Pega Certified Senior System Architect (CSSA)"] or [],
   "achievements": ["each achievement or award exactly as written"] or [],
   "interests": ["interest1", "interest2"] or [],
   "languages": ["Language1", "Language2"] or [],
-  "references": [{"name": "Ref Name", "title": "Their Title"}] or []
+  "references": [{"name": "Ref Name", "title": "Their Title"}] or [],
+  "projects": [{ "name": "project name", "period": "dates if any", "bullets": ["each line, verbatim"] }] or [],
+  "volunteer": [{ "organization": "organization", "role": "role if any", "period": "dates if any", "bullets": ["each line, verbatim"] }] or [],
+  "publications": ["each publication or patent exactly as written"] or [],
+  "otherSections": [{ "title": "the section heading exactly as written, e.g. Positions of Responsibility, Extracurriculars, Trainings", "items": ["each line, verbatim"] }] or []
 }
 
 Rules:
@@ -1647,6 +1653,7 @@ Rules:
 - Copy every bullet and the summary VERBATIM from the resume text (only remove bullet symbols and fix line breaks). Do not shorten, reword or merge them.
 - The text may list a sidebar (contact, skills, education, certifications, achievements) separately from the main column; assign each item to its correct section.
 - Certifications and achievements/awards are their own sections: list every one, verbatim, and never fold them into skills or the summary.
+- Nothing may be lost: every section of the resume must land in one of the fields above. A section that fits none of them goes in "otherSections" under its own heading, with its lines verbatim.
 
 Resume text:
 ${pastedText}`;
@@ -1671,6 +1678,10 @@ ${pastedText}`;
       interests: Array.isArray(parsed.interests) ? parsed.interests : [],
       languages: Array.isArray(parsed.languages) ? parsed.languages : [],
       references: Array.isArray(parsed.references) ? parsed.references : [],
+      projects: Array.isArray(parsed.projects) ? parsed.projects.filter((x) => x && (x.name || (x.bullets || []).length)) : [],
+      volunteer: Array.isArray(parsed.volunteer) ? parsed.volunteer.filter((x) => x && (x.organization || (x.bullets || []).length)) : [],
+      publications: Array.isArray(parsed.publications) ? parsed.publications.filter((x) => typeof x === "string" && x.trim()) : [],
+      otherSections: Array.isArray(parsed.otherSections) ? parsed.otherSections.filter((x) => x && x.title && Array.isArray(x.items) && x.items.length) : [],
     };
   } catch (e) {
     console.error("Resume extraction error:", e);
@@ -2214,34 +2225,96 @@ let assistantEditSeq = 0;
  * for missing facts, and proposes one checked edit at a time (server/assistant.js).
  * Chat state lives in the parent so it survives moving to the preview and back.
  */
-/** What the rewording pass is doing, shown step by step while the user waits (timings are typical, not tracked). */
-const REWORD_STAGES = [
-  { at: 0, label: "Reading the job description" },
-  { at: 3, label: "Picking out what this job asks for" },
-  { at: 7, label: "Matching it to your experience" },
-  { at: 11, label: "Rewording your lines in the job's language" },
-  { at: 18, label: "Checking nothing was made up" },
-];
-const REWORD_TYPICAL_S = 20;
+/** How fast the left-hand resume is read through, and how fast finished changes land on it. */
+const REWORD_SCAN_MS = 650;
+const REWORD_REVEAL_MS = 750;
 
-/** The Tailor step's "working on it" card: a progress bar, the stage it's on, and the lines being rewritten. */
-function RewordProgress({ job, startedAt }) {
+/**
+ * Everything the rewording pass reads (server/assistant.js formatResume), in on-screen order:
+ * "h" headline, "s" summary, "r<role>" / "e<role>-<bullet>" experience, "ed<i>" education,
+ * "k" skills, "c<i>" certifications, "a<i>" achievements. Contact details aren't sent, so aren't shown as read.
+ */
+function rewordScanTargets(resume) {
+  const targets = [];
+  if (resume?.name || resume?.title) targets.push({ key: "h", where: "your name and headline" });
+  if (resume?.summary) targets.push({ key: "s", where: "your summary" });
+  (resume?.experience || []).forEach((exp, idx) => {
+    const where = `your ${exp.role ? `${exp.role} role` : "role"}${exp.company ? ` at ${exp.company}` : ""}`;
+    targets.push({ key: `r${idx}`, where });
+    (exp.bullets || []).forEach((_, i) => targets.push({ key: `e${idx}-${i}`, where }));
+  });
+  (resume?.education || []).forEach((_, i) => targets.push({ key: `ed${i}`, where: "your education" }));
+  if ((resume?.skills || []).length) targets.push({ key: "k", where: "your skills" });
+  (resume?.certifications || []).forEach((_, i) => targets.push({ key: `c${i}`, where: "your certifications" }));
+  (resume?.achievements || []).forEach((_, i) => targets.push({ key: `a${i}`, where: "your achievements" }));
+  (resume?.projects || []).forEach((_, i) => targets.push({ key: `p${i}`, where: "your projects" }));
+  (resume?.volunteer || []).forEach((_, i) => targets.push({ key: `v${i}`, where: "your volunteering" }));
+  (resume?.publications || []).forEach((_, i) => targets.push({ key: `pb${i}`, where: "your publications" }));
+  if ((resume?.languages || []).length) targets.push({ key: "l", where: "your languages" });
+  if ((resume?.interests || []).length) targets.push({ key: "in", where: "your interests" });
+  (resume?.otherSections || []).forEach((o, i) => targets.push({ key: `o${i}`, where: `your ${String(o.title || "other sections").toLowerCase()}` }));
+  return targets;
+}
+
+/** Where an edit landed, for the ticker ("your summary", "RPSG Group", "your skills"). */
+function editWhere(edit, resume) {
+  if (edit.section === "Summary") return "your summary";
+  if (edit.section === "Skills") return "your skills";
+  const exp = resume?.experience?.[edit.experienceIndex];
+  return exp?.company || "your experience";
+}
+
+/**
+ * The Tailor step's live ticker while rewording runs: a timer, then a running log of what's being
+ * done – the job's requirements, each role as the left-hand resume is read, and each change as it
+ * lands on the resume.
+ */
+function RewordProgress({ job, resume, startedAt, scanIndex = 0, reveal = null }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 400);
+    const t = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(t);
   }, []);
-  const elapsed = Math.max(0, (now - (startedAt || now)) / 1000);
-  // Eases toward 95% so the bar keeps moving when the AI takes longer than usual, and never claims done.
-  const pct = Math.max(4, Math.round(95 * (1 - Math.exp(-elapsed / (REWORD_TYPICAL_S / 2.3)))));
-  const current = REWORD_STAGES.reduce((at, stage, i) => (elapsed >= stage.at ? i : at), 0);
+  const elapsed = Math.max(0, Math.floor((now - (startedAt || now)) / 1000));
+  const listRef = useRef(null);
+  const targets = rewordScanTargets(resume);
+  const skills = heuristicExtractSkills(job?.jd);
+  const revealing = !!reveal;
+
+  // The log: what's done (✓), what's happening now (spinner).
+  const entries = [{ text: `Read the job description for ${job?.role || "this role"}` }];
+  entries.push({ text: skills.length ? `Found what it asks for: ${skills.slice(0, 4).join(", ")}${skills.length > 4 ? "…" : ""}` : "Picked out what this job asks for" });
+  const firstPass = Math.min(scanIndex, targets.length);
+  const seen = [];
+  for (const t of targets.slice(0, revealing ? targets.length : firstPass + 1)) if (!seen.includes(t.where)) seen.push(t.where);
+  seen.forEach((where, i) => entries.push({ text: `Checking ${where}`, now: !revealing && i === seen.length - 1 && scanIndex < targets.length }));
+  if (revealing || scanIndex >= targets.length) {
+    entries.push({ text: "Rewording lines in the job's language", now: !revealing });
+    entries.push({ text: "Checking nothing was made up", now: !revealing && elapsed > 12 });
+  }
+  if (revealing) {
+    reveal.edits.slice(0, reveal.count).forEach((e) => entries.push({ text: `Reworded a line in ${editWhere(e, resume)}`, added: true }));
+    if (reveal.count < reveal.edits.length) entries.push({ text: "Putting the changes on your resume", now: true });
+  }
+  const pct = revealing
+    ? 90 + Math.round((10 * reveal.count) / Math.max(1, reveal.edits.length))
+    : Math.max(4, Math.round(88 * (1 - Math.exp(-elapsed / 9))));
   const accent = "var(--rq-accent)";
+  const timer = `${Math.floor(elapsed / 60)}:${String(elapsed % 60).padStart(2, "0")}`;
+  // The newest line stays in view as the log grows.
+  const lastEntry = entries.length;
+  useEffect(() => {
+    const list = listRef.current;
+    if (list) list.scrollTo({ top: list.scrollHeight, behavior: "smooth" });
+  }, [lastEntry]);
+
   return (
     <div
       role="status"
       aria-live="polite"
       data-rq-reword-progress
       style={{
+        order: -1, // first in the right-hand column while it runs
         border: `1px solid color-mix(in srgb, ${accent} 35%, transparent)`,
         borderRadius: 16,
         padding: "16px 18px",
@@ -2256,36 +2329,70 @@ function RewordProgress({ job, startedAt }) {
         <span aria-hidden="true" style={{ flex: "none", width: 34, height: 34, borderRadius: 10, display: "grid", placeItems: "center", background: accent, color: "#fff", animation: "rqPulse 1.6s ease-in-out infinite" }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9zM19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9z" /></svg>
         </span>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 650, fontSize: 15, color: "var(--rq-text)", lineHeight: 1.35 }}>
-            Tailoring your resume for {job?.role || "this job"}{job?.company ? ` at ${job.company}` : ""}
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, justifyContent: "space-between" }}>
+            <div style={{ fontWeight: 650, fontSize: 15, color: "var(--rq-text)", lineHeight: 1.35 }}>
+              {revealing ? "Applying the changes to your resume" : `Tailoring your resume for ${job?.role || "this job"}${job?.company ? ` at ${job.company}` : ""}`}
+            </div>
+            <span style={{ flex: "none", fontVariantNumeric: "tabular-nums", fontSize: 13, fontWeight: 600, color: accent }}>{timer}</span>
           </div>
           <div style={{ fontSize: 12.5, color: "var(--rq-text-2)", marginTop: 3 }}>
-            {elapsed < 35 ? `Usually about ${REWORD_TYPICAL_S} seconds – your new lines will appear right here.` : "Taking a little longer than usual – almost there."}
+            {revealing
+              ? `${reveal.count} of ${reveal.edits.length} changes on your resume – watch them appear on the left.`
+              : elapsed < 35 ? "Usually 10–20 seconds. Watch the resume on the left – the line being read is highlighted." : "Taking a little longer than usual – almost there."}
           </div>
         </div>
       </div>
       <div style={{ height: 6, borderRadius: 99, background: `color-mix(in srgb, ${accent} 15%, transparent)`, overflow: "hidden" }}>
         <div style={{ height: "100%", width: `${pct}%`, borderRadius: 99, background: accent, transition: "width .4s ease" }} />
       </div>
-      <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 7 }}>
-        {REWORD_STAGES.map((stage, i) => {
-          const state = i < current ? "done" : i === current ? "now" : "next";
-          return (
-            <li key={stage.label} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, color: state === "next" ? "var(--rq-text-3)" : "var(--rq-text)", fontWeight: state === "now" ? 600 : 400 }}>
-              <span aria-hidden="true" style={{ flex: "none", width: 18, height: 18, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 11, color: "#fff", background: state === "done" ? accent : "transparent", border: state === "done" ? "none" : `2px solid ${state === "now" ? accent : "var(--rq-border-strong)"}`, borderTopColor: state === "now" ? "transparent" : undefined, animation: state === "now" ? "rqSpin .8s linear infinite" : "none", boxSizing: "border-box" }}>
-                {state === "done" ? "✓" : ""}
-              </span>
-              {stage.label}
-            </li>
-          );
-        })}
-      </ol>
-      <div aria-hidden="true" style={{ display: "flex", flexDirection: "column", gap: 7, paddingTop: 2 }}>
-        {[92, 78, 85].map((w, i) => (
-          <div key={i} style={{ height: 9, width: `${w}%`, borderRadius: 6, background: `linear-gradient(90deg, color-mix(in srgb, var(--rq-text) 7%, transparent) 25%, color-mix(in srgb, ${accent} 22%, transparent) 50%, color-mix(in srgb, var(--rq-text) 7%, transparent) 75%)`, backgroundSize: "200% 100%", animation: `rqShimmer 1.4s ease-in-out ${i * 0.15}s infinite` }} />
+      <ol ref={listRef} style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 7, maxHeight: 260, overflowY: "auto" }}>
+        {entries.map((entry, i) => (
+          <li key={`${i}-${entry.text}`} style={{ display: "flex", alignItems: "flex-start", gap: 9, fontSize: 13, lineHeight: 1.4, color: "var(--rq-text)", fontWeight: entry.now ? 600 : 400, animation: "fadeUp .3s ease both" }}>
+            <span aria-hidden="true" style={{ flex: "none", marginTop: 1, width: 16, height: 16, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 10, color: "#fff", background: entry.now ? "transparent" : entry.added ? "var(--rq-info)" : accent, border: entry.now ? `2px solid ${accent}` : "none", borderTopColor: entry.now ? "transparent" : undefined, animation: entry.now ? "rqSpin .8s linear infinite" : "none", boxSizing: "border-box" }}>
+              {entry.now ? "" : entry.added ? "✎" : "✓"}
+            </span>
+            {entry.text}
+          </li>
         ))}
+      </ol>
+    </div>
+  );
+}
+
+/** "Add the ticked ones" while it runs: each ticked gap in turn, with a timer (timings are typical, not tracked). */
+function GapProgress({ gaps, startedAt }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, []);
+  const elapsed = Math.max(0, (now - (startedAt || now)) / 1000);
+  const perGap = 2.2;
+  const current = Math.min(gaps.length, Math.floor(elapsed / perGap));
+  const accent = "var(--rq-accent)";
+  // Gaps are worded as what's missing ("No SQL experience shown"); the list names the skill being added.
+  const short = (g) => {
+    const text = g.replace(/^no\s+(explicit\s+|direct\s+|clear\s+)?/i, "").replace(/\s+(shown|evident|documented)( explicitly)?\.?$/i, "");
+    const named = text.charAt(0).toUpperCase() + text.slice(1);
+    return named.length > 70 ? `${named.slice(0, 67)}…` : named;
+  };
+  return (
+    <div role="status" aria-live="polite" style={{ border: `1px solid color-mix(in srgb, ${accent} 30%, transparent)`, background: `color-mix(in srgb, ${accent} 6%, transparent)`, borderRadius: 12, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6, animation: "fadeUp .3s ease both" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, fontWeight: 600, color: "var(--rq-text)" }}>
+        <span>Writing them into the roles where they fit</span>
+        <span style={{ color: accent, fontVariantNumeric: "tabular-nums" }}>{`${Math.floor(elapsed / 60)}:${String(Math.floor(elapsed) % 60).padStart(2, "0")}`}</span>
       </div>
+      {gaps.map((g, i) => {
+        const state = i < current ? "done" : i === current ? "now" : "next";
+        return (
+          <div key={g} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 12.5, lineHeight: 1.4, color: state === "next" ? "var(--rq-text-3)" : "var(--rq-text)", fontWeight: state === "now" ? 600 : 400 }}>
+            <span aria-hidden="true" style={{ flex: "none", marginTop: 1, width: 14, height: 14, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 9, color: "#fff", background: state === "done" ? accent : "transparent", border: state === "done" ? "none" : `2px solid ${state === "now" ? accent : "var(--rq-border-strong)"}`, borderTopColor: state === "now" ? "transparent" : undefined, animation: state === "now" ? "rqSpin .8s linear infinite" : "none", boxSizing: "border-box" }}>{state === "done" ? "✓" : ""}</span>
+            {state === "done" ? "Drafted: " : state === "now" ? "Drafting: " : ""}{short(g)}
+          </div>
+        );
+      })}
+      {current >= gaps.length && <div style={{ fontSize: 12, color: "var(--rq-text-2)" }}>Checking the new lines against your resume…</div>}
     </div>
   );
 }
@@ -2934,8 +3041,29 @@ const undoButtonStyle = { border: "none", background: "none", padding: "0 2px", 
  * title line can be clicked and edited – an edit becomes an accepted edit like the others.
  * `edits` are the accepted suggestions: { id, section, type, original, displayOriginal?, proposed }.
  */
-function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
+function TailoredResume({ base, working, edits, onUndo, onEditLine, live = null }) {
+  // While live, the resume scrolls itself so the line being read (or the change that just landed) stays in view.
+  const paperRef = useRef(null);
+  const focusKey = live?.flashId ? `edit:${live.flashId}` : live?.scanKey ? `line:${live.scanKey}` : null;
+  useEffect(() => {
+    const paper = paperRef.current;
+    if (!paper || !focusKey) return;
+    const [kind, id] = [focusKey.slice(0, focusKey.indexOf(":")), focusKey.slice(focusKey.indexOf(":") + 1)];
+    const el = paper.querySelector(kind === "edit" ? `[data-rq-edit="${CSS.escape(id)}"]` : `[data-rq-line="${CSS.escape(id)}"]`);
+    if (el) paper.scrollTo({ top: Math.max(0, el.offsetTop - paper.clientHeight / 3), behavior: "smooth" });
+  }, [focusKey]);
   if (!working) return null;
+  // live (while rewording): scanKey – the line being read now; flashId – the change that just landed.
+  const liveStyle = (key, edit) =>
+    live && edit && edit.id === live.flashId
+      ? { borderRadius: 6, animation: "rqFlash 1.6s ease both" }
+      : live?.scanKey === key
+        ? { borderRadius: 6, background: "color-mix(in srgb, var(--rq-accent) 13%, transparent)", boxShadow: "-3px 0 0 var(--rq-accent)", transition: "background .25s ease" }
+        : { transition: "background .25s ease" };
+  const liveTag = (key) =>
+    live?.scanKey === key ? (
+      <span aria-hidden="true" style={{ flex: "none", alignSelf: "flex-start", marginTop: 2, fontSize: 10.5, fontWeight: 700, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--rq-accent)", whiteSpace: "nowrap", animation: "rqPulse 1.2s ease-in-out infinite" }}>reading…</span>
+    ) : null;
   const summaryEdits = edits.filter((e) => e.section === "Summary");
   // The summary as it was, with the wording pass's tidied text for the sentences it changed (so
   // spacing fixes don't show as changes).
@@ -2954,24 +3082,36 @@ function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
   };
 
   return (
-    <div style={styles.resumePaper} data-rq-tailor-resume data-clarity-mask="True">
+    <div ref={paperRef} style={{ ...styles.resumePaper, position: "relative", ...(live?.active ? { maxHeight: "74vh", overflowY: "auto" } : {}) }} data-rq-tailor-resume data-clarity-mask="True">
       <div style={styles.resumeHeaderRow}>
         <div style={styles.resumeHeaderText}>
-          <div style={styles.resumeNameText}>{working.name}</div>
-          <div style={styles.resumeTitleText}>{working.title}</div>
+          <div data-rq-line="h" style={{ ...liveStyle("h"), display: "flex", gap: 8, alignItems: "baseline", flexWrap: "wrap" }}>
+            <div style={{ ...styles.resumeNameText, width: "100%" }}>{working.name}</div>
+            <div style={styles.resumeTitleText}>{working.title}</div>
+            {liveTag("h")}
+          </div>
           <div style={styles.resumeContactText}>{working.contact}</div>
         </div>
       </div>
       <hr style={styles.resumeHr} />
+      {live?.active && (
+        <div aria-hidden="true" style={{ position: "sticky", top: 8, zIndex: 2, display: "flex", alignItems: "center", gap: 8, margin: "-4px 0 12px", padding: "8px 12px", borderRadius: 10, background: "color-mix(in srgb, var(--rq-accent) 12%, var(--rq-surface))", border: "1px solid color-mix(in srgb, var(--rq-accent) 30%, transparent)", fontSize: 12.5, fontWeight: 600, color: "var(--rq-text)" }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "var(--rq-danger)", animation: "rqPulse 1s ease-in-out infinite" }} />
+          LIVE · {live.label}
+        </div>
+      )}
       {working.summary && (
         <>
           <div style={styles.resumeSectionTitle}>Summary</div>
-          <ChangeableLine
-            text={working.summary}
-            before={summaryBefore}
-            style={styles.resumeBodyText}
-            onCommit={(next) => onEditLine({ section: "Summary", original: working.summary, proposed: next })}
-          />
+          <div data-rq-line="s" data-rq-edit={summaryEdits.find((e) => e.id === live?.flashId)?.id} style={{ display: "flex", gap: 8, ...liveStyle("s", summaryEdits.find((e) => e.id === live?.flashId)) }}>
+            <ChangeableLine
+              text={working.summary}
+              before={summaryBefore}
+              style={{ ...styles.resumeBodyText, flex: 1 }}
+              onCommit={(next) => onEditLine({ section: "Summary", original: working.summary, proposed: next })}
+            />
+            {liveTag("s")}
+          </div>
           {summaryEdits.length > 0 && (
             <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 12px", marginTop: 4 }}>
               {summaryEdits.map((e) => (
@@ -2987,9 +3127,9 @@ function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
       <div style={styles.resumeSectionTitle}>Experience</div>
       {(working.experience || []).map((exp, idx) => (
         <div key={idx}>
-          <div style={styles.resumeExpHeaderRow}>
+          <div data-rq-line={`r${idx}`} style={{ ...styles.resumeExpHeaderRow, ...liveStyle(`r${idx}`) }}>
             <div style={styles.resumeExpTitle}>
-              {exp.role} · {exp.company}
+              {exp.role} · {exp.company} {liveTag(`r${idx}`)}
             </div>
             <div style={styles.resumeExpPeriod}>{exp.period}</div>
           </div>
@@ -2998,13 +3138,14 @@ function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
               const edit = editFor("Experience", b);
               return (
                 <li key={i} style={{ ...styles.resumeBullet }}>
-                  <div style={{ display: "flex", gap: 6, alignItems: "flex-start" }}>
+                  <div data-rq-line={`e${idx}-${i}`} data-rq-edit={edit?.id} style={{ display: "flex", gap: 6, alignItems: "flex-start", ...liveStyle(`e${idx}-${i}`, edit) }}>
                     <ChangeableLine
                       text={b}
                       before={edit ? beforeOf(edit) : null}
                       style={{ flex: 1 }}
                       onCommit={(next) => onEditLine({ section: "Experience", experienceIndex: idx, original: b, proposed: next, edit })}
                     />
+                    {liveTag(`e${idx}-${i}`)}
                     {edit && (
                       <button type="button" style={undoButtonStyle} title={edit.type === "Addition" ? "Remove this added bullet" : `Put back: ${beforeOf(edit)}`} onClick={() => onUndo(edit.id)}>
                         Undo
@@ -3020,19 +3161,21 @@ function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
 
       <div style={styles.resumeSectionTitle}>Education</div>
       {(working.education || []).map((ed, idx) => (
-        <div key={idx} style={styles.resumeEducationRow}>
-          <strong>{ed.degree}</strong> · {ed.school} · {ed.year}
+        <div key={idx} data-rq-line={`ed${idx}`} style={{ ...styles.resumeEducationRow, ...liveStyle(`ed${idx}`) }}>
+          <strong>{ed.degree}</strong> · {ed.school} · {ed.year}{ed.grade ? ` · ${ed.grade}` : ""}{ed.location ? ` · ${ed.location}` : ""} {liveTag(`ed${idx}`)}
+          {(ed.details || []).length > 0 && <ul style={{ ...styles.resumeBullets, marginTop: 4 }}>{ed.details.map((d, i) => <li key={i} style={styles.resumeBullet}>{d}</li>)}</ul>}
         </div>
       ))}
 
       {(working.skills || []).length > 0 && (
         <>
           <div style={styles.resumeSectionTitle}>Skills</div>
-          <div style={styles.resumeSkillsWrap}>
+          <div data-rq-line="k" style={{ ...styles.resumeSkillsWrap, ...liveStyle("k") }}>
+            {liveTag("k")}
             {working.skills.map((skill, idx) => {
               const edit = editFor("Skills", skill);
               return (
-                <div key={idx} style={{ ...styles.resumeSkillChip, ...(edit ? { display: "flex", alignItems: "center", gap: 4 } : {}) }}>
+                <div key={idx} data-rq-edit={edit?.id} style={{ ...styles.resumeSkillChip, ...(edit ? { display: "flex", alignItems: "center", gap: 4 } : {}), ...(live && edit && edit.id === live.flashId ? { animation: "rqFlash 1.6s ease both" } : {}) }}>
                   {edit
                     ? <ChangeableLine as="span" text={skill} before={beforeOf(edit)} onCommit={(next) => onEditLine({ section: "Skills", original: skill, proposed: next, edit })} />
                     : skill}
@@ -3052,7 +3195,7 @@ function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
           <div style={styles.resumeSectionTitle}>Certifications</div>
           <ul style={styles.resumeBullets}>
             {working.certifications.map((c, idx) => (
-              <li key={idx} style={styles.resumeBullet}>{c}</li>
+              <li key={idx} data-rq-line={`c${idx}`} style={{ ...styles.resumeBullet, ...liveStyle(`c${idx}`) }}>{c} {liveTag(`c${idx}`)}</li>
             ))}
           </ul>
         </>
@@ -3062,11 +3205,72 @@ function TailoredResume({ base, working, edits, onUndo, onEditLine }) {
           <div style={styles.resumeSectionTitle}>Achievements</div>
           <ul style={styles.resumeBullets}>
             {working.achievements.map((a, idx) => (
-              <li key={idx} style={styles.resumeBullet}>{a}</li>
+              <li key={idx} data-rq-line={`a${idx}`} style={{ ...styles.resumeBullet, ...liveStyle(`a${idx}`) }}>{a} {liveTag(`a${idx}`)}</li>
             ))}
           </ul>
         </>
       )}
+      {/* Carried forward as they are – never changed by tailoring. */}
+      {(working.projects || []).length > 0 && (
+        <>
+          <div style={styles.resumeSectionTitle}>Projects</div>
+          {working.projects.map((pr, idx) => (
+            <div key={idx} data-rq-line={`p${idx}`} style={{ marginBottom: 8, ...liveStyle(`p${idx}`) }}>
+              <div style={styles.resumeExpHeaderRow}>
+                <div style={styles.resumeExpTitle}>{pr.name} {liveTag(`p${idx}`)}</div>
+                <div style={styles.resumeExpPeriod}>{pr.period}</div>
+              </div>
+              {(pr.bullets || []).length > 0 && <ul style={styles.resumeBullets}>{pr.bullets.map((b, i) => <li key={i} style={styles.resumeBullet}>{b}</li>)}</ul>}
+            </div>
+          ))}
+        </>
+      )}
+      {(working.volunteer || []).length > 0 && (
+        <>
+          <div style={styles.resumeSectionTitle}>Volunteering</div>
+          {working.volunteer.map((v, idx) => (
+            <div key={idx} data-rq-line={`v${idx}`} style={{ marginBottom: 8, ...liveStyle(`v${idx}`) }}>
+              <div style={styles.resumeExpHeaderRow}>
+                <div style={styles.resumeExpTitle}>{[v.role, v.organization].filter(Boolean).join(" · ")} {liveTag(`v${idx}`)}</div>
+                <div style={styles.resumeExpPeriod}>{v.period}</div>
+              </div>
+              {(v.bullets || []).length > 0 && <ul style={styles.resumeBullets}>{v.bullets.map((b, i) => <li key={i} style={styles.resumeBullet}>{b}</li>)}</ul>}
+            </div>
+          ))}
+        </>
+      )}
+      {(working.publications || []).length > 0 && (
+        <>
+          <div style={styles.resumeSectionTitle}>Publications</div>
+          <ul style={styles.resumeBullets}>
+            {working.publications.map((pb, idx) => <li key={idx} data-rq-line={`pb${idx}`} style={{ ...styles.resumeBullet, ...liveStyle(`pb${idx}`) }}>{pb} {liveTag(`pb${idx}`)}</li>)}
+          </ul>
+        </>
+      )}
+      {(working.languages || []).length > 0 && (
+        <>
+          <div style={styles.resumeSectionTitle}>Languages</div>
+          <div data-rq-line="l" style={{ ...styles.resumeBodyText, ...liveStyle("l") }}>
+            {working.languages.map((l) => (typeof l === "string" ? l : l?.language || l?.name || "")).filter(Boolean).join(" · ")} {liveTag("l")}
+          </div>
+        </>
+      )}
+      {(working.interests || []).length > 0 && (
+        <>
+          <div style={styles.resumeSectionTitle}>Interests</div>
+          <div data-rq-line="in" style={{ ...styles.resumeBodyText, ...liveStyle("in") }}>
+            {working.interests.map((i) => (typeof i === "string" ? i : i?.name || "")).filter(Boolean).join(" · ")} {liveTag("in")}
+          </div>
+        </>
+      )}
+      {(working.otherSections || []).map((o, idx) => (
+        <div key={idx}>
+          <div style={styles.resumeSectionTitle}>{o.title}</div>
+          <ul data-rq-line={`o${idx}`} style={{ ...styles.resumeBullets, ...liveStyle(`o${idx}`) }}>
+            {(o.items || []).map((it, i) => <li key={i} style={styles.resumeBullet}>{it}{i === 0 && <> {liveTag(`o${idx}`)}</>}</li>)}
+          </ul>
+        </div>
+      ))}
     </div>
   );
 }
@@ -3412,6 +3616,25 @@ export default function ResumeIQ() {
   const [openInBuilderError, setOpenInBuilderError] = useState(null);
   // Reactive Resume builder embedded in the Updated Resume step: { builderUrl, embeddable }.
   const [rxEditor, setRxEditor] = useState(null);
+  // The embedded editor reports each download/export (format and target only – see the editor's
+  // use-resume-export.ts). Only messages from the editor's own address count.
+  const editorOrigin = useMemo(() => {
+    try {
+      return rxEditor?.builderUrl ? new URL(rxEditor.builderUrl).origin : null;
+    } catch {
+      return null;
+    }
+  }, [rxEditor?.builderUrl]);
+  useEffect(() => {
+    if (!editorOrigin) return undefined;
+    const onMessage = (event) => {
+      if (event.origin !== editorOrigin || event.data?.source !== "resumeiq-editor" || event.data.type !== "export") return;
+      const format = ["pdf", "docx", "json", "markdown", "print"].includes(event.data.format) ? event.data.format : "other";
+      track("resume_exported", { format, target: event.data.target === "cover-letter" ? "cover-letter" : "resume", where: "editor" });
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [editorOrigin]);
   // Preview shows the editor as a full-window workspace; "classic" swaps back to the old view.
   const [showClassicPreview, setShowClassicPreview] = useState(false);
   const [workspaceTop, setWorkspaceTop] = useState(0);
@@ -3535,6 +3758,33 @@ export default function ResumeIQ() {
     scoreAgainstJob(job);
     rewordForJob(job);
   };
+
+  // While rewording runs, the left-hand resume is read line by line (scanIndex); once the result is
+  // in, its changes land one at a time (revealCount), then the step shows them all.
+  const [scanIndex, setScanIndex] = useState(0);
+  const rewordingNow = step === "suggestions" && generation.jobId === selectedJob?.id && generation.status === "loading";
+  useEffect(() => {
+    if (!rewordingNow) return undefined;
+    setScanIndex(0);
+    // Bring the live resume and the ticker into view (they sit below the match score).
+    const toLive = setTimeout(() => document.querySelector("[data-rq-live-area]")?.scrollIntoView({ behavior: "smooth", block: "start" }), 900);
+    const t = setInterval(() => setScanIndex((i) => i + 1), REWORD_SCAN_MS);
+    return () => {
+      clearInterval(t);
+      clearTimeout(toLive);
+    };
+  }, [rewordingNow]);
+  useEffect(() => {
+    if (generation.status !== "revealing") return undefined;
+    const t = setTimeout(() => {
+      setGeneration((g) => {
+        if (g.status !== "revealing") return g;
+        const next = g.revealCount + 1;
+        return next > g.revealIds.length ? { ...g, status: "done" } : { ...g, revealCount: next };
+      });
+    }, generation.revealCount === 0 ? 300 : REWORD_REVEAL_MS);
+    return () => clearTimeout(t);
+  }, [generation]);
 
   // "Check with another resume": once the new resume is in state, tailor the same job with it.
   useEffect(() => {
@@ -4086,7 +4336,7 @@ export default function ResumeIQ() {
   const rewordForJob = async (job) => {
     if (!job?.jd || !resume) return;
     const cacheKey = `rq-reworded-v1:${resumeHash}:${job.id}:${hashString(job.jd)}`;
-    const applyResult = (data) => {
+    const applyResult = (data, { animate = false } = {}) => {
       if (tailorJobRef.current !== job.id) return; // the user opened another job meanwhile
       const edits = (data.changes || []).map((c, i) => ({
         id: `reworded-${job.id}-${i}`,
@@ -4103,7 +4353,12 @@ export default function ResumeIQ() {
       }));
       setSuggestions((prev) => [...edits, ...prev.filter((x) => !x.reworded)]);
       setApprovedIds((prev) => new Set([...prev, ...edits.map((e) => e.id)]));
-      setGeneration({ jobId: job.id, status: "done", realGaps: data.realGaps || [], changed: edits.length });
+      // After a live run the changes land on the resume one at a time (see the reveal effect).
+      if (animate && edits.length) {
+        setGeneration((prev) => ({ jobId: job.id, status: "revealing", realGaps: data.realGaps || [], changed: edits.length, startedAt: prev.jobId === job.id ? prev.startedAt : Date.now(), revealIds: edits.map((e) => e.id), revealCount: 0 }));
+      } else {
+        setGeneration({ jobId: job.id, status: "done", realGaps: data.realGaps || [], changed: edits.length });
+      }
     };
     const cached = readCachedScore(cacheKey);
     if (cached) return applyResult(cached);
@@ -4117,7 +4372,7 @@ export default function ResumeIQ() {
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw Object.assign(new Error(data?.error || `the request failed (${response.status})`), { status: response.status });
       writeCachedScore(cacheKey, data);
-      applyResult(data);
+      applyResult(data, { animate: true });
       track("resume_reworded", { changes: (data.changes || []).length, must_have_gaps: (data.realGaps || []).filter((g) => g.mustHave).length });
     } catch (e) {
       // Failures show only on screen, so record them (status: the server's HTTP code, or "network").
@@ -4161,7 +4416,7 @@ export default function ResumeIQ() {
     const ticked = coreEdits.jobId === job.id ? coreEdits.ticked : [];
     if (!ticked.length) return;
     const working = applyApprovedChangesClientSide(resume, suggestions.filter((x) => approvedIds.has(x.id)));
-    setCoreEdits((prev) => ({ ...prev, status: "loading", error: "" }));
+    setCoreEdits((prev) => ({ ...prev, status: "loading", error: "", startedAt: Date.now() }));
     try {
       const response = await fetch(`${API_BASE.replace(/\/$/, "")}/api/draft-gap-edits`, {
         method: "POST",
@@ -4197,6 +4452,78 @@ export default function ResumeIQ() {
     } catch (e) {
       track("core_edits_failed", { status: e.status || "network" });
       if (tailorJobRef.current === job.id) setCoreEdits((prev) => ({ ...prev, status: "error", error: e.message }));
+    }
+  };
+
+  /**
+   * "Apply now" (works everywhere, no extension): opens the job's application, saves the editor's PDF to
+   * the user's resume files for this job, downloads it to attach, and records the application – then
+   * asks whether they submitted it.
+   */
+  const [applyNow, setApplyNow] = useState({ jobId: null, status: "idle" }); // saving → ready | error
+  const handleApplyNow = async () => {
+    const job = selectedJob;
+    if (!job) return;
+    const applyUrl = /^https?:\/\//i.test(job.url || "") ? job.url : null;
+    track("apply_now_clicked", { has_link: !!applyUrl, accepted_edits: approvedIds.size, source: job.source || "unknown" });
+    // Opened straight from the click, before anything is awaited, so the browser doesn't block it.
+    if (applyUrl) window.open(applyUrl, "_blank", "noopener");
+    setApplyNow({ jobId: job.id, status: "saving", opened: !!applyUrl, applyUrl });
+    try {
+      const session = supabaseClient ? (await supabaseClient.auth.getSession()).data.session : null;
+      if (!session) throw new Error("Sign in to ResumeIQ to save this resume to your account");
+      const base = API_BASE.replace(/\/$/, "");
+      const headers = { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` };
+      const post = async (path, body) => {
+        const r = await fetch(`${base}${path}`, { method: "POST", headers, body: JSON.stringify(body), signal: AbortSignal.timeout(120_000) }).catch((err) => {
+          throw new Error(err?.name === "TimeoutError" ? "it took too long – please try again" : "couldn't reach ResumeIQ – check your connection");
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(data?.error || `the request failed (${r.status})`);
+        return data;
+      };
+      // 1. The resume exactly as the editor has it, saved to the account against this job.
+      const saved = await post("/api/tailored/use", { jobId: job.id, company: job.company, title: job.role });
+      const fileId = saved.resume?.id;
+      // 2. Downloaded, to attach on the application (on phones the file usually isn't there otherwise).
+      let fileName = saved.resume?.file_name || "resume.pdf";
+      if (fileId) {
+        const r = await fetch(`${base}/api/ext/resume?id=${encodeURIComponent(fileId)}`, { headers });
+        const file = await r.json().catch(() => ({}));
+        if (r.ok && file.base64) {
+          fileName = file.fileName || fileName;
+          const bytes = Uint8Array.from(atob(file.base64), (c) => c.charCodeAt(0));
+          const url = URL.createObjectURL(new Blob([bytes], { type: file.mimeType || "application/pdf" }));
+          const a = Object.assign(document.createElement("a"), { href: url, download: fileName });
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        }
+      }
+      // 3. The application, in the user's applications.
+      const recorded = await post("/api/applications", { jobId: job.id, company: job.company, title: job.role, applyUrl, resumeFileId: fileId });
+      setApplyNow({ jobId: job.id, status: "ready", opened: !!applyUrl, applyUrl, fileName, applicationId: recorded.id });
+      track("application_opened", { has_link: !!applyUrl, source: job.source || "unknown" });
+    } catch (e) {
+      setApplyNow((prev) => ({ ...prev, jobId: job.id, status: "error", error: e.message }));
+      track("apply_now_failed", { reason: /sign in/i.test(e.message) ? "signed_out" : /editor/i.test(e.message) ? "editor" : "other" });
+    }
+  };
+  const markApplication = async (status) => {
+    const { applicationId } = applyNow;
+    setApplyNow((prev) => ({ ...prev, answer: status }));
+    track(status === "submitted" ? "application_submitted" : "application_not_yet", { source: selectedJob?.source || "unknown" });
+    try {
+      const session = supabaseClient ? (await supabaseClient.auth.getSession()).data.session : null;
+      if (!session || !applicationId) return;
+      await fetch(`${API_BASE.replace(/\/$/, "")}/api/applications/${encodeURIComponent(applicationId)}/status`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` },
+        body: JSON.stringify({ status }),
+      });
+    } catch {
+      // The answer is shown either way; a failed update only affects the tracker.
     }
   };
 
@@ -4515,6 +4842,11 @@ export default function ResumeIQ() {
 
 @keyframes rqSpin { to { transform: rotate(360deg); } }
 
+@keyframes rqFlash {
+  0% { background: color-mix(in srgb, var(--rq-info) 32%, transparent); box-shadow: 0 0 0 4px color-mix(in srgb, var(--rq-info) 18%, transparent); }
+  100% { background: transparent; box-shadow: 0 0 0 0 transparent; }
+}
+
 @keyframes rqShimmer {
   0% { background-position: 100% 0; }
   100% { background-position: -100% 0; }
@@ -4598,7 +4930,7 @@ body {
                   // From Tailor, Preview is reached the way Continue does: with your edits applied, and
                   // not while [blanks] are left.
                   if (s.id === "preview" && step === "suggestions") {
-                    const rewording = generation.jobId !== selectedJob?.id || generation.status === "loading";
+                    const rewording = generation.jobId !== selectedJob?.id || generation.status === "loading" || generation.status === "revealing";
                     if (rewording) document.querySelector("[data-rq-reword-progress]")?.scrollIntoView({ behavior: "smooth", block: "center" });
                     else if (blanksLeft) document.querySelector("[data-rq-tailor-footer]")?.scrollIntoView({ behavior: "smooth", block: "center" });
                     else handleApplyChanges();
@@ -5380,7 +5712,7 @@ body {
                   ResumeIQ rewords your resume for this role and marks every change
                   on the left. Undo any you don't want, or click a line to edit it.
                 </p>
-                {(generation.jobId !== selectedJob?.id || generation.status === "loading") && (
+                {(generation.jobId !== selectedJob?.id || generation.status === "loading" || generation.status === "revealing") && (
                   // On phones the full progress card sits below the score and resume; this strip stays in view.
                   <button
                     type="button"
@@ -5477,12 +5809,21 @@ body {
               )}
 
               {selectedJob && resume && (() => {
-                const acceptedEdits = suggestions.filter((s) => approvedIds.has(s.id));
+                const forThisJob = generation.jobId === selectedJob.id;
+                const revealing = forThisJob && generation.status === "revealing";
+                const notYet = new Set(revealing ? generation.revealIds.slice(generation.revealCount) : []);
+                const acceptedEdits = suggestions.filter((s) => approvedIds.has(s.id) && !notYet.has(s.id));
                 const workingResume = applyApprovedChangesClientSide(resume, acceptedEdits);
+                const scanTargets = rewordScanTargets(resume);
+                const live = rewordingNow
+                  ? { active: true, scanKey: scanTargets.length ? scanTargets[scanIndex % scanTargets.length].key : null, label: `ResumeIQ is reading your resume for ${selectedJob.company || "this job"}` }
+                  : revealing
+                    ? { active: true, flashId: generation.revealIds[generation.revealCount - 1], label: `Rewording for ${selectedJob.company || "this job"} – ${generation.revealCount} of ${generation.revealIds.length} changes made` }
+                    : null;
                 return (
-                  <div className="rq-two-col" style={{ ...styles.twoColumn, marginTop: 16 }}>
+                  <div className="rq-two-col" data-rq-live-area style={{ ...styles.twoColumn, marginTop: 16, scrollMarginTop: 12 }}>
                     <div style={styles.colLeft}>
-                      <TailoredResume base={resume} working={workingResume} edits={acceptedEdits} onUndo={undoEdit} onEditLine={editTailoredLine} />
+                      <TailoredResume base={resume} working={workingResume} edits={acceptedEdits} onUndo={undoEdit} onEditLine={editTailoredLine} live={live} />
                     </div>
                     <aside style={{ width: 460, maxWidth: "100%", flexShrink: 0, position: "sticky", top: 16, display: "flex", flexDirection: "column", gap: 12 }}>
                 {(() => {
@@ -5530,8 +5871,16 @@ body {
                   const card = { border: "1px solid color-mix(in srgb, var(--rq-text) 10%, transparent)", borderRadius: 14, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 8, background: "var(--rq-surface, transparent)" };
                   const note = { fontSize: 13, lineHeight: 1.55, color: "var(--rq-text)" };
                   const small = { fontSize: 12, color: "var(--rq-text-2)", lineHeight: 1.5 };
-                  if (gen.status === "loading") {
-                    return <RewordProgress job={selectedJob} startedAt={gen.startedAt} />;
+                  if (gen.status === "loading" || gen.status === "revealing") {
+                    return (
+                      <RewordProgress
+                        job={selectedJob}
+                        resume={resume}
+                        startedAt={gen.startedAt}
+                        scanIndex={scanIndex}
+                        reveal={gen.status === "revealing" ? { edits: gen.revealIds.map((id) => suggestions.find((x) => x.id === id)).filter(Boolean), count: gen.revealCount } : null}
+                      />
+                    );
                   }
                   if (gen.status === "error") {
                     return (
@@ -5587,10 +5936,11 @@ body {
                                 disabled={!core.ticked.length || core.status === "loading"}
                                 onClick={() => addTickedGaps(selectedJob)}
                               >
-                                {core.status === "loading" ? "Adding to your resume…" : `Add the ticked ones${core.ticked.length ? ` (${core.ticked.length})` : ""}`}
+                                {core.status === "loading" ? <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}><span aria-hidden="true" style={{ width: 13, height: 13, borderRadius: "50%", border: "2px solid currentColor", borderTopColor: "transparent", animation: "rqSpin .8s linear infinite", boxSizing: "border-box" }} />Adding to your resume…</span> : `Add the ticked ones${core.ticked.length ? ` (${core.ticked.length})` : ""}`}
                               </button>
                               {!showAssistant && <button type="button" style={undoButtonStyle} onClick={() => setShowAssistant(true)}>Prefer to talk it through? Open the assistant</button>}
                             </div>
+                            {core.status === "loading" && <GapProgress gaps={core.ticked} startedAt={core.startedAt} />}
                             {core.status === "error" && <div style={{ ...small, color: "var(--rq-danger)" }}>Couldn't add them ({core.error}). Try again.</div>}
                             {core.skipped.length > 0 && (
                               <ul style={{ ...styles.keyGapsList, color: "var(--rq-text-2)" }}>
@@ -5631,7 +5981,7 @@ body {
                 const blanks = blanksLeft;
                 // While the wording pass runs, Continue waits for it: most people who continued early left
                 // with their original resume and never saw what ResumeIQ changes.
-                const rewording = generation.jobId !== selectedJob?.id || generation.status === "loading";
+                const rewording = generation.jobId !== selectedJob?.id || generation.status === "loading" || generation.status === "revealing";
                 if (rewording && !blanks) {
                   return (
                     <div style={styles.suggestionsFooterRow} data-rq-tailor-footer>
@@ -5689,6 +6039,16 @@ body {
                   )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  {selectedJob && (() => {
+                    const mine = applyNow.jobId === selectedJob.id;
+                    const busy = mine && applyNow.status === "saving";
+                    return (
+                      <button type="button" data-rq-apply-now style={{ ...styles.primaryButton, ...(busy ? styles.disabledButton : {}), display: "inline-flex", alignItems: "center", gap: 8 }} disabled={busy} onClick={handleApplyNow}>
+                        {busy && <span aria-hidden="true" style={{ width: 13, height: 13, borderRadius: "50%", border: "2px solid currentColor", borderTopColor: "transparent", animation: "rqSpin .8s linear infinite", boxSizing: "border-box" }} />}
+                        {busy ? "Saving your resume…" : mine && applyNow.status === "ready" ? "Apply again ↗" : selectedJob.url ? "Apply now ↗" : "Save & download this resume"}
+                      </button>
+                    );
+                  })()}
                   {FEATURES.autoApply && selectedJob && (() => {
                     const busy = applyRun.jobId === selectedJob.id && (applyRun.status === "saving" || applyRun.status === "running");
                     const done = applyRun.jobId === selectedJob.id && applyRun.status === "submitted";
@@ -5711,7 +6071,8 @@ body {
                   )}
                   {/* Fallback for browsers that block the editor's sign-in inside a frame (e.g. Safari on iPhone). */}
                   {rxEditor?.builderUrl && (
-                    <a href={rxEditor.builderUrl} target="_blank" rel="noopener noreferrer" style={{ ...styles.ghostButton, textDecoration: "none" }}>
+                    // No rel="noopener": the editor (our own site) reports exports back to this tab.
+                    <a href={rxEditor.builderUrl} target="_blank" onClick={() => track("editor_opened_new_tab", { where: "preview_actions" })} style={{ ...styles.ghostButton, textDecoration: "none" }}>
                       Open in new tab ↗
                     </a>
                   )}
@@ -5726,6 +6087,47 @@ body {
                   </button>
                 </div>
               </div>
+              {selectedJob && applyNow.jobId === selectedJob.id && applyNow.status !== "idle" && (() => {
+                const run = applyNow;
+                const tone = run.status === "error" ? "var(--rq-danger)" : "var(--rq-accent)";
+                const Step = ({ done, children }) => (
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    <span aria-hidden="true" style={{ flex: "none", marginTop: 2, width: 15, height: 15, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 10, color: "#fff", background: done ? "var(--rq-accent)" : "transparent", border: done ? "none" : "2px solid var(--rq-accent)", borderTopColor: done ? undefined : "transparent", animation: done ? "none" : "rqSpin .8s linear infinite", boxSizing: "border-box" }}>{done ? "✓" : ""}</span>
+                    <span>{children}</span>
+                  </div>
+                );
+                const ready = run.status === "ready";
+                return (
+                  <div role="status" aria-live="polite" data-rq-apply-status style={{ borderBottom: "1px solid var(--rq-border)", padding: "12px 20px", display: "flex", flexDirection: "column", gap: 7, fontSize: 13.5, lineHeight: 1.45, color: "var(--rq-text)", background: `color-mix(in srgb, ${tone} 7%, var(--rq-bg))` }}>
+                    {run.opened && (
+                      <Step done>
+                        Opened the application{selectedJob.company ? ` at ${selectedJob.company}` : ""} in a new tab.{" "}
+                        <a href={run.applyUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--rq-accent)", fontWeight: 600 }}>Didn't open? Open it ↗</a>
+                      </Step>
+                    )}
+                    {run.status === "error" ? (
+                      <div style={{ color: "var(--rq-danger)" }}>
+                        Couldn't save your resume ({run.error}).{" "}
+                        <button type="button" style={{ ...undoButtonStyle, fontSize: 13 }} onClick={handleApplyNow}>Try again</button>
+                      </div>
+                    ) : (
+                      <>
+                        <Step done={ready}>{ready ? <>Saved to your ResumeIQ account – it's in <b>My resume files</b>, linked to this job.</> : "Saving this resume to your account…"}</Step>
+                        <Step done={ready}>{ready ? <>Downloaded <b>{run.fileName}</b> – attach it on the application.</> : "Preparing your PDF…"}</Step>
+                      </>
+                    )}
+                    {ready && !run.answer && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+                        <span style={{ fontWeight: 600 }}>Did you submit the application?</span>
+                        <button type="button" style={{ ...styles.primaryButton, padding: "6px 14px", fontSize: 13 }} onClick={() => markApplication("submitted")}>Yes, I applied</button>
+                        <button type="button" style={{ ...styles.ghostButton, padding: "6px 14px", fontSize: 13 }} onClick={() => markApplication("not_yet")}>Not yet</button>
+                      </div>
+                    )}
+                    {run.answer === "submitted" && <div style={{ fontWeight: 600, color: "var(--rq-accent)" }}>Marked as applied ✓ Good luck – pick another job to tailor for next.</div>}
+                    {run.answer === "not_yet" && <div style={{ color: "var(--rq-text-2)" }}>No problem – your resume for this job is saved in your account for when you're ready.</div>}
+                  </div>
+                );
+              })()}
               {selectedJob && applyRun.jobId === selectedJob.id && applyRun.status !== "idle" && (() => {
                 const run = applyRun;
                 const tone = run.status === "submitted" ? "var(--rq-accent)" : run.status === "needs_review" || run.status === "unsupported" ? "var(--rq-warn)" : run.status === "failed" || run.status === "no_extension" || run.status === "signin" ? "var(--rq-danger)" : "var(--rq-text-2)";
@@ -5853,7 +6255,7 @@ body {
                 <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 12 }}>
                   <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                     {rxEditor && (
-                      <a href={rxEditor.builderUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--rq-info)", fontSize: 12 }}>
+                      <a href={rxEditor.builderUrl} target="_blank" onClick={() => track("editor_opened_new_tab", { where: "editor_header" })} style={{ color: "var(--rq-info)", fontSize: 12 }}>
                         Open in new tab ↗
                       </a>
                     )}
@@ -6122,6 +6524,7 @@ body {
                   }}
                   onClick={async () => {
                     track("classic_pdf_downloaded");
+                    track("resume_exported", { format: "pdf", target: "resume", where: "classic" });
                     const data = updatedResume || resume;
                     const photoUrl = data?.photoUrl || null;
                     let photoDataUrl = photoUrl && photoUrl.startsWith("data:") ? photoUrl : null;

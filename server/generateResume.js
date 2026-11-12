@@ -15,8 +15,8 @@ const MAX_JD_CHARS = 8000;
 const MAX_EDITS = 8;
 // One pass with no conversation to fill gaps, so this step uses the stronger model (slower: ~50s).
 const PROVIDER = "anthropic";
-// Rewording runs while the user waits: "low" effort answered in about half the time of "medium"
-// (14s vs 29s on the sample resume) with the same kind of edits.
+// Rewording and gap drafting run while the user waits: "low" effort answers in about half the time
+// of "medium" with the same kind of edits (rewording 14s vs 29s; 5 ticked gaps 7s vs 17s).
 const REWORD_EFFORT = "low";
 
 const GENERATE_PROMPT = `You tailor one candidate's resume to one job in a single pass. The candidate reviews the result afterwards.
@@ -329,7 +329,7 @@ Return ONLY the JSON object.`;
     };
   };
   const context = { resume, jd, candidateText: ticked.join("\n"), decisions: [], allowJdClaims: true };
-  let reply = parseDrafts(await callLLM({ system: GAP_DRAFT_PROMPT, user, maxTokens: 3000, json: true, provider: PROVIDER }));
+  let reply = parseDrafts(await callLLM({ system: GAP_DRAFT_PROMPT, user, maxTokens: 3000, json: true, provider: PROVIDER, effort: REWORD_EFFORT }));
   let checked = reply.edits.map((edit) => ({ edit, problems: gapDraftProblems(edit, context) }));
   if (checked.some((c) => c.problems.length)) {
     const feedback = checked
@@ -342,6 +342,7 @@ Return ONLY the JSON object.`;
         maxTokens: 3000,
         json: true,
         provider: PROVIDER,
+        effort: REWORD_EFFORT,
       }));
       checked = reply.edits.map((edit) => ({ edit, problems: gapDraftProblems(edit, context) }));
     } catch (e) {

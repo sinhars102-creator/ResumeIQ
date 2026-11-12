@@ -139,12 +139,21 @@ export function formatResume(resume) {
     `SUMMARY:\n${resume.summary || "(none)"}`,
     "EXPERIENCE:",
     ...(resume.experience || []).map((exp, i) =>
-      [`[experienceIndex ${i}] ${exp.role || ""} — ${exp.company || ""} (${exp.period || ""})`, ...(exp.bullets || []).map((b) => `  • ${b}`)].join("\n")
+      [`[experienceIndex ${i}] ${exp.role || ""} — ${exp.company || ""}${exp.location ? `, ${exp.location}` : ""} (${exp.period || ""})`, ...(exp.bullets || []).map((b) => `  • ${b}`)].join("\n")
     ),
     `SKILLS: ${(resume.skills || []).join(" | ")}`,
-    `EDUCATION: ${(resume.education || []).map((e) => `${e.degree}, ${e.school} ${e.year || ""}`).join("; ")}`,
+    // Read-only context: used to judge fit, never edited (only Summary, Experience bullets and Skills change).
+    "READ-ONLY – use for context, never edit:",
+    `CONTACT AND LOCATION: ${resume.contact || "(none)"}`,
+    `EDUCATION: ${(resume.education || []).map((e) => [`${e.degree || ""}, ${e.school || ""} ${e.year || ""}`.trim(), e.grade && `grade ${e.grade}`, e.location, ...(e.details || [])].filter(Boolean).join(" – ")).join("; ") || "(none listed)"}`,
     `CERTIFICATIONS: ${(resume.certifications || []).join(" | ") || "(none listed)"}`,
     `ACHIEVEMENTS: ${(resume.achievements || []).join(" | ") || "(none listed)"}`,
+    ...((resume.projects || []).length ? [`PROJECTS: ${resume.projects.map((p) => [p.name, p.period, ...(p.bullets || [])].filter(Boolean).join(" – ")).join(" | ")}`] : []),
+    ...((resume.volunteer || []).length ? [`VOLUNTEERING: ${resume.volunteer.map((v) => [v.role, v.organization, v.period, ...(v.bullets || [])].filter(Boolean).join(" – ")).join(" | ")}`] : []),
+    ...((resume.publications || []).length ? [`PUBLICATIONS: ${resume.publications.join(" | ")}`] : []),
+    ...((resume.languages || []).length ? [`LANGUAGES: ${resume.languages.map((l) => (typeof l === "string" ? l : l?.language || l?.name || "")).filter(Boolean).join(", ")}`] : []),
+    ...((resume.interests || []).length ? [`INTERESTS: ${resume.interests.map((i) => (typeof i === "string" ? i : i?.name || "")).filter(Boolean).join(", ")}`] : []),
+    ...(resume.otherSections || []).map((o) => `${String(o.title || "OTHER").toUpperCase()}: ${(o.items || []).join(" | ")}`),
   ];
   return parts.join("\n");
 }

@@ -348,6 +348,14 @@ export async function recordApplication(row) {
   return data.id;
 }
 
+/** Set the status of one of this user's applications ("submitted", "not_yet"); false if it isn't theirs. */
+export async function setApplicationStatus(userId, id, status) {
+  const patch = { status, updated_at: new Date().toISOString(), ...(status === "submitted" ? { submitted_at: new Date().toISOString() } : {}) };
+  const { data, error } = await db().from("applications").update(patch).eq("id", id).eq("user_id", userId).select("id");
+  if (error) throw new Error(`updating the application failed: ${error.message}`);
+  return (data || []).length > 0;
+}
+
 export async function updateApplication(id, patch) {
   const { error } = await db().from("applications").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", id);
   if (error) console.warn(`[easy-apply] could not update application ${id}: ${error.message}`);
