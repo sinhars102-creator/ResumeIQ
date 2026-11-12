@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ResumeIQ – Save jobs & autofill applications",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Save jobs from any page to ResumeIQ, see how well you fit, and autofill applications for you to review and submit.",
   "permissions": ["storage", "sidePanel", "scripting", "tabs"],
   "host_permissions": ["<all_urls>"],

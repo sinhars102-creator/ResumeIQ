@@ -74,10 +74,11 @@ function showMatch(m) {
   $("scoreLabel").textContent = tier[0];
   $("scoreSummary").textContent = m.summary || "";
   $("gaps").replaceChildren(...(m.gaps.length ? m.gaps : ["Nothing major"]).map((g) => Object.assign(document.createElement("li"), { textContent: g })));
-  $("matched").replaceChildren(...m.matched.map((g) => Object.assign(document.createElement("li"), { textContent: g })));
+  $("matched").replaceChildren(...(m.matched || []).map((g) => Object.assign(document.createElement("li"), { textContent: g })));
+  $("matchedHead").hidden = !(m.matched || []).length; // no empty "Where you fit" heading
 }
 
-async function readJob() {
+async function readJob({ fresh = false } = {}) {
   readSeq += 1;
   $("matchCard").hidden = true;
   currentMatch = null;
@@ -100,7 +101,10 @@ async function readJob() {
     $("jobSummary").textContent = [job?.title, job?.company].filter(Boolean).join(" · ") || "Job details";
     if (!job?.title) status($("jobStatus"), "No job found on this page – fill in the details to save it anyway.");
     // Enough of a description to judge fit: score it straight away.
-    else if ((job.description || "").length >= 150) runMatch(job);
+    else if ((job.description || "").length >= 150) {
+      const scoring = runMatch(job, { force: fresh });
+      if (fresh) await scoring; // Re-read waits for the new score; opening the panel doesn't
+    }
   } catch (err) {
     status($("jobStatus"), `Can't read this page (${err.message})`, "err");
   }
@@ -789,9 +793,21 @@ $("jobSummary").addEventListener("click", () => {
   $("jobSummary").setAttribute("aria-expanded", String(open));
 });
 
+// Re-read: the page's details and a fresh score (not the saved one – the resume may have changed),
+// with a visible "working" state so the click is never silent.
 $("rescan").addEventListener("click", async () => {
-  await layoutForPage();
-  await readJob();
+  const button = $("rescan");
+  if (button.disabled) return;
+  button.disabled = true;
+  button.textContent = "Re-reading…";
+  try {
+    await layoutForPage();
+    await readJob({ fresh: true });
+    if ($("title").value) status($("jobStatus"), "Page re-read – details and fit are up to date.", "ok");
+  } finally {
+    button.disabled = false;
+    button.textContent = "Re-read page";
+  }
 });
 $("rematch").addEventListener("click", () =>
   runMatch({ url: $("jobForm").dataset.url, title: $("title").value, company: $("company").value, description: $("description").value }, { force: true }));
