@@ -1322,6 +1322,39 @@ const styles = {
   },
 };
 
+/**
+ * Before signing in, the parsed resume is kept in this browser only (never sent to our database), so a
+ * refresh or a return visit opens the job board again. Signing in moves it to the account and clears it.
+ */
+const GUEST_RESUME_KEY = "rq-guest-resume";
+const GUEST_RESUME_DAYS = 14;
+function saveGuestResume(resume) {
+  try {
+    // The photo (a data URL) can be large; the account copy keeps it, the browser copy doesn't need it.
+    const copy = { ...resume };
+    delete copy.photoUrl;
+    localStorage.setItem(GUEST_RESUME_KEY, JSON.stringify({ resume: copy, savedAt: Date.now() }));
+  } catch {
+    // Storage full or blocked (private mode) – the resume just won't survive a refresh.
+  }
+}
+function readGuestResume() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(GUEST_RESUME_KEY) || "null");
+    if (!saved?.resume || Date.now() - saved.savedAt > GUEST_RESUME_DAYS * 864e5) return null;
+    return saved.resume;
+  } catch {
+    return null;
+  }
+}
+function clearGuestResume() {
+  try {
+    localStorage.removeItem(GUEST_RESUME_KEY);
+  } catch {
+    // Nothing to clear.
+  }
+}
+
 function getStepOrder(step) {
   switch (step) {
     case "account":
@@ -2180,6 +2213,82 @@ let assistantEditSeq = 0;
  * for missing facts, and proposes one checked edit at a time (server/assistant.js).
  * Chat state lives in the parent so it survives moving to the preview and back.
  */
+/** What the rewording pass is doing, shown step by step while the user waits (timings are typical, not tracked). */
+const REWORD_STAGES = [
+  { at: 0, label: "Reading the job description" },
+  { at: 3, label: "Picking out what this job asks for" },
+  { at: 7, label: "Matching it to your experience" },
+  { at: 11, label: "Rewording your lines in the job's language" },
+  { at: 18, label: "Checking nothing was made up" },
+];
+const REWORD_TYPICAL_S = 20;
+
+/** The Tailor step's "working on it" card: a progress bar, the stage it's on, and the lines being rewritten. */
+function RewordProgress({ job, startedAt }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 400);
+    return () => clearInterval(t);
+  }, []);
+  const elapsed = Math.max(0, (now - (startedAt || now)) / 1000);
+  // Eases toward 95% so the bar keeps moving when the AI takes longer than usual, and never claims done.
+  const pct = Math.max(4, Math.round(95 * (1 - Math.exp(-elapsed / (REWORD_TYPICAL_S / 2.3)))));
+  const current = REWORD_STAGES.reduce((at, stage, i) => (elapsed >= stage.at ? i : at), 0);
+  const accent = "var(--rq-accent)";
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      data-rq-reword-progress
+      style={{
+        border: `1px solid color-mix(in srgb, ${accent} 35%, transparent)`,
+        borderRadius: 16,
+        padding: "16px 18px",
+        background: `linear-gradient(135deg, color-mix(in srgb, ${accent} 10%, var(--rq-surface)), var(--rq-surface))`,
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        animation: "fadeUp .35s ease both",
+      }}
+    >
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+        <span aria-hidden="true" style={{ flex: "none", width: 34, height: 34, borderRadius: 10, display: "grid", placeItems: "center", background: accent, color: "#fff", animation: "rqPulse 1.6s ease-in-out infinite" }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l1.9 5.6L19.5 9.5l-5.6 1.9L12 17l-1.9-5.6L4.5 9.5l5.6-1.9zM19 14l.9 2.6 2.6.9-2.6.9L19 21l-.9-2.6-2.6-.9 2.6-.9z" /></svg>
+        </span>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontWeight: 650, fontSize: 15, color: "var(--rq-text)", lineHeight: 1.35 }}>
+            Tailoring your resume for {job?.role || "this job"}{job?.company ? ` at ${job.company}` : ""}
+          </div>
+          <div style={{ fontSize: 12.5, color: "var(--rq-text-2)", marginTop: 3 }}>
+            {elapsed < 35 ? `Usually about ${REWORD_TYPICAL_S} seconds – your new lines will appear right here.` : "Taking a little longer than usual – almost there."}
+          </div>
+        </div>
+      </div>
+      <div style={{ height: 6, borderRadius: 99, background: `color-mix(in srgb, ${accent} 15%, transparent)`, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${pct}%`, borderRadius: 99, background: accent, transition: "width .4s ease" }} />
+      </div>
+      <ol style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 7 }}>
+        {REWORD_STAGES.map((stage, i) => {
+          const state = i < current ? "done" : i === current ? "now" : "next";
+          return (
+            <li key={stage.label} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, color: state === "next" ? "var(--rq-text-3)" : "var(--rq-text)", fontWeight: state === "now" ? 600 : 400 }}>
+              <span aria-hidden="true" style={{ flex: "none", width: 18, height: 18, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 11, color: "#fff", background: state === "done" ? accent : "transparent", border: state === "done" ? "none" : `2px solid ${state === "now" ? accent : "var(--rq-border-strong)"}`, borderTopColor: state === "now" ? "transparent" : undefined, animation: state === "now" ? "rqSpin .8s linear infinite" : "none", boxSizing: "border-box" }}>
+                {state === "done" ? "✓" : ""}
+              </span>
+              {stage.label}
+            </li>
+          );
+        })}
+      </ol>
+      <div aria-hidden="true" style={{ display: "flex", flexDirection: "column", gap: 7, paddingTop: 2 }}>
+        {[92, 78, 85].map((w, i) => (
+          <div key={i} style={{ height: 9, width: `${w}%`, borderRadius: 6, background: `linear-gradient(90deg, color-mix(in srgb, var(--rq-text) 7%, transparent) 25%, color-mix(in srgb, ${accent} 22%, transparent) 50%, color-mix(in srgb, var(--rq-text) 7%, transparent) 75%)`, backgroundSize: "200% 100%", animation: `rqShimmer 1.4s ease-in-out ${i * 0.15}s infinite` }} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function TailoringAssistant({ job, resume, chat, setChat, onAccept, onContinue, continueLabel }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -3167,6 +3276,7 @@ export default function ResumeIQ() {
   const [step, setStep] = useState(() => (onboarding ? "account" : "upload"));
   // Signed out after uploading: the account step comes between reading the resume and the job board.
   const [accountAfterUpload, setAccountAfterUpload] = useState(false);
+  const [signInForJob, setSignInForJob] = useState(null); // the job picked before signing in (its Tailor step opens after)
   // The uploaded file, kept with the account once signed in (see storeResumeFile).
   const uploadedFileRef = useRef(null);
   const keepUploadedFile = () => {
@@ -3398,7 +3508,17 @@ export default function ResumeIQ() {
 
   const handleJobAnalyzeClick = (job) => {
     setSelectedJob(job);
-    setStep("suggestions");
+    // Signed out: ask for the account now, once they've picked a job. Scoring and rewording start
+    // below anyway, so the tailored resume is usually ready by the time they've signed in.
+    const needsAccount = !!supabaseClient && !signedIn;
+    if (needsAccount) {
+      setSignInForJob(job);
+      setAccountAfterUpload(true);
+      setStep("account");
+      track("signin_wall_shown", { at: "job_click", source: job.source || "unknown" });
+    } else {
+      setStep("suggestions");
+    }
     setScore(null);
     setScoreBreakdown(null);
     setSuggestions([]);
@@ -3736,11 +3856,17 @@ export default function ResumeIQ() {
       try {
         const session = (await supabaseClient.auth.getSession()).data.session;
         const profile = session ? await loadProfile(session.user.id).catch(() => null) : null;
+        const guest = profile?.resume ? null : readGuestResume();
         if (profile?.resume && !resume) {
           setResume(profile.resume);
           setStep("select");
           startJobSearch(profile.resume);
           track("returning_user_job_board");
+        } else if (guest && !resume) {
+          setResume(guest);
+          setStep("select");
+          startJobSearch(guest);
+          track("returning_user_job_board", { guest: true });
         }
       } finally {
         setRestoringAccount(false);
@@ -3805,17 +3931,15 @@ export default function ResumeIQ() {
       if (session) {
         saveResumeToAccount(extracted);
         keepUploadedFile();
+      } else {
+        saveGuestResume(extracted);
       }
 
       // Move to the job grid now instead of blocking on the LinkedIn search —
       // that's a live Apify scrape (server/index.js) that can take 30–180s.
       // Fetch it in the background and stream results into the grid once ready.
-      if (session || !supabaseClient) setStep("select");
-      else {
-        setAccountAfterUpload(true);
-        setStep("account");
-        track("account_step_after_upload");
-      }
+      // Signed out too: the job board opens straight away – the account is asked for once they pick a job.
+      setStep("select");
       setParsingStatus((s) => ({ ...s, findJobs: true }));
       startJobSearch(extracted);
     } catch (err) {
@@ -3949,7 +4073,7 @@ export default function ResumeIQ() {
     };
     const cached = readCachedScore(cacheKey);
     if (cached) return applyResult(cached);
-    setGeneration({ jobId: job.id, status: "loading", realGaps: [] });
+    setGeneration({ jobId: job.id, status: "loading", realGaps: [], startedAt: Date.now() });
     try {
       const response = await fetch(`${API_BASE.replace(/\/$/, "")}/api/generate-resume`, {
         method: "POST",
@@ -4212,7 +4336,7 @@ export default function ResumeIQ() {
     };
   }, [editorWorkspace]);
 
-  const currentStepOrder = step === "account" && accountAfterUpload ? getStepOrder("parsing") : getStepOrder(step);
+  const currentStepOrder = step === "account" && accountAfterUpload ? getStepOrder(signInForJob ? "suggestions" : "parsing") : getStepOrder(step);
 
   const renderScoreCircle = () => {
     const value = typeof score === "number" ? score : 0;
@@ -4355,6 +4479,13 @@ export default function ResumeIQ() {
   100% { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes rqSpin { to { transform: rotate(360deg); } }
+
+@keyframes rqShimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
 body {
   background: var(--rq-bg);
   color: var(--rq-text);
@@ -4433,7 +4564,9 @@ body {
                   // From Tailor, Preview is reached the way Continue does: with your edits applied, and
                   // not while [blanks] are left.
                   if (s.id === "preview" && step === "suggestions") {
-                    if (blanksLeft) document.querySelector("[data-rq-tailor-footer]")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    const rewording = generation.jobId !== selectedJob?.id || generation.status === "loading";
+                    if (rewording) document.querySelector("[data-rq-reword-progress]")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    else if (blanksLeft) document.querySelector("[data-rq-tailor-footer]")?.scrollIntoView({ behavior: "smooth", block: "center" });
                     else handleApplyChanges();
                     return;
                   }
@@ -4472,6 +4605,14 @@ body {
             <AccountStep
               homeHref={accountAfterUpload ? null : HOME_URL}
               afterUpload={accountAfterUpload}
+              job={signInForJob}
+              initialEmail={resume && resume !== SAMPLE_RESUME ? (String(resume.contact || "").match(/[^\s@·|,;<>()]+@[^\s@·|,;<>()]+\.[a-z]{2,}/i) || [""])[0] : ""}
+              onBack={signInForJob ? () => {
+                track("signin_wall_back", { at: "job_click" });
+                setSignInForJob(null);
+                setAccountAfterUpload(false);
+                setStep("select");
+              } : null}
               onDone={(session) => {
                 if (!accountAfterUpload) {
                   // Signing in (e.g. "Sign in" on the home page): a saved resume opens the job board.
@@ -4482,10 +4623,13 @@ body {
                     startJobSearch(profile.resume);
                   });
                 }
-                saveResumeToAccount(resume);
+                // The sample resume is a demo – it isn't saved as theirs.
+                if (resume && resume !== SAMPLE_RESUME) saveResumeToAccount(resume);
                 keepUploadedFile();
+                clearGuestResume();
                 setAccountAfterUpload(false);
-                setStep("select");
+                setStep(signInForJob ? "suggestions" : "select");
+                setSignInForJob(null);
               }}
             />
           )}
@@ -5174,6 +5318,18 @@ body {
                   ResumeIQ rewords your resume for this role and marks every change
                   on the left. Undo any you don't want, or click a line to edit it.
                 </p>
+                {(generation.jobId !== selectedJob?.id || generation.status === "loading") && (
+                  // On phones the full progress card sits below the score and resume; this strip stays in view.
+                  <button
+                    type="button"
+                    onClick={() => document.querySelector("[data-rq-reword-progress]")?.scrollIntoView({ behavior: "smooth", block: "center" })}
+                    style={{ marginTop: 12, display: "inline-flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 999, border: "1px solid color-mix(in srgb, var(--rq-accent) 40%, transparent)", background: "color-mix(in srgb, var(--rq-accent) 10%, transparent)", color: "var(--rq-text)", fontSize: 13, fontWeight: 600, fontFamily: "inherit", cursor: "pointer", animation: "fadeUp .3s ease both" }}
+                  >
+                    <span aria-hidden="true" style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid var(--rq-accent)", borderTopColor: "transparent", animation: "rqSpin .8s linear infinite", boxSizing: "border-box" }} />
+                    Tailoring your resume for this job…
+                    <span style={{ color: "var(--rq-accent)" }}>See progress ↓</span>
+                  </button>
+                )}
               </div>
 
               {loading && score == null && !scoreBreakdown && (
@@ -5313,7 +5469,7 @@ body {
                   const note = { fontSize: 13, lineHeight: 1.55, color: "var(--rq-text)" };
                   const small = { fontSize: 12, color: "var(--rq-text-2)", lineHeight: 1.5 };
                   if (gen.status === "loading") {
-                    return <div style={card}><span style={styles.monoStatus}>Rewording your resume for this job – this can take up to a minute…</span></div>;
+                    return <RewordProgress job={selectedJob} startedAt={gen.startedAt} />;
                   }
                   if (gen.status === "error") {
                     return (
@@ -5411,6 +5567,25 @@ body {
 
               {(() => {
                 const blanks = blanksLeft;
+                // While the wording pass runs, Continue waits for it: most people who continued early left
+                // with their original resume and never saw what ResumeIQ changes.
+                const rewording = generation.jobId !== selectedJob?.id || generation.status === "loading";
+                if (rewording && !blanks) {
+                  return (
+                    <div style={styles.suggestionsFooterRow} data-rq-tailor-footer>
+                      <div>
+                        Your tailored lines are on the way.{" "}
+                        <button type="button" style={{ ...undoButtonStyle, color: "var(--rq-text-2)" }} onClick={() => { track("continue_before_reword"); handleApplyChanges(); }}>
+                          Skip – use my original resume
+                        </button>
+                      </div>
+                      <button type="button" disabled style={{ ...styles.primaryButton, ...styles.disabledButton, display: "inline-flex", alignItems: "center", gap: 8, whiteSpace: "nowrap" }}>
+                        <span aria-hidden="true" style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid currentColor", borderTopColor: "transparent", animation: "rqSpin .8s linear infinite", boxSizing: "border-box" }} />
+                        Tailoring…
+                      </button>
+                    </div>
+                  );
+                }
                 return (
               <div style={styles.suggestionsFooterRow} data-rq-tailor-footer>
                 <div>

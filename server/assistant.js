@@ -37,7 +37,7 @@ const SYSTEM_PROMPT = `You are a resume tailoring assistant inside ResumeIQ. You
 How you work:
 - Be objective and specific. Every claim you make about fit cites concrete evidence: a JD requirement (quote its key words) and the resume line that does or doesn't meet it.
 - Work one gap at a time, highest impact first. Propose at most ${MAX_EDITS_PER_TURN} edits per turn; usually 1.
-- If the best edit needs a fact the resume doesn't contain (a number, scale, tool, outcome), ASK for it instead of guessing. Ask one precise question for the single most valuable fact – at most 2 questions per gap. After that, draft the edit with the facts you have and put anything still missing in [square-bracket placeholders] for the candidate to fill in.
+- If the best edit needs a fact the resume doesn't contain (a number, scale, tool, outcome), ASK for it instead of guessing. Ask one precise question for the single most valuable fact – at most 2 questions per gap. After that, draft the edit with the facts you have, worded so it reads complete without the missing detail – never use [square-bracket placeholders].
 - Separate gaps wording can fix (the experience is there but undersold or uses different terms) from real gaps (years, certifications, domains the candidate lacks). Say plainly that real gaps can't be closed by rewording; don't try to paper over them.
 - Talk to the candidate directly ("you", "your"). Keep your message under 90 words. No pleasantries, no restating the resume back.
 - End every message with exactly one clear question or next step.
@@ -47,7 +47,7 @@ Hard rules for every edit:
 1. "original" must be copied EXACTLY from the resume: the whole summary or one full sentence of it, one bullet, or for Skills one existing skill. For an Addition, original is "".
 2. Never upgrade the candidate's role: don't turn "implemented", "developed" or "worked on" into "led", "owned", "architected" or "end-to-end" unless the candidate confirms it in this conversation. Ask instead.
 3. Keep every specific in the original: tools, versions (e.g. "8.x"), product names, certifications, clients, numbers. You may reorder and sharpen, never generalise.
-4. Never invent facts. Numbers in "proposed" must come from the resume or from the candidate's messages. If a number would help but you don't have it, use a placeholder like [X users] and ask for it.
+4. Never invent facts. Numbers in "proposed" must come from the resume or from the candidate's messages. If a number would help but you don't have it, ask for it, or write the line without it – never a [placeholder].
 5. No filler: never use phrases like "results-driven", "track record", "proven ability", "passionate", "dynamic", "team player", "self-starter".
 6. Mirror the JD's exact terminology only where the resume genuinely supports it.
 7. A Skills Addition must be a single skill the resume or the candidate's messages already show evidence of.
@@ -217,11 +217,14 @@ export function checkEdit(edit, context) {
     const filler = BANNED_PHRASES.filter((p) => lowerProposed.includes(p) && !lowerOriginal.includes(p));
     if (filler.length) problems.push(`uses generic filler: ${filler.map((f) => `"${f}"`).join(", ")}`);
 
+    // Every edit is a finished line: no [blanks] for the candidate to fill in.
+    if (/\[[^\]]*\]/.test(proposed)) problems.push("uses a [placeholder] – write the finished line from what the resume and the candidate say, leaving out any detail you don't have");
+
     // No invented numbers: every number must already be in the resume or in what the candidate said.
     const known = new Set([...numbersIn(resumeAsText(resume)), ...numbersIn(candidateText)]);
     const withoutPlaceholders = proposed.replace(/\[[^\]]*\]/g, "");
     const invented = numbersIn(withoutPlaceholders).filter((n) => !known.has(n));
-    if (invented.length) problems.push(`introduces numbers not in the resume or the candidate's messages: ${invented.join(", ")} (use a [placeholder] and ask)`);
+    if (invented.length) problems.push(`introduces numbers not in the resume or the candidate's messages: ${invented.join(", ")} (leave it out, or ask)`);
   }
 
   // allowJdClaims: the candidate ticked this requirement as something they have (generateResume's
@@ -384,7 +387,7 @@ ${opening
     : opening
       ? "Start the conversation: in 2–3 sentences give an objective fit diagnosis naming the top 2–3 gaps (JD requirement vs resume evidence), marking which are real gaps vs wording gaps. Then propose the single highest-impact edit for a wording gap that the resume already supports. Only if no edit is possible without a missing fact, ask one precise question for it instead."
       : "Reply to the candidate's latest message and continue with the next most important gap."}
-${mustDraft ? `QUESTION LIMIT REACHED for the current gap: you have already asked ${questionsOnGap} questions. Do NOT ask another question. Propose the edit now as a draft built from the resume and the candidate's answers; put every missing fact in a [square-bracket placeholder] (e.g. [X%], [number of tickets], [tool name]). In the message, say briefly that they can fill in the brackets.
+${mustDraft ? `QUESTION LIMIT REACHED for the current gap: you have already asked ${questionsOnGap} questions. Do NOT ask another question. Propose the edit now, built from the resume and the candidate's answers, worded so it reads complete without any fact you don't have – no [square-bracket placeholders]. In the message, say briefly that they can edit the line to add specifics.
 ` : ""}Return ONLY the JSON object.`;
 
   let reply = parseReply(await callLLM({ system: SYSTEM_PROMPT, user, maxTokens: 1500, json: true }));
@@ -418,7 +421,7 @@ ${mustDraft ? `QUESTION LIMIT REACHED for the current gap: you have already aske
       reply = parseReply(
         await callLLM({
           system: SYSTEM_PROMPT,
-          user: `${user}\n\nYour reply asked another question but the limit is reached. Return the full JSON object again with exactly one edit for the current gap: a draft from the resume and the candidate's answers, with [placeholders] for anything missing. No question.`,
+          user: `${user}\n\nYour reply asked another question but the limit is reached. Return the full JSON object again with exactly one edit for the current gap: a finished line from the resume and the candidate's answers, leaving out anything missing – no [placeholders]. No question.`,
           maxTokens: 1500,
           json: true,
         })

@@ -15,6 +15,9 @@ const MAX_JD_CHARS = 8000;
 const MAX_EDITS = 8;
 // One pass with no conversation to fill gaps, so this step uses the stronger model (slower: ~50s).
 const PROVIDER = "anthropic";
+// Rewording runs while the user waits: "low" effort answered in about half the time of "medium"
+// (14s vs 29s on the sample resume) with the same kind of edits.
+const REWORD_EFFORT = "low";
 
 const GENERATE_PROMPT = `You tailor one candidate's resume to one job in a single pass. The candidate reviews the result afterwards.
 Change wording only. The candidate can't answer questions now, so use only facts already in the resume.
@@ -106,7 +109,6 @@ function problemsWith(edit, context) {
   // Models like non-breaking hyphens ("Day‑7"); the resume has plain ones, and checks compare text.
   edit.proposed = String(edit.proposed || "").replace(/[\u2010\u2011]/g, "-");
   const problems = checkEdit(edit, context);
-  if (/\[[^\]]*\]/.test(String(edit.proposed || ""))) problems.push("uses a [placeholder] – use only facts in the resume, or skip this edit");
   if (edit.type === "Rewrite" && words(edit.original) === words(edit.proposed)) problems.push("only changes spacing or punctuation – make a change that targets the job, or skip this edit");
   const added = (edit.type === "Rewrite" ? addedRuns(edit.original, edit.proposed) : [edit.proposed]).join(" … ").toLowerCase();
   const original = String(edit.original || "").toLowerCase();
@@ -219,7 +221,7 @@ CANDIDATE RESUME:
 ${formatResume(resume)}
 
 Return ONLY the JSON object.`;
-  let reply = parse(await callLLM({ system: GENERATE_PROMPT, user, maxTokens: 3000, json: true, provider: PROVIDER }));
+  let reply = parse(await callLLM({ system: GENERATE_PROMPT, user, maxTokens: 3000, json: true, provider: PROVIDER, effort: REWORD_EFFORT }));
   const context = { resume, jd, candidateText: "", decisions: [] };
   let checked = reply.edits.map((edit) => ({ edit, problems: problemsWith(edit, context) }));
 
@@ -235,6 +237,7 @@ Return ONLY the JSON object.`;
         maxTokens: 3000,
         json: true,
         provider: PROVIDER,
+        effort: REWORD_EFFORT,
       }));
       reply = { edits: repaired.edits, realGaps: repaired.realGaps.length ? repaired.realGaps : reply.realGaps };
       checked = reply.edits.map((edit) => ({ edit, problems: problemsWith(edit, context) }));
@@ -268,12 +271,14 @@ const GAP_DRAFT_PROMPT = `The candidate ticked requirements from a job ("gaps") 
 For each ticked gap write ONE edit:
 - Prefer rewriting the existing bullet (or summary sentence) of the role where it most plausibly happened; else add one bullet to that role. For a tool or skill on its own, a Skills Addition.
 - The gap itself may be stated as fact (the candidate ticked it). Everything else must come from the resume.
-- Any detail the resume doesn't give – which tool, how many, what result, which product – goes in a [square-bracket blank] that says what to fill in, e.g. "[number of A/B tests]", "[SQL or analytics tool]", "[result]". Use blanks rather than guessing; one to three per edit.
+- Write a finished line the candidate can use as is – NO [square-bracket blanks] or placeholders, ever.
+- Make it fit their profile: tie the gap to the real context of that role – its company, products, users, tools, teams and outcomes as the resume states them (e.g. "Built SQL dashboards to track the onboarding funnel for the Android app", using the app and funnel the resume mentions).
+- Where the resume doesn't give a detail (a number, a partner's name, a tool, a result), leave it out and word the line so it reads complete without it. Never make one up.
 
 Hard rules:
 1. "original" must be copied EXACTLY from the resume: the whole summary or one full sentence of it, one bullet, or "" for an Addition.
 2. Keep every specific in the original: tools, numbers, names. Never drop them.
-3. No numbers outside blanks unless the resume already has them.
+3. No numbers, company names, tools or results that aren't already in the resume (the ticked gap itself excepted).
 4. Never upgrade the candidate's role ("worked on" → "led").
 5. No filler ("results-driven", "track record", "passionate", "dynamic").
 6. One edit per gap, and never two edits on the same line. No Summary Additions.
@@ -282,7 +287,7 @@ Respond with ONLY a JSON object:
 {
   "edits": [
     { "gap": <index of the ticked gap>, "section": "Summary" | "Experience" | "Skills", "type": "Rewrite" | "Addition",
-      "experienceIndex": number (Experience only), "original": "exact text or \\"\\"", "proposed": "new text with [blanks]", "why": "one sentence" }
+      "experienceIndex": number (Experience only), "original": "exact text or \\"\\"", "proposed": "the finished new text", "why": "one sentence" }
   ],
   "skipped": [{ "gap": <index>, "reason": "why it can't go anywhere sensible" }]
 }`;
@@ -292,12 +297,12 @@ function gapDraftProblems(edit, context) {
   if (edit.type === "Removal") return ["removals aren't allowed – rewrite or add instead"];
   if (edit.section === "Summary" && edit.type === "Addition") return ["add to the summary by rewriting one of its sentences instead"];
   edit.proposed = String(edit.proposed || "").replace(/[‐‑]/g, "-");
-  return checkEdit(edit, context);
+  return checkEdit(edit, context); // includes the no-[placeholder] check
 }
 
 /**
- * "Core edits": the gaps the candidate ticked, written into their resume with [blanks] for the
- * details only they know. `resume` is the resume as it stands (wording edits already in), so each
+ * "Core edits": the gaps the candidate ticked, written into their resume as finished lines that fit
+ * the role they're placed in (no [blanks]; details the resume doesn't give are left out, not invented). `resume` is the resume as it stands (wording edits already in), so each
  * edit's original is exactly a line of it.
  * @returns {{ edits: [{ gap, section, type, experienceIndex?, original, proposed, why }], skipped: [{ gap, reason }] }}
  */
@@ -333,7 +338,7 @@ Return ONLY the JSON object.`;
     try {
       reply = parseDrafts(await callLLM({
         system: GAP_DRAFT_PROMPT,
-        user: `${user}\n\nYour previous reply:\n${JSON.stringify(reply)}\n\nAutomatic checks failed:\n${feedback}\nFix the failing edits (keep passing ones unchanged); put any missing detail in a [blank]. Return the full JSON object again.`,
+        user: `${user}\n\nYour previous reply:\n${JSON.stringify(reply)}\n\nAutomatic checks failed:\n${feedback}\nFix the failing edits (keep passing ones unchanged); leave out any detail the resume doesn't give – no [blanks]. Return the full JSON object again.`,
         maxTokens: 3000,
         json: true,
         provider: PROVIDER,

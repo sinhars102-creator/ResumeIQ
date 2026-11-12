@@ -110,7 +110,7 @@ async function callGroq({ system, user, maxTokens, json }, model, attempt = 0) {
 
 let anthropicClient;
 
-async function callAnthropic({ system, user, maxTokens }, model) {
+async function callAnthropic({ system, user, maxTokens, effort }, model) {
   anthropicClient ??= new Anthropic({ apiKey: anthropicKey() });
   let response;
   try {
@@ -118,7 +118,7 @@ async function callAnthropic({ system, user, maxTokens }, model) {
       model,
       // Thinking shares this budget with the answer, so leave plenty of headroom above the reply size.
       max_tokens: Math.max(16000, maxTokens + 8000),
-      output_config: { effort: process.env.ANTHROPIC_EFFORT || DEFAULT_ANTHROPIC_EFFORT },
+      output_config: { effort: effort || process.env.ANTHROPIC_EFFORT || DEFAULT_ANTHROPIC_EFFORT },
       // If a safety classifier declines, the API re-runs the request on a suitable fallback model.
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
@@ -140,12 +140,13 @@ async function callAnthropic({ system, user, maxTokens }, model) {
 /**
  * Run one prompt, falling back across models/providers when one is rate limited or fails.
  * `provider` ("groq" | "anthropic") puts that provider first for this call only – e.g. a step where
- * quality matters more than speed – with the other still as the fallback.
+ * quality matters more than speed – with the other still as the fallback. `effort` ("low" | "medium" |
+ * "high") overrides how long Claude thinks for this call – lower answers sooner.
  */
-export async function callLLM({ system, user, maxTokens = 1500, json = false, provider: preferred }) {
+export async function callLLM({ system, user, maxTokens = 1500, json = false, provider: preferred, effort }) {
   const provider = preferred === "anthropic" && anthropicKey() ? "anthropic" : preferred === "groq" && process.env.GROQ_API_KEY ? "groq" : llmProvider();
   if (!provider) throw new Error("No LLM provider configured. Set GROQ_API_KEY or ANTHROPIC_API_KEY in .env.");
-  const prompt = { system, user, maxTokens, json };
+  const prompt = { system, user, maxTokens, json, effort };
   const groq = process.env.GROQ_API_KEY ? groqModels().map((m) => () => callGroq(prompt, m)) : [];
   const anthropic = anthropicKey() ? [() => callAnthropic(prompt, process.env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL)] : [];
   const attempts = provider === "anthropic" ? [...anthropic, ...groq] : [...groq, ...anthropic];
