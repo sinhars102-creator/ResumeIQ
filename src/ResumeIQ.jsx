@@ -906,6 +906,7 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
+    flexWrap: "wrap",
     marginBottom: 18,
     gap: 12,
   },
@@ -3277,6 +3278,9 @@ export default function ResumeIQ() {
   // Signed out after uploading: the account step comes between reading the resume and the job board.
   const [accountAfterUpload, setAccountAfterUpload] = useState(false);
   const [signInForJob, setSignInForJob] = useState(null); // the job picked before signing in (its Tailor step opens after)
+  const [recheckJob, setRecheckJob] = useState(null); // "Check with another resume": the job to tailor again once it's read
+  const [recheckError, setRecheckError] = useState(null);
+  const recheckInputRef = useRef(null);
   // The uploaded file, kept with the account once signed in (see storeResumeFile).
   const uploadedFileRef = useRef(null);
   const keepUploadedFile = () => {
@@ -3531,6 +3535,15 @@ export default function ResumeIQ() {
     scoreAgainstJob(job);
     rewordForJob(job);
   };
+
+  // "Check with another resume": once the new resume is in state, tailor the same job with it.
+  useEffect(() => {
+    if (!recheckJob || !resume) return;
+    const job = recheckJob;
+    setRecheckJob(null);
+    handleJobAnalyzeClick(job);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when the re-read resume lands
+  }, [recheckJob, resume]);
 
   // (Declared after the resume state and handleJobAnalyzeClick, which these effects use.)
   // "/app?tailor=<job id>" (from the Chrome extension) opens tailoring for that role, with the
@@ -3875,9 +3888,14 @@ export default function ResumeIQ() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on opening the app
   }, []);
 
-  const handleUploadAndParse = async (file) => {
-    uploadedFileRef.current = file;
+  /**
+   * forJob: "Check with another resume" on the Tailor step – read this resume and tailor the same job
+   * with it. The job board stays, and the resume saved on the account isn't replaced.
+   */
+  const handleUploadAndParse = async (file, { forJob = null } = {}) => {
     if (!file) return;
+    const previousResume = resume;
+    uploadedFileRef.current = forJob ? null : file;
     const name = file.name || "Resume";
     const size = file.size ? `${(file.size / 1024).toFixed(1)} KB` : "";
     setUploadedFileName(name);
@@ -3885,20 +3903,24 @@ export default function ResumeIQ() {
     setParsingStatus({ ...DEFAULT_PARSING_STATUS });
     setParsingError(null);
     setStep("parsing");
-    // A new resume means a new search: drop the previous resume's roles and ignore its in-flight search.
-    searchIdRef.current++;
-    lastSearchKeyRef.current = "";
-    jobsRef.current = [];
-    setJobs([]);
+    setRecheckError(null);
+    // Scores belong to the resume they were made for.
     setAnalyzedScores(new Map());
     setDismissedYearsCorrection(false);
-    setJobFeedStatus(null);
-    setLinkedInSearching(false);
-    setShowBelowLevelJobs(false);
+    if (!forJob) {
+      // A new resume means a new search: drop the previous resume's roles and ignore its in-flight search.
+      searchIdRef.current++;
+      lastSearchKeyRef.current = "";
+      jobsRef.current = [];
+      setJobs([]);
+      setJobFeedStatus(null);
+      setLinkedInSearching(false);
+      setShowBelowLevelJobs(false);
+    }
 
     const uploadStarted = Date.now();
     const fileType = (file.name.split(".").pop() || "unknown").toLowerCase();
-    track("resume_uploaded", { file_type: fileType, size_kb: Math.round((file.size || 0) / 1024) });
+    track("resume_uploaded", { file_type: fileType, size_kb: Math.round((file.size || 0) / 1024), ...(forJob ? { recheck: true } : {}) });
     try {
       const text = await readFileToText(file);
       setParsingStatus((s) => ({ ...s, extractText: true }));
@@ -3925,6 +3947,11 @@ export default function ResumeIQ() {
       setResume(extracted);
       setResumeText(text);
       setParsingStatus((s) => ({ ...s, parseStructure: true }));
+      if (forJob) {
+        // The effect below opens the Tailor step for this job once the new resume is in state.
+        setRecheckJob(forJob);
+        return;
+      }
       // Signed in: the resume is saved to the account and the job grid opens. Signed out: create an
       // account (or sign in) first – the job search below keeps running meanwhile.
       const session = supabaseClient ? (await supabaseClient.auth.getSession()).data.session : null;
@@ -3958,6 +3985,13 @@ export default function ResumeIQ() {
             ? (import.meta.env.DEV ? `Resume parsing failed: ${msg}` : "Resume parsing is temporarily unavailable. Please try again later.")
             : msg
       );
+      if (forJob) {
+        // Keep working with the resume they had; say why the other one didn't load.
+        setResume(previousResume);
+        setRecheckError(`Couldn't read that resume (${msg}). You're still tailoring with your previous one.`);
+        setStep("suggestions");
+        return;
+      }
       setResume(null);
       setStep("upload");
     } finally {
@@ -5311,7 +5345,35 @@ body {
                     ? `${selectedJob.role} @ ${selectedJob.company}`
                     : "Tailor"}
                 </div>
+                {selectedJob && (
+                  <>
+                    <button
+                      type="button"
+                      style={{ ...styles.smallBackButton, marginLeft: "auto" }}
+                      onClick={() => { track("recheck_resume_clicked"); recheckInputRef.current?.click(); }}
+                      title="Upload a different resume and tailor this job with it – the resume saved on your account stays as it is"
+                    >
+                      ↻ Check with another resume
+                    </button>
+                    <input
+                      ref={recheckInputRef}
+                      type="file"
+                      accept=".pdf,.txt,.md,application/pdf,text/plain,text/markdown"
+                      hidden
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (file) handleUploadAndParse(file, { forJob: selectedJob });
+                      }}
+                    />
+                  </>
+                )}
               </div>
+              {recheckError && (
+                <div role="alert" style={{ margin: "0 0 14px", padding: "10px 14px", borderRadius: 10, fontSize: 13.5, background: "color-mix(in srgb, var(--rq-danger) 10%, transparent)", color: "var(--rq-text)" }}>
+                  {recheckError}
+                </div>
+              )}
               <div style={styles.sectionHeader}>
                 <h2 style={styles.sectionTitle}>Tailor your resume</h2>
                 <p style={styles.sectionSubtitle}>
@@ -5502,7 +5564,7 @@ body {
                         return (
                           <>
                             <div style={{ ...styles.keyGapsTitle, marginTop: 6 }}>What the job asks for that your resume doesn't show</div>
-                            <div style={small}>Tick the ones you have. ResumeIQ adds them to your resume and leaves <span style={blankStyle}>[blanks]</span> for details only you know.</div>
+                            <div style={small}>Tick the ones you have. ResumeIQ adds them to your resume, in the role where they fit – edit any line to add specifics.</div>
                             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                               {gaps.map((g) => {
                                 const added = core.added.includes(g.text);
