@@ -7,6 +7,7 @@
  * text. Visitors get an anonymous ID per browser.
  */
 import posthog from "posthog-js";
+import { captureTouch, touchProperties, firstTouchPersonProperties, isInternal } from "./attribution.js";
 
 const key = import.meta.env.VITE_POSTHOG_KEY;
 let enabled = false;
@@ -32,6 +33,8 @@ function takeHandoffId() {
 }
 
 export function initAnalytics() {
+  // Where this visitor came from is read even with analytics off (it's also saved on the account).
+  captureTouch();
   if (!key || enabled) return;
   const handoffId = takeHandoffId();
   posthog.init(key, {
@@ -61,6 +64,51 @@ export function initAnalytics() {
     mask_all_element_attributes: true,
   });
   enabled = true;
+  registerVisitProperties();
+}
+
+/** Channel, campaign and internal flag on every event from this browser. */
+function registerVisitProperties(extra = {}) {
+  try {
+    posthog.register({ ...touchProperties(), is_internal: isInternal(), ...extra });
+  } catch {
+    // ignore
+  }
+}
+
+let identifiedAs = null;
+
+/**
+ * Link this browser's visits to the signed-in account, so one person can be followed from ad click
+ * to tailored resume across sessions and devices. Uses the account ID only – no email or name is
+ * sent. Where they first came from is stored once on the person.
+ */
+export function identifyUser(user) {
+  if (!enabled || !user?.id || identifiedAs === user.id) return;
+  identifiedAs = user.id;
+  const internal = isInternal(user.email);
+  try {
+    posthog.identify(
+      user.id,
+      { is_internal: internal, signed_up_at: user.created_at ?? null },
+      firstTouchPersonProperties(),
+    );
+    registerVisitProperties({ is_internal: internal });
+  } catch {
+    // Analytics must never break the app.
+  }
+}
+
+/** After sign-out: a fresh anonymous ID, so the next person on this browser isn't merged in. */
+export function resetAnalytics() {
+  identifiedAs = null;
+  if (!enabled) return;
+  try {
+    posthog.reset();
+    registerVisitProperties();
+  } catch {
+    // ignore
+  }
 }
 
 /** This visitor's anonymous ID, or null when analytics is off. */
@@ -107,6 +155,7 @@ export function track(event, properties = {}) {
   } catch {
     // Analytics must never break the app.
   }
+  if (event === "signed_out") resetAnalytics();
 }
 
 /** Bucket a number so events stay coarse (e.g. years of experience). */

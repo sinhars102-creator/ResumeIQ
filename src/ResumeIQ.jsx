@@ -3733,7 +3733,75 @@ export default function ResumeIQ() {
   const easyApplyCount = useMemo(() => sortedJobs.filter(isEasyApplyJob).length, [sortedJobs]);
   const visibleJobs = useMemo(() => (easyApplyOnly ? sortedJobs.filter(isEasyApplyJob) : sortedJobs), [sortedJobs, easyApplyOnly]);
 
+  // Job board quality, as users see it: what the top of the list is made of (company tier, match,
+  // freshness, source) once it settles, then how long they stayed, how far they scrolled and how many
+  // jobs they opened. Counts and categories only.
+  const jobBoardSeen = useRef({ key: null, clicks: 0 });
+  useEffect(() => {
+    if (step !== "select" || visibleJobs.length === 0) return undefined;
+    const t = setTimeout(() => {
+      const key = `${visibleJobs.length}:${jobSortBy}:${easyApplyOnly}`;
+      if (jobBoardSeen.current.key === key) return;
+      jobBoardSeen.current.key = key;
+      const top = visibleJobs.slice(0, 20);
+      const count = (test) => top.filter(test).length;
+      const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+      const sources = {};
+      for (const j of top) sources[j.source || "unknown"] = (sources[j.source || "unknown"] || 0) + 1;
+      const topSource = Object.entries(sources).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "none";
+      track("job_board_viewed", {
+        jobs: visibleJobs.length,
+        top20_tier1: count((j) => j.tier === 1),
+        top20_tier2: count((j) => j.tier === 2),
+        top20_untiered: count((j) => j.tier == null || j.tier >= 3),
+        top20_strong_match: count((j) => (jobMatchScores.get(j.id)?.score ?? 0) >= 75),
+        top20_weak_match: count((j) => jobMatchScores.has(j.id) && (jobMatchScores.get(j.id)?.score ?? 0) < 50),
+        top20_posted_this_week: count((j) => (Date.parse(j.postedAt || 0) || 0) >= weekAgo),
+        top20_sources: Object.keys(sources).length,
+        top_source: topSource,
+        sort: jobSortBy,
+        easy_apply_only: easyApplyOnly,
+      });
+    }, 2000);
+    return () => clearTimeout(t);
+  }, [step, visibleJobs, jobSortBy, easyApplyOnly, jobMatchScores]);
+
+  useEffect(() => {
+    if (step !== "select") return undefined;
+    const started = Date.now();
+    const board = jobBoardSeen.current;
+    board.clicks = 0;
+    let maxScroll = 0;
+    const onScroll = () => {
+      const el = document.scrollingElement || document.documentElement;
+      const seen = (el.scrollTop + window.innerHeight) / Math.max(1, el.scrollHeight);
+      if (seen > maxScroll) maxScroll = seen;
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      track("job_board_left", {
+        seconds: Math.round((Date.now() - started) / 1000),
+        max_scroll_pct: Math.round(Math.min(1, maxScroll) * 100),
+        jobs_opened: board.clicks,
+      });
+    };
+  }, [step]);
+
   const handleJobAnalyzeClick = (job) => {
+    jobBoardSeen.current.clicks += 1;
+    const position = visibleJobs.findIndex((j) => j.id === job.id) + 1;
+    const postedDays = job.postedAt ? (Date.now() - Date.parse(job.postedAt)) / 86400000 : null;
+    track("job_card_clicked", {
+      position: position || null,
+      of: visibleJobs.length,
+      company_tier: job.tier ?? "none",
+      source: job.source || "unknown",
+      match: bucket(jobMatchScores.get(job.id)?.score, [50, 65, 75, 90]),
+      posted_days: bucket(postedDays, [1, 3, 7, 14, 30]),
+      sort: jobSortBy,
+    });
     setSelectedJob(job);
     // Signed out: ask for the account now, once they've picked a job. Scoring and rewording start
     // below anyway, so the tailored resume is usually ready by the time they've signed in.
