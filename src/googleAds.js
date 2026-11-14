@@ -1,10 +1,10 @@
 // Google Ads: the site tag and the "Sign up" conversion. Loaded only on the live site, so local
 // testing never counts as conversions. Ad cookies stay off until the visitor accepts the cookie
 // notice (Google Consent Mode); without consent Google still receives cookieless signals.
-const ADS_ID = "AW-18537655280";
+const ADS_ID = "AW-18574591591";
 // From Google Ads → Goals → Conversions → Sign up → Tag setup → event snippet: the part after the
-// slash in send_to ("AW-18537655280/<label>"). Until it's set, no conversion is sent.
-const SIGNUP_LABEL = "saUQCLXUjKodEPDXuIdF";
+// slash in send_to ("AW-18574591591/<label>"). Until it's set, no conversion is sent.
+const SIGNUP_LABEL = "COGBCNT6lrgdEOeMh5lF";
 
 // LinkedIn: Campaign Manager → Conversion tracking → "Sign up" (Insight Tag, event-specific) → the
 // conversion_id in `window.lintrk('track', { conversion_id: … })`. Until it's set, no LinkedIn conversion is sent.
