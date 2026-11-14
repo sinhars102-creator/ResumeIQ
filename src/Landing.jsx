@@ -422,10 +422,9 @@ export default function Landing({ onStart }) {
         <div className="lp-wrap lp-footer-inner">
           <span className="lp-logo-word" style={{ fontSize: 18, color: "#15171a" }}>ResumeIQ</span>
           <div className="lp-footer-links">
-            {/* TODO: replace with real pages before launch */}
-            <a href="#top">Privacy policy</a>
-            <a href="#top">Terms</a>
-            <a href="#top">Contact</a>
+            <a href="/privacy.html">Privacy policy</a>
+            <a href="/terms.html">Terms</a>
+            <a href="/contact.html">Contact</a>
           </div>
           <span>Made in India</span>
         </div>
