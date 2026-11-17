@@ -212,7 +212,7 @@ const STEPS = [
   },
 ];
 
-export default function UploadStep({ onFile, onSample, error, homeHref }) {
+export default function UploadStep({ onFile, onSample, error, homeHref, mode = "jobs" }) {
   const inputRef = useRef(null);
   const [hover, setHover] = useState(false);
   const [rejected, setRejected] = useState("");
@@ -329,8 +329,12 @@ export default function UploadStep({ onFile, onSample, error, homeHref }) {
           </a>
         )}
         <p className="us-eyebrow">Get started</p>
-        <h1 className="us-title">Upload your resume</h1>
-        <p className="us-sub">We'll find roles you fit and show you why. Takes about a minute.</p>
+        <h1 className="us-title">{mode === "editor" ? "Upload the resume you want to edit" : "Upload your resume"}</h1>
+        <p className="us-sub">
+          {mode === "editor"
+            ? "It opens in the editor in about a minute: change any section, pick a template, download a PDF."
+            : "We'll find roles you fit and show you why. Takes about a minute."}
+        </p>
 
         {(error || rejected) && (
           <div className="us-error" role="alert">{rejected || error}</div>

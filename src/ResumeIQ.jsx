@@ -3479,6 +3479,15 @@ export default function ResumeIQ() {
   // code, then upload – the parsed resume is saved to the account.
   const [onboarding] = useState(() => window.location.pathname.startsWith("/app/onboarding"));
   const [step, setStep] = useState(() => (onboarding ? "account" : "upload"));
+  // Resume editor entry (/app/editor, the landing page's "Resume editor" button): for visitors who only
+  // want to edit their resume. Upload opens the editor straight away; the job board is one click away.
+  const [editorEntry] = useState(() => window.location.pathname.startsWith("/app/editor"));
+  const editorEntryTracked = useRef(false);
+  useEffect(() => {
+    if (!editorEntry || editorEntryTracked.current) return;
+    editorEntryTracked.current = true;
+    track("editor_entry_opened");
+  }, [editorEntry]);
   // Signed out after uploading: the account step comes between reading the resume and the job board.
   const [accountAfterUpload, setAccountAfterUpload] = useState(false);
   const [signInForJob, setSignInForJob] = useState(null); // the job picked before signing in (its Tailor step opens after)
@@ -4188,7 +4197,11 @@ export default function ResumeIQ() {
         const session = (await supabaseClient.auth.getSession()).data.session;
         const profile = session ? await loadProfile(session.user.id).catch(() => null) : null;
         const guest = profile?.resume ? null : readGuestResume();
-        if (profile?.resume && !resume) {
+        if ((profile?.resume || guest) && !resume && editorEntry) {
+          setResume(profile?.resume || guest);
+          setStep("preview");
+          track("returning_user_editor", { guest: !profile?.resume });
+        } else if (profile?.resume && !resume) {
           setResume(profile.resume);
           setStep("select");
           startJobSearch(profile.resume);
@@ -4284,6 +4297,12 @@ export default function ResumeIQ() {
       // that's a live Apify scrape (server/index.js) that can take 30–180s.
       // Fetch it in the background and stream results into the grid once ready.
       // Signed out too: the job board opens straight away – the account is asked for once they pick a job.
+      if (editorEntry) {
+        // Came for the editor: open it now. The (paid) job search starts only if they open the job board.
+        setStep("preview");
+        track("editor_entry_resume_ready");
+        return;
+      }
       setStep("select");
       setParsingStatus((s) => ({ ...s, findJobs: true }));
       startJobSearch(extracted);
@@ -4736,6 +4755,15 @@ export default function ResumeIQ() {
     }
   };
 
+  const editorJobSearchRef = useRef(false);
+  useEffect(() => {
+    if (!editorEntry || step !== "select" || editorJobSearchRef.current || !resume || jobs.length) return;
+    editorJobSearchRef.current = true;
+    track("editor_entry_jobs_opened");
+    startJobSearch(resume);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editorEntry, step, resume]);
+
   const editorRequestedRef = useRef(false);
   useEffect(() => {
     if (step !== "preview") {
@@ -5072,13 +5100,14 @@ body {
           )}
           {step === "upload" && !restoringAccount && (
             <UploadStep
+              mode={editorEntry ? "editor" : "jobs"}
               homeHref={HOME_URL}
               error={parsingError}
               onFile={handleUploadAndParse}
               onSample={() => {
                 track("sample_resume_used");
                 setResume(SAMPLE_RESUME);
-                setStep("select");
+                setStep(editorEntry ? "preview" : "select");
               }}
             />
           )}
@@ -5111,7 +5140,7 @@ body {
                     <span style={parsingStatus.findJobs ? styles.parsingBulletDone : styles.parsingBulletPending}>
                       {parsingStatus.findJobs ? "✓" : "○"}
                     </span>
-                    Find matching jobs
+                    {editorEntry ? "Open the editor" : "Find matching jobs"}
                   </li>
                 </ul>
               </div>
@@ -6097,9 +6126,22 @@ body {
             <div style={{ position: "fixed", top: workspaceTop, left: 0, right: 0, bottom: 0, zIndex: 15, display: "flex", flexDirection: "column", background: "var(--rq-bg)" }}>
               <div className="rq-workspace-bar" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 20px", borderBottom: "1px solid var(--rq-border)" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
-                  <button type="button" style={styles.smallBackButton} onClick={() => setStep("suggestions")}>
-                    ← Back to Suggestions
-                  </button>
+                  {selectedJob ? (
+                    <button type="button" style={styles.smallBackButton} onClick={() => setStep("suggestions")}>
+                      ← Back to Suggestions
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      style={styles.smallBackButton}
+                      onClick={() => {
+                        track("editor_find_jobs_clicked", { editor_entry: editorEntry });
+                        setStep("select");
+                      }}
+                    >
+                      Find jobs that match this resume →
+                    </button>
+                  )}
                   {approvedIds.size > 0 && (
                     <span style={{ fontSize: 12, color: "var(--rq-text-2)", whiteSpace: "nowrap" }}>
                       {approvedIds.size} approved change{approvedIds.size > 1 ? "s" : ""} applied

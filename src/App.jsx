@@ -17,9 +17,9 @@ function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
-  const openApp = () => {
-    window.history.pushState({}, "", "/app");
-    setPath("/app");
+  const openApp = (to = "/app") => {
+    window.history.pushState({}, "", to);
+    setPath(to);
     window.scrollTo(0, 0);
   };
 

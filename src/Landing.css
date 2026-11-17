@@ -63,6 +63,9 @@
 .lp-hero-sub { margin-top: 24px; font-size: 19px; line-height: 1.6; color: var(--lp-ink-2); max-width: 560px; }
 .lp-hero-ctas { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; }
 .lp-hero-note { margin-top: 18px; font-size: 14px; color: var(--lp-muted); }
+.lp-hero-editor { margin-top: 10px; font-size: 15px; color: var(--lp-ink-2); }
+.lp-hero-editor a { color: var(--lp-ink); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.lp-nav-editor { padding-top: 8px; padding-bottom: 8px; }
 .lp-hero-visual { flex: 1 1 480px; min-width: 0; }
 
 /* Cards and mocks */
@@ -208,6 +211,7 @@
 
 @media (max-width: 720px) {
   .lp-nav-links, .lp-signin { display: none; }
+  .lp-nav-cta .lp-btn { padding: 8px 12px; font-size: 14px; }
   .lp-hero { padding-top: 40px; gap: 40px; }
   .lp-section { padding-top: 72px; }
   .lp-final-box { padding: 40px 24px; }

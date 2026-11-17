@@ -73,6 +73,12 @@ export default function Landing({ onStart }) {
     track("upload_cta_clicked", { location: where });
     openApp(e);
   };
+  // The resume editor on its own (/app/editor): upload, then straight into the editor.
+  const openEditor = (where) => (e) => {
+    e.preventDefault();
+    track("editor_cta_clicked", { location: where });
+    onStart("/app/editor");
+  };
 
   // Pack checkout: { plan, state: "paying" | "paid" | "error", message }
   const [payment, setPayment] = useState(null);
@@ -130,6 +136,7 @@ export default function Landing({ onStart }) {
             <a href="#faq">FAQ</a>
           </div>
           <div className="lp-nav-cta">
+            <a href="/app/editor" className="lp-btn lp-btn-outline lp-nav-editor" onClick={openEditor("nav")}>Resume editor</a>
             {account ? (
               <>
                 <button type="button" className="lp-signin" onClick={signOut} title={`Signed in as ${account.email}`}>Sign out</button>
@@ -166,6 +173,10 @@ export default function Landing({ onStart }) {
               </a>
             </div>
             <p className="lp-hero-note">No signup for your first matches · 1 tailored resume free · Pay by UPI</p>
+            <p className="lp-hero-editor">
+              Only need to edit your resume?{" "}
+              <a href="/app/editor" onClick={openEditor("hero")}>Open the resume editor →</a>
+            </p>
           </div>
 
           {/* The product mockups look tappable, so a tap opens the upload screen instead of doing nothing. */}
