@@ -3474,6 +3474,21 @@ function ResumeDocument({ resume, highlights = [], dim = false, afterMode = fals
 
 const DEFAULT_PARSING_STATUS = { extractText: false, parseStructure: false, findJobs: false };
 
+/** Full-area loading state for the editor workspace while the editor is prepared and its page loads. */
+function EditorLoading({ label }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, background: "var(--rq-bg)", color: "var(--rq-text-2)", fontSize: 14 }}
+    >
+      <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: "50%", border: "3px solid var(--rq-accent)", borderTopColor: "transparent", animation: "rqSpin .8s linear infinite", boxSizing: "border-box" }} />
+      <span>{label}</span>
+      <span style={{ fontSize: 12, opacity: 0.8 }}>Usually a few seconds</span>
+    </div>
+  );
+}
+
 export default function ResumeIQ() {
   // Onboarding (/app/onboarding, not linked from anywhere yet): create an account with an emailed
   // code, then upload – the parsed resume is saved to the account.
@@ -3625,6 +3640,34 @@ export default function ResumeIQ() {
   const [openInBuilderError, setOpenInBuilderError] = useState(null);
   // Reactive Resume builder embedded in the Updated Resume step: { builderUrl, embeddable }.
   const [rxEditor, setRxEditor] = useState(null);
+  // The embedded editor page has finished loading (its own app takes a few seconds after the iframe opens).
+  const [editorFrameReady, setEditorFrameReady] = useState(false);
+  useEffect(() => setEditorFrameReady(false), [rxEditor?.builderUrl]);
+
+  // Warm-up: wake the API and the editor's server while the visitor uploads and the resume is read,
+  // so opening the editor isn't a cold start. The editor's own page is preloaded (hidden) when the
+  // editor is the next thing they'll see: the resume editor entry, or a job being tailored.
+  const [editorWarm, setEditorWarm] = useState(null); // { origin, embeddable }
+  const editorWarmStarted = useRef(false);
+  useEffect(() => {
+    if (editorWarmStarted.current || !["upload", "parsing", "suggestions"].includes(step)) return;
+    editorWarmStarted.current = true;
+    fetch(`${API_BASE.replace(/\/$/, "")}/api/rxresume/warm`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data?.origin) return;
+        setEditorWarm(data);
+        if (!document.querySelector(`link[rel="preconnect"][href="${data.origin}"]`)) {
+          const link = document.createElement("link");
+          link.rel = "preconnect";
+          link.href = data.origin;
+          document.head.appendChild(link);
+        }
+      })
+      .catch(() => {});
+  }, [step]);
+  const preloadEditorPage =
+    !!editorWarm?.embeddable && !rxEditor && ((editorEntry && ["upload", "parsing"].includes(step)) || step === "suggestions");
   // The embedded editor reports each download/export (format and target only – see the editor's
   // use-resume-export.ts). Only messages from the editor's own address count.
   const editorOrigin = useMemo(() => {
@@ -4721,7 +4764,9 @@ export default function ResumeIQ() {
 
   // Imports the current resume into Reactive Resume and shows its builder inline.
   // Each call creates a fresh copy, so it also serves as "send my latest edits".
+  const editorOpenStartedRef = useRef(0);
   const handleOpenInReactiveResume = async () => {
+    editorOpenStartedRef.current = Date.now();
     setOpeningInBuilder(true);
     setOpenInBuilderError(null);
     try {
@@ -4747,6 +4792,7 @@ export default function ResumeIQ() {
       }
       // rxresu.me refuses to be framed; only a self-hosted instance can be embedded.
       setRxEditor({ builderUrl: data.builderUrl, embeddable: !!data.embeddable });
+      track("editor_api_ready", { seconds: Math.round((Date.now() - editorOpenStartedRef.current) / 100) / 10, warmed: !!editorWarm });
     } catch (e) {
       console.error("Open in Reactive Resume failed:", e);
       setOpenInBuilderError(e.message || "Failed to open in Reactive Resume.");
@@ -5002,6 +5048,18 @@ body {
   background: color-mix(in srgb, var(--rq-info) 8%, transparent);
 }
         `}</style>
+
+        {preloadEditorPage && (
+          // Hidden copy of the editor's page: its scripts and styles are cached (and its server woken)
+          // before the real editor opens, so the editor appears in a second instead of several.
+          <iframe
+            src={`${editorWarm.origin}/`}
+            title=""
+            aria-hidden="true"
+            tabIndex={-1}
+            style={{ position: "fixed", width: 1, height: 1, left: -10, top: -10, opacity: 0, pointerEvents: "none", border: "none" }}
+          />
+        )}
 
         <header style={styles.stickyHeader}>
           <div className="rq-header-row" style={styles.headerRow}>
@@ -6324,16 +6382,22 @@ body {
                 );
               })()}
               {rxEditor?.embeddable ? (
-                <iframe
-                  key={rxEditor.builderUrl}
-                  src={rxEditor.builderUrl}
-                  onLoad={() => track("editor_loaded")}
-                  title="Resume editor"
-                  style={{ flex: 1, width: "100%", border: "none", display: "block", background: "var(--rq-bg)" }}
-                />
+                <div style={{ flex: 1, position: "relative", display: "flex" }}>
+                  <iframe
+                    key={rxEditor.builderUrl}
+                    src={rxEditor.builderUrl}
+                    onLoad={() => {
+                      setEditorFrameReady(true);
+                      track("editor_loaded", { seconds: editorOpenStartedRef.current ? Math.round((Date.now() - editorOpenStartedRef.current) / 100) / 10 : null });
+                    }}
+                    title="Resume editor"
+                    style={{ flex: 1, width: "100%", border: "none", display: "block", background: "var(--rq-bg)" }}
+                  />
+                  {!editorFrameReady && <EditorLoading label="Opening your resume in the editor…" />}
+                </div>
               ) : (
-                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--rq-text-2)", fontSize: 13 }}>
-                  Loading the resume editor…
+                <div style={{ flex: 1, position: "relative", display: "flex" }}>
+                  <EditorLoading label="Preparing your resume for the editor…" />
                 </div>
               )}
             </div>

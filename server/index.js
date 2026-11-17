@@ -571,10 +571,15 @@ function editorSsoSecret() {
 }
 
 /** The user's own editor API key – their editor account is made (and its key saved) on first use. */
+const editorKeyCache = new Map(); // userId -> editor API key, for the life of this server instance
 async function editorKeyFor(userId, email = null) {
   if (!editorSsoSecret() || !jobStoreConfigured()) return null;
+  if (editorKeyCache.has(userId)) return editorKeyCache.get(userId);
   const saved = await getEditorAccount(userId);
-  if (saved) return saved.api_key;
+  if (saved) {
+    editorKeyCache.set(userId, saved.api_key);
+    return saved.api_key;
+  }
   const address = email || (await userEmail(userId));
   if (!address) throw new Error("This account has no email for the editor");
   const r = await fetch(`${RX_APP_URL}/api/auth/resumeiq/provision`, {
@@ -585,6 +590,7 @@ async function editorKeyFor(userId, email = null) {
   const data = await r.json().catch(() => ({}));
   if (!r.ok || !data.apiKey) throw new Error(`Making the editor account failed (${r.status}${data.message ? `: ${data.message}` : ""})`);
   await saveEditorAccount(userId, { rxUserId: data.userId, apiKey: data.apiKey });
+  editorKeyCache.set(userId, data.apiKey);
   return data.apiKey;
 }
 
@@ -1095,6 +1101,21 @@ async function optionalUser(req) {
 
 const builderReply = (resumeId, extra = {}) => ({
   resumeId, builderUrl: `${RX_APP_URL}/builder/${resumeId}`, embeddable: RX_APP_URL !== "https://rxresu.me", ...extra,
+});
+
+/**
+ * Warm-up, called while the visitor uploads (the editor opens right after): wakes this API and the
+ * editor's server so the first open isn't a cold start (~7s cold vs <1s warm), and tells the page the
+ * editor's address so it can preload the editor itself.
+ */
+app.get("/api/rxresume/warm", async (_req, res) => {
+  const embeddable = RX_APP_URL !== "https://rxresu.me";
+  if (getRxResumeKey()) {
+    // A lookup that touches the editor's API and database and returns at once (no such resume).
+    await rxFetch("/resumes/00000000-0000-0000-0000-000000000000", { method: "GET", signal: AbortSignal.timeout(10_000) }).catch(() => null);
+  }
+  res.set("Cache-Control", "no-store");
+  res.json({ origin: RX_APP_URL, embeddable });
 });
 
 /**
