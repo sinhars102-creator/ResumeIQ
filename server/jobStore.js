@@ -287,7 +287,7 @@ export function roleSearchWords(keywords) {
   return core.length ? core : words;
 }
 
-export async function findStoredJobs({ keywords = "", location = "", limit = 60, maxAgeDays = 30 } = {}) {
+export async function findStoredJobs({ keywords = "", location = "", limit = 60, maxAgeDays = 30, boardMaxAgeDays = 60 } = {}) {
   const words = roleSearchWords(keywords).map((w) => w.replace(/[^a-z0-9]/g, "")).filter(Boolean);
   if (!words.length) return [];
   let q = db()
@@ -299,8 +299,13 @@ export async function findStoredJobs({ keywords = "", location = "", limit = 60,
     .limit(limit);
   if (maxAgeDays) {
     // Fresh roles only: posted in the window, or (no posting date) first seen in it.
+    // Career boards (re-read daily, closed when removed) get a longer window than search sources.
     const since = new Date(Date.now() - maxAgeDays * 86400000).toISOString();
-    q = q.or(`posted_at.gte.${since},and(posted_at.is.null,first_seen_at.gte.${since})`);
+    const boardSince = new Date(Date.now() - boardMaxAgeDays * 86400000).toISOString();
+    q = q.or(
+      `posted_at.gte.${since},and(posted_at.is.null,first_seen_at.gte.${since}),` +
+        `and(source.in.(greenhouse,lever,ashby,workable),posted_at.gte.${boardSince})`
+    );
   }
   const place = String(location).trim();
   if (place && !/^india$/i.test(place)) q = q.ilike("location", `%${place.replace(/[%_]/g, "")}%`);

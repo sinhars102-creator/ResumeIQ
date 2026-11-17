@@ -11,6 +11,11 @@
 import { scoreParts, parseJdYearsRange } from "./matchScore.js";
 
 export const MAX_AGE_DAYS = 30;
+// Company career boards are re-read daily and roles that leave them are closed, so an older role there
+// is still verifiably open; search sources (LinkedIn, Adzuna) can't be checked that way.
+export const BOARD_SOURCES = ["greenhouse", "lever", "ashby", "workable"];
+export const BOARD_MAX_AGE_DAYS = 60;
+export const maxAgeFor = (job) => (BOARD_SOURCES.includes(job.source) ? BOARD_MAX_AGE_DAYS : MAX_AGE_DAYS);
 export const STRONG_FIT = 75;
 export const GOOD_FIT = 55;
 
@@ -152,12 +157,12 @@ export function assessJob(job, profile, resume, { now = Date.now() } = {}) {
   if (profile.families.size && family && relevance === 0) reason = "different_role";
   else if (profile.level != null && (jobLevel - profile.level >= 1.5 || (range && profile.years != null && range.min - profile.years >= 4))) reason = "too_senior";
   else if (profile.level != null && isTooJunior(jobLevel, range, profile)) reason = "too_junior";
-  else if (age != null && age > MAX_AGE_DAYS) reason = "stale";
+  else if (age != null && age > maxAgeFor(job)) reason = "stale";
 
   const parts = scoreParts(resume, job, profile.years);
   const skillShare = parts ? (parts.skills + parts.keywords) / 50 : 0.3;
   const experience = parts?.fit ? parts.fit.points / 25 : 0.7;
-  const freshness = age == null ? 0.5 : age <= 7 ? 1 : age <= 14 ? 0.8 : age <= 30 ? 0.5 : 0;
+  const freshness = age == null ? 0.5 : age <= 7 ? 1 : age <= 14 ? 0.8 : age <= 30 ? 0.5 : age <= BOARD_MAX_AGE_DAYS ? 0.2 : 0;
 
   const fit = Math.round(40 * relevance + 30 * skillShare + 20 * experience + 10 * freshness);
   const label = fit >= STRONG_FIT ? "Strong" : fit >= GOOD_FIT ? "Good" : "Stretch";

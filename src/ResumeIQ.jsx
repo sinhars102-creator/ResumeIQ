@@ -15,7 +15,7 @@ import ResumeFilesDialog, { storeResumeFile } from "./ResumeFiles.jsx";
 import {
   computeLocalMatchScore, experienceFromRoles, getCandidateYears, parseJdYearsRange, resumeForAI, scoreResume,
 } from "./matchScore.js";
-import { assessJob, byFitThenTier, candidateProfile, GOOD_FIT, MAX_AGE_DAYS } from "./jobFit.js";
+import { assessJob, byFitThenTier, candidateProfile, GOOD_FIT } from "./jobFit.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 

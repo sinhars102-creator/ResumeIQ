@@ -57,3 +57,10 @@ test("a 9-year PM still sees plain Product Manager roles", () => {
   assert.equal(assessJob(job("Technical Product Manager", "8+ years"), p, pm).show, true);
   assert.equal(assessJob(job("Product Manager", "2-4 years"), p, pm).reason, "too_junior");
 });
+
+test("career-board roles stay up to 60 days; LinkedIn roles go stale after 30", () => {
+  const p = candidateProfile(pm, { roles: ["Senior Product Manager"], years: 9 });
+  const old = job("Senior Product Manager", "8+ years", 45);
+  assert.equal(assessJob({ ...old, source: "greenhouse" }, p, pm).show, true);
+  assert.equal(assessJob({ ...old, source: "linkedin" }, p, pm).reason, "stale");
+});
