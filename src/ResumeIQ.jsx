@@ -3506,6 +3506,7 @@ export default function ResumeIQ() {
   // Signed out after uploading: the account step comes between reading the resume and the job board.
   const [accountAfterUpload, setAccountAfterUpload] = useState(false);
   const [signInForJob, setSignInForJob] = useState(null); // the job picked before signing in (its Tailor step opens after)
+  const [signInForEditor, setSignInForEditor] = useState(false); // the editor opens after signing in
   const [recheckJob, setRecheckJob] = useState(null); // "Check with another resume": the job to tailor again once it's read
   const [recheckError, setRecheckError] = useState(null);
   const recheckInputRef = useRef(null);
@@ -3650,7 +3651,7 @@ export default function ResumeIQ() {
   const [editorWarm, setEditorWarm] = useState(null); // { origin, embeddable }
   const editorWarmStarted = useRef(false);
   useEffect(() => {
-    if (editorWarmStarted.current || !["upload", "parsing", "suggestions"].includes(step)) return;
+    if (editorWarmStarted.current || !["upload", "parsing", "account", "suggestions"].includes(step)) return;
     editorWarmStarted.current = true;
     fetch(`${API_BASE.replace(/\/$/, "")}/api/rxresume/warm`)
       .then((r) => (r.ok ? r.json() : null))
@@ -3667,7 +3668,7 @@ export default function ResumeIQ() {
       .catch(() => {});
   }, [step]);
   const preloadEditorPage =
-    !!editorWarm?.embeddable && !rxEditor && ((editorEntry && ["upload", "parsing"].includes(step)) || step === "suggestions");
+    !!editorWarm?.embeddable && !rxEditor && ((editorEntry && ["upload", "parsing"].includes(step)) || (step === "account" && signInForEditor) || step === "suggestions");
   // The embedded editor reports each download/export (format and target only – see the editor's
   // use-resume-export.ts). Only messages from the editor's own address count.
   const editorOrigin = useMemo(() => {
@@ -4773,12 +4774,13 @@ export default function ResumeIQ() {
       const base = API_BASE.replace(/\/$/, "");
       // Signed in with a job: the job's editor resume is reopened (so "Apply with this resume" knows
       // which one) and brought up to date with this content, keeping the design chosen in the editor.
-      const session = supabaseClient && selectedJob ? (await supabaseClient.auth.getSession()).data.session : null;
+      // Always signed in: the editor opens through the user's own sign-in link (the editor has no guest access).
+      const session = supabaseClient ? (await supabaseClient.auth.getSession()).data.session : null;
       const response = await fetch(`${base}/api/rxresume/open-in-builder`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
         body: JSON.stringify({
-          ...(session ? { jobId: selectedJob.id, refresh: true } : {}),
+          ...(session && selectedJob ? { jobId: selectedJob.id, refresh: true } : {}),
           // A very large embedded photo would exceed the API's request size limit; send the resume without it.
           resumeData: (getFinalResume()?.photoUrl?.length || 0) > 1_500_000 ? { ...getFinalResume(), photoUrl: null } : getFinalResume(),
           name: [getFinalResume()?.name, selectedJob && [selectedJob.role, selectedJob.company].filter(Boolean).join(" @ ")]
@@ -4818,8 +4820,20 @@ export default function ResumeIQ() {
     }
     if (editorRequestedRef.current) return;
     editorRequestedRef.current = true;
-    track("preview_opened");
-    handleOpenInReactiveResume();
+    (async () => {
+      // The editor needs an account (it signs the user in with their own editor account): signed out,
+      // ask for the email code first and open the editor straight after.
+      const session = supabaseClient ? (await supabaseClient.auth.getSession()).data.session : null;
+      if (supabaseClient && !session) {
+        setSignInForEditor(true);
+        setAccountAfterUpload(true);
+        setStep("account");
+        track("signin_wall_shown", { at: "editor", editor_entry: editorEntry });
+        return;
+      }
+      track("preview_opened");
+      handleOpenInReactiveResume();
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [step]);
 
@@ -5126,6 +5140,7 @@ body {
               homeHref={accountAfterUpload ? null : HOME_URL}
               afterUpload={accountAfterUpload}
               job={signInForJob}
+              forEditor={signInForEditor}
               initialEmail={resume && resume !== SAMPLE_RESUME ? (String(resume.contact || "").match(/[^\s@·|,;<>()]+@[^\s@·|,;<>()]+\.[a-z]{2,}/i) || [""])[0] : ""}
               onBack={signInForJob ? () => {
                 track("signin_wall_back", { at: "job_click" });
@@ -5148,8 +5163,9 @@ body {
                 keepUploadedFile();
                 clearGuestResume();
                 setAccountAfterUpload(false);
-                setStep(signInForJob ? "suggestions" : "select");
+                setStep(signInForEditor ? "preview" : signInForJob ? "suggestions" : "select");
                 setSignInForJob(null);
+                setSignInForEditor(false);
               }}
             />
           )}

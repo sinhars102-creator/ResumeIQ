@@ -26,7 +26,7 @@ const RESEND_AFTER_S = 30;
  * the resume and the job board, so the copy says the matches are ready. job: shown after picking a job
  * (the resume is being tailored for it meanwhile), so the copy says so; onBack returns to the job board.
  */
-export default function AccountStep({ onDone, homeHref, afterUpload = false, job = null, initialEmail = "", onBack = null }) {
+export default function AccountStep({ onDone, homeHref, afterUpload = false, job = null, forEditor = false, initialEmail = "", onBack = null }) {
   // The email on the uploaded resume, so most people only have to tap "Send my code".
   const [email, setEmail] = useState(() => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(initialEmail || "") ? initialEmail.trim() : ""));
   const [code, setCode] = useState("");
@@ -153,8 +153,13 @@ export default function AccountStep({ onDone, homeHref, afterUpload = false, job
           </>
         ) : stage === "email" ? (
           <>
-            <h1 className="us-title">{job ? "Your tailored resume is being written" : afterUpload ? "Your job matches are ready" : "Create your account"}</h1>
-            {job ? (
+            <h1 className="us-title">{forEditor ? "Your resume is ready to edit" : job ? "Your tailored resume is being written" : afterUpload ? "Your job matches are ready" : "Create your account"}</h1>
+            {forEditor ? (
+              <p className="us-sub">
+                Create your free account to open it in the editor – {email ? "check your email below" : "enter your email"} and we'll send you a 6-digit code.
+                Your edits and downloads are saved to your account. Already have an account? Same here – it signs you in.
+              </p>
+            ) : job ? (
               <p className="us-sub">
                 We're rewording your resume for <b>{job.role}{job.company ? ` at ${job.company}` : ""}</b> right now.
                 Create your free account to see it – {email ? "check your email below" : "enter your email"} and we'll send you a 6-digit code.
