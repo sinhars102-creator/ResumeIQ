@@ -63,8 +63,11 @@
 .lp-hero-sub { margin-top: 24px; font-size: 19px; line-height: 1.6; color: var(--lp-ink-2); max-width: 560px; }
 .lp-hero-ctas { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; }
 .lp-hero-note { margin-top: 18px; font-size: 14px; color: var(--lp-muted); }
-.lp-hero-editor { margin-top: 10px; font-size: 15px; color: var(--lp-ink-2); }
-.lp-hero-editor a { color: var(--lp-ink); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+/* Primary action on its own row; Chrome extension and editor as an equal pair beneath it. */
+.lp-hero-ctas { flex-direction: column; align-items: stretch; max-width: 470px; }
+.lp-hero-secondary { display: flex; gap: 12px; }
+.lp-hero-secondary .lp-btn { flex: 1 1 0; min-width: 0; white-space: nowrap; }
+.lp-hero-secondary .lp-btn svg { flex: 0 0 auto; }
 .lp-nav-editor { padding-top: 8px; padding-bottom: 8px; }
 .lp-hero-visual { flex: 1 1 480px; min-width: 0; }
 
@@ -212,6 +215,13 @@
 @media (max-width: 720px) {
   .lp-nav-links, .lp-signin { display: none; }
   .lp-nav-cta .lp-btn { padding: 8px 12px; font-size: 14px; }
+  .lp-hero-ctas { max-width: none; }
+  .lp-hero-secondary { gap: 10px; }
+  .lp-hero-secondary .lp-btn { padding: 14px 10px; font-size: 15px; gap: 8px; }
+  .lp-nav-inner { flex-wrap: nowrap; gap: 10px; }
+  .lp-nav-editor { display: none; }
+  .lp-nav-cta .lp-btn { white-space: nowrap; }
+  .lp-logo-word { font-size: 18px; }
   .lp-hero { padding-top: 40px; gap: 40px; }
   .lp-section { padding-top: 72px; }
   .lp-final-box { padding: 40px 24px; }
