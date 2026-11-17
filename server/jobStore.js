@@ -276,8 +276,19 @@ export async function listCompanyTiers() {
  * (a pool – the caller ranks it). The repository is India-only, so "India" needs no location
  * filter; a city narrows it.
  */
-export async function findStoredJobs({ keywords = "", location = "", limit = 60 } = {}) {
-  const words = String(keywords).toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 1);
+// Seniority words narrow a search to titles that spell them out ("Senior Product Manager" would miss
+// "Product Manager II"); the job board filters by level itself (src/jobFit.js), so they're dropped here.
+const SEARCH_NOISE = new Set(["senior", "sr", "junior", "jr", "lead", "staff", "principal", "associate", "ii", "iii", "iv", "i", "the", "and", "of"]);
+
+/** Search terms for a role: lower-case words without seniority words (all of them if nothing else is left). */
+export function roleSearchWords(keywords) {
+  const words = String(keywords).toLowerCase().split(/[^a-z0-9+#]+/).filter((w) => w.length > 1 || w === "c");
+  const core = words.filter((w) => !SEARCH_NOISE.has(w));
+  return core.length ? core : words;
+}
+
+export async function findStoredJobs({ keywords = "", location = "", limit = 60, maxAgeDays = 30 } = {}) {
+  const words = roleSearchWords(keywords).map((w) => w.replace(/[^a-z0-9]/g, "")).filter(Boolean);
   if (!words.length) return [];
   let q = db()
     .from("jobs")
@@ -286,6 +297,11 @@ export async function findStoredJobs({ keywords = "", location = "", limit = 60 
     .textSearch("search_text", words.join(" & "), { config: "simple" })
     .order("last_seen_at", { ascending: false })
     .limit(limit);
+  if (maxAgeDays) {
+    // Fresh roles only: posted in the window, or (no posting date) first seen in it.
+    const since = new Date(Date.now() - maxAgeDays * 86400000).toISOString();
+    q = q.or(`posted_at.gte.${since},and(posted_at.is.null,first_seen_at.gte.${since})`);
+  }
   const place = String(location).trim();
   if (place && !/^india$/i.test(place)) q = q.ilike("location", `%${place.replace(/[%_]/g, "")}%`);
   const { data, error } = await q;

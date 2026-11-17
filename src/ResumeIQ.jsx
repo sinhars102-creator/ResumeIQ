@@ -15,6 +15,7 @@ import ResumeFilesDialog, { storeResumeFile } from "./ResumeFiles.jsx";
 import {
   computeLocalMatchScore, experienceFromRoles, getCandidateYears, parseJdYearsRange, resumeForAI, scoreResume,
 } from "./matchScore.js";
+import { assessJob, byFitThenTier, candidateProfile, GOOD_FIT, MAX_AGE_DAYS } from "./jobFit.js";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 
@@ -3569,7 +3570,7 @@ export default function ResumeIQ() {
   const [readingPdf, setReadingPdf] = useState(false);
   const [linkedInText, setLinkedInText] = useState("");
   const [extracting, setExtracting] = useState(false);
-  const [linkedInSearchKeywords, setLinkedInSearchKeywords] = useState("Product Manager");
+  const [linkedInSearchKeywords, setLinkedInSearchKeywords] = useState("");
   const [suggestedRoles, setSuggestedRoles] = useState([]);
   const [candidateYears, setCandidateYears] = useState("");
   const [showBelowLevelJobs, setShowBelowLevelJobs] = useState(false);
@@ -3707,38 +3708,64 @@ export default function ResumeIQ() {
   // Years used by both the estimate and the AI score: the "yrs exp" box, else what the resume implies.
   const matchYears = Number(candidateYears) || getCandidateYears(resume || SAMPLE_RESUME);
   const resumeHash = useMemo(() => hashString(JSON.stringify(resumeForAI(resume || SAMPLE_RESUME))), [resume]);
+  // Recruiter-style fit for every role on the board (src/jobFit.js): role family, seniority,
+  // title relevance, skills, experience and freshness. Drives what's hidden, the order and the card score.
+  const fitProfile = useMemo(
+    () => candidateProfile(resume || SAMPLE_RESUME, { roles: suggestedRoles, years: matchYears ?? null }),
+    [resume, suggestedRoles, matchYears]
+  );
+  const jobAssessments = useMemo(() => {
+    const map = new Map();
+    jobs.forEach((job) => map.set(job.id, assessJob(job, fitProfile, resume || SAMPLE_RESUME)));
+    return map;
+  }, [jobs, fitProfile, resume]);
   const jobMatchScores = useMemo(() => {
     const resumeForMatch = resume || SAMPLE_RESUME;
     const map = new Map();
     jobs.forEach((job) => {
       const analyzed = analyzedScores.get(job.id) || readCachedScore(scoreCacheKey(resumeHash, matchYears, job));
       const estimate = computeLocalMatchScore(resumeForMatch, job, matchYears);
-      map.set(job.id, analyzed ? { ...estimate, score: analyzed.score, analyzed: true } : estimate && { ...estimate, analyzed: false });
+      const fit = jobAssessments.get(job.id);
+      if (analyzed) map.set(job.id, { ...estimate, score: analyzed.score, analyzed: true });
+      else if (fit) map.set(job.id, { ...estimate, score: fit.fit, matchedSkills: fit.matchedSkills, analyzed: false });
     });
     return map;
-  }, [jobs, resume, analyzedScores, resumeHash, matchYears]);
+  }, [jobs, resume, analyzedScores, resumeHash, matchYears, jobAssessments]);
 
   const [jobSortBy, setJobSortBy] = useState("recommended");
 
   const yearsNum = Number(candidateYears) || null;
+  const hiddenReasons = useMemo(() => {
+    const counts = { different_role: 0, too_senior: 0, too_junior: 0, stale: 0 };
+    jobs.forEach((job) => {
+      const a = jobAssessments.get(job.id);
+      const reason = a && !a.show ? a.reason : isBelowCandidateLevel(job, yearsNum) ? "too_junior" : null;
+      if (reason) counts[reason] += 1;
+    });
+    return counts;
+  }, [jobs, jobAssessments, yearsNum]);
   const belowLevelJobIds = useMemo(
-    () => new Set(jobs.filter((job) => isBelowCandidateLevel(job, yearsNum)).map((job) => job.id)),
-    [jobs, yearsNum]
+    () =>
+      new Set(
+        jobs
+          .filter((job) => (jobAssessments.get(job.id) && !jobAssessments.get(job.id).show) || isBelowCandidateLevel(job, yearsNum))
+          .map((job) => job.id)
+      ),
+    [jobs, yearsNum, jobAssessments]
   );
 
   const sortedJobs = useMemo(() => {
     const list = showBelowLevelJobs ? [...jobs] : jobs.filter((job) => !belowLevelJobIds.has(job.id));
     if (jobSortBy === "recommended") {
-      // Company tier first (1 most wanted, 2 established, then the rest), then the most recently posted.
-      const posted = (job) => Date.parse(job.postedAt || 0) || job.firstSeenAt || 0;
-      list.sort((a, b) => (a.tier ?? 3) - (b.tier ?? 3) || posted(b) - posted(a));
+      // Best fit first (src/jobFit.js), then company tier (1 most wanted), then the most recent.
+      list.sort(byFitThenTier(jobAssessments));
     } else if (jobSortBy === "match") {
       list.sort((a, b) => (jobMatchScores.get(b.id)?.score ?? 0) - (jobMatchScores.get(a.id)?.score ?? 0));
     } else if (jobSortBy === "company") {
       list.sort((a, b) => (a.company || "").localeCompare(b.company || ""));
     }
     return list;
-  }, [jobs, jobSortBy, jobMatchScores, showBelowLevelJobs, belowLevelJobIds]);
+  }, [jobs, jobSortBy, jobMatchScores, showBelowLevelJobs, belowLevelJobIds, jobAssessments]);
   const easyApplyCount = useMemo(() => sortedJobs.filter(isEasyApplyJob).length, [sortedJobs]);
   const visibleJobs = useMemo(() => (easyApplyOnly ? sortedJobs.filter(isEasyApplyJob) : sortedJobs), [sortedJobs, easyApplyOnly]);
 
@@ -3766,6 +3793,11 @@ export default function ResumeIQ() {
         top20_strong_match: count((j) => (jobMatchScores.get(j.id)?.score ?? 0) >= 75),
         top20_weak_match: count((j) => jobMatchScores.has(j.id) && (jobMatchScores.get(j.id)?.score ?? 0) < 50),
         top20_posted_this_week: count((j) => (Date.parse(j.postedAt || 0) || 0) >= weekAgo),
+        top20_good_fit: count((j) => (jobAssessments.get(j.id)?.fit ?? 0) >= GOOD_FIT),
+        hidden_different_role: hiddenReasons.different_role,
+        hidden_too_senior: hiddenReasons.too_senior,
+        hidden_too_junior: hiddenReasons.too_junior,
+        hidden_stale: hiddenReasons.stale,
         top20_sources: Object.keys(sources).length,
         top_source: topSource,
         sort: jobSortBy,
@@ -3773,7 +3805,7 @@ export default function ResumeIQ() {
       });
     }, 2000);
     return () => clearTimeout(t);
-  }, [step, visibleJobs, jobSortBy, easyApplyOnly, jobMatchScores]);
+  }, [step, visibleJobs, jobSortBy, easyApplyOnly, jobMatchScores, jobAssessments, hiddenReasons]);
 
   useEffect(() => {
     if (step !== "select") return undefined;
@@ -3990,8 +4022,12 @@ export default function ResumeIQ() {
    * the live LinkedIn scrape (30–180s) streams in fresh listings and the
    * server saves them for the next search.
    */
-  const handleSearchLinkedInJobs = async (overrideKeywords, overrideYears) => {
-    const keywords = (overrideKeywords ?? linkedInSearchKeywords).trim() || "Product Manager";
+  const handleSearchLinkedInJobs = async (overrideKeywords, overrideYears, alsoRoles = []) => {
+    const keywords = (overrideKeywords ?? linkedInSearchKeywords).trim() || (suggestedRoles[0] || "").trim();
+    if (!keywords) {
+      setLinkedInSearchError("Add a role to search for (for example, the job title you want next).");
+      return;
+    }
     const levels = yearsToLinkedInLevels(overrideYears !== undefined ? overrideYears : yearsNum);
     const location = linkedInSearchIndiaOnly ? "India" : (linkedInSearchLocation.trim() || "India");
     const base = API_BASE.replace(/\/$/, "");
@@ -4015,27 +4051,45 @@ export default function ResumeIQ() {
     track("job_search_started", { india_only: linkedInSearchIndiaOnly, limit: linkedInSearchLimit, has_years: levels.length > 0 });
     const updateFeed = (patch) => setJobFeedStatus((s) => (s && s.keywords === keywords ? { ...s, ...patch } : s));
 
-    fetch(`${base}/api/jobs/saved?${params}`)
-      .then((res) => (res.ok ? res.json() : { jobs: [] }))
-      .then((data) => {
-        if (!isCurrent()) return;
-        updateFeed({ savedCount: mergeJobs(data.jobs || []) });
-      })
-      .catch(() => updateFeed({ savedCount: 0 }));
+    // Saved roles and company career pages are free, so they cover up to 3 target roles;
+    // the paid live LinkedIn run below stays on the primary role.
+    const freeRoles = [keywords, ...alsoRoles.map((r) => String(r || "").trim())]
+      .filter((r, i, all) => r && all.findIndex((x) => x.toLowerCase() === r.toLowerCase()) === i)
+      .slice(0, 3);
+    const paramsFor = (role) => {
+      const p = new URLSearchParams(params);
+      p.set("keywords", role);
+      return p;
+    };
+    Promise.all(
+      freeRoles.map((role) =>
+        fetch(`${base}/api/jobs/saved?${paramsFor(role)}`)
+          .then((res) => (res.ok ? res.json() : { jobs: [] }))
+          .then((data) => (isCurrent() ? mergeJobs(data.jobs || []) : 0))
+          .catch(() => 0)
+      )
+    ).then((counts) => updateFeed({ savedCount: counts.reduce((a, b) => a + b, 0) }));
 
     // Company career pages (Greenhouse, Lever, Ashby, Workable) and Adzuna – official APIs, full JDs.
-    const sourceParams = new URLSearchParams(params);
-    sourceParams.set("limit", "150");
-    fetch(`${base}/api/jobs/sources?${sourceParams}`)
-      .then((res) => (res.ok ? res.json() : { jobs: [] }))
-      .then((data) => {
-        if (!isCurrent()) return;
-        const found = data.jobs || [];
-        const added = mergeJobs(found, { markFresh: true });
-        updateFeed({ careerCount: found.length, careerAdded: added });
-        track("job_sources_completed", { found: found.length, new_roles: added, adzuna: !!data.sources?.adzuna?.configured });
+    Promise.all(
+      freeRoles.map((role) => {
+        const sourceParams = paramsFor(role);
+        sourceParams.set("limit", "150");
+        return fetch(`${base}/api/jobs/sources?${sourceParams}`)
+          .then((res) => (res.ok ? res.json() : { jobs: [] }))
+          .then((data) => {
+            if (!isCurrent()) return { found: 0, added: 0, adzuna: false };
+            const found = data.jobs || [];
+            return { found: found.length, added: mergeJobs(found, { markFresh: true }), adzuna: !!data.sources?.adzuna?.configured };
+          })
+          .catch(() => ({ found: 0, added: 0, adzuna: false }));
       })
-      .catch(() => updateFeed({ careerCount: 0, careerAdded: 0 }));
+    ).then((results) => {
+      const found = results.reduce((a, r) => a + r.found, 0);
+      const added = results.reduce((a, r) => a + r.added, 0);
+      updateFeed({ careerCount: found, careerAdded: added });
+      track("job_sources_completed", { found, new_roles: added, roles_searched: freeRoles.length, adzuna: results.some((r) => r.adzuna) });
+    });
 
     try {
       params.set("limit", String(linkedInSearchLimit));
@@ -4176,12 +4230,15 @@ export default function ResumeIQ() {
 
   /** Fill the job board for a resume: its target roles (else its title) and years of experience. */
   const startJobSearch = (r) => {
-    const roles = r.targetRoles && r.targetRoles.length ? r.targetRoles : [(r.title || "").trim() || "Product Manager"];
+    // Target roles, else the current title, else the latest role on the resume – never a hard-coded default.
+    const latestRole = ((r.experience || [])[0]?.role || "").trim();
+    const roles = (r.targetRoles && r.targetRoles.length ? r.targetRoles : [(r.title || "").trim() || latestRole]).filter(Boolean);
     setSuggestedRoles(roles);
     const years = getCandidateYears(r);
     setCandidateYears(years != null ? String(years) : "");
-    setLinkedInSearchKeywords(roles[0]);
-    handleSearchLinkedInJobs(roles[0], years);
+    setLinkedInSearchKeywords(roles[0] || "");
+    if (roles[0]) handleSearchLinkedInJobs(roles[0], years, roles.slice(1));
+    else track("job_search_no_role");
   };
 
   // Signed in with a saved resume: open the job board straight away instead of asking for the resume

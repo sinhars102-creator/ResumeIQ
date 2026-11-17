@@ -18,6 +18,7 @@ import {
   userFromToken, recordApplication, updateApplication, setApplicationStatus, getJobById,
   getTailorSession, saveTailorSession, saveTailoredResumeFile, getProfile,
   getEditorAccount, saveEditorAccount, userEmail,
+  roleSearchWords,
 } from "./jobStore.js";
 import { normalizeQuery, FRESH_HOURS } from "./searchDemand.js";
 import { withTiers, byTierThenNewest } from "./companyTiers.js";
@@ -314,7 +315,14 @@ app.get("/api/jobs/saved", async (req, res) => {
       // A wide pool of matching roles, then the best by company tier and recency (see companyTiers.js).
       const limit = Math.min(Number(req.query.limit) || 100, 200);
       const pool = await withTiers(await findStoredJobs({ keywords, location, limit: 800 }));
-      const jobs = pool.sort(byTierThenNewest).slice(0, limit);
+      // Roles whose title names the searched role first (the text search also matches descriptions),
+      // then company tier and recency.
+      const words = roleSearchWords(keywords);
+      const titleHit = (job) => {
+        const title = String(job.role || job.title || "").toLowerCase();
+        return words.every((w) => title.includes(w)) ? 0 : 1;
+      };
+      const jobs = pool.sort((a, b) => titleHit(a) - titleHit(b) || byTierThenNewest(a, b)).slice(0, limit);
       return res.json({ jobs, repository: "supabase" });
     } catch (err) {
       console.warn("[jobs-db] saved roles lookup failed, using the local file:", err.message);

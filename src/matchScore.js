@@ -194,7 +194,8 @@ export function parseJdYearsRange(jd) {
   const match = (jd || "").match(/(\d{1,2})\s*(?:(?:-|–|—|to)\s*(\d{1,2}))?\s*(\+)?\s*(?:\+\s*)?years?/i);
   if (!match) return null;
   const min = Number(match[1]);
-  const max = match[2] ? Number(match[2]) : null;
+  // "3-5+ years" means at least 3, with no upper limit.
+  const max = match[2] && !match[3] ? Number(match[2]) : null;
   if (min > 30 || (max != null && max < min)) return null;
   return { min, max };
 }
