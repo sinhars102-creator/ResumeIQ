@@ -107,7 +107,9 @@ export function cleanEdit(edit, resume, ctx) {
   if (op === "add_bullet" && !/^E\d+$/.test(target)) return null;
   if (op === "replace" && !/^(T|S|E\d+B\d+)$/.test(target)) return null;
   const after = String(edit.after || "").trim().slice(0, 600);
-  if (!after || after === textAt(resume, target)) return null;
+  // Same words, at most a full stop or capital letter different: not worth a suggestion.
+  const plain = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (!after || plain(after) === plain(textAt(resume, target))) return null;
   const unsupported = unsupportedClaims(after, ctx, { strict: op === "add_bullet" });
   if (unsupported.length) return { unsupported };
   const { text } = withoutInventedNumbers(after, ctx.known);
