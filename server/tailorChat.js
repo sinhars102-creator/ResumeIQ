@@ -10,15 +10,30 @@
  * Honesty rule, enforced here as well as in the prompt: a number the resume (or the user's own message)
  * doesn't contain is never written into the resume – it becomes a "[number]" blank for the user to fill.
  */
-import { callLLM } from "./llm.js";
+import { callLLM as callLLMRaw } from "./llm.js";
+
+// A hung provider request shouldn't freeze the chat: give up after 40 seconds (the page offers a retry).
+const LLM_TIMEOUT_MS = 40_000;
+function callLLM(args) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error("The AI took too long to answer. Please try again.")), LLM_TIMEOUT_MS);
+  });
+  return Promise.race([callLLMRaw(args), timeout]).finally(() => clearTimeout(timer));
+}
 import { tokenizeForMatch, buildResumeCorpus } from "../src/matchScore.js";
 import { textAt, scoreImpact } from "../src/tailorEdits.js";
+import { reviewResume, WEAK_START } from "../src/resumeReview.js";
 
 // A suggestion that lowers the job match by more than this (it drops the job's keywords) is left out.
 const MAX_SCORE_LOSS = 2;
 
 // Rough stem, so "integrations"/"integrated"/"integrating" count as the same claim.
-const stem = (w) => w.replace(/[^a-z0-9+#]/g, "").replace(/(ations|ation|ings|ing|ers|ed|es|s)$/, "");
+const stem = (w) =>
+  w
+    .replace(/[^a-z0-9+#]/g, "")
+    .replace(/(ations|ation|ings|ing|ers|ed|es|s)$/, "")
+    .replace(/([b-df-hj-np-tv-z])\1$/, "$1"); // cutting -> cutt -> cut
 const stems = (text) => new Set(tokenizeForMatch(text).map(stem).filter((w) => w.length >= 3));
 // Ordinary resume wording a rewrite may use freely, even when the job description also says it.
 const GENERIC = stems(`led lead managed manage owned own drove drive built build shipped ship launched launch delivered deliver
@@ -33,7 +48,10 @@ const GENERIC = stems(`led lead managed manage owned own drove drive built build
   organized facilitated mentored coached trained hired onboarded negotiated resolved handled achieved reached completed
   every each per daily weekly monthly quarterly annual annually two three four five several multiple first key core main
   major new existing internal external within through via based throughout ongoing regular consistent clear faster better
-  higher lower more less over under team teams people member members part whole across time times week weeks month months`);
+  higher lower more less over under team teams people member members part whole across time times week weeks month months
+  contributed contribute contributing co-wrote cowrote co-authored drafted authored lifted lift boosted boost cut saved save
+  partnered partner collaborated collaborate facilitated led spearheaded accelerated expanded grew growing increasing reducing
+  per quarter quarterly year yearly percent average total overall from into while resulting result results`);
 
 /**
  * Job-description terms a rewrite introduces that the candidate never claimed (not in the resume, not
@@ -42,15 +60,21 @@ const GENERIC = stems(`led lead managed manage owned own drove drive built build
 function unsupportedClaims(text, ctx, { strict = false } = {}) {
   // strict (a brand-new bullet): every meaningful word must come from the resume or the candidate;
   // otherwise (rewording an existing line): only the job's own terms are checked.
-  return [...stems(text)].filter((w) => (strict || ctx.jd.has(w)) && !ctx.supported.has(w) && !GENERIC.has(w));
+  // The [number] blank is ours, not a claim. Returns the words as written (not their stems), for questions.
+  const clean = String(text).replace(/\[number\]/g, " ");
+  const bad = new Set([...stems(clean)].filter((w) => (strict || ctx.strict || ctx.jd.has(w)) && !ctx.supported.has(w) && !GENERIC.has(w)));
+  const words = tokenizeForMatch(clean).filter((w) => bad.has(stem(w)));
+  return [...new Set(words.map((w) => w.replace(/[^a-z0-9+#/-]/g, "")))].filter(Boolean);
 }
 
 /** What the candidate has claimed (resume + their own chat messages) and what the job asks for. */
-export function claimContext(resume, jd, userText = "") {
+export function claimContext(resume, jd, userText = "", { strict = false } = {}) {
   return {
     known: numbersIn(`${resumeLines(resume)}\n${userText}`),
-    supported: stems(`${buildResumeCorpus(resume)}\n${userText}`),
+    supported: stems(`${buildResumeCorpus(resume)}\n${resume?.contact || ""}\n${(resume?.education || []).map((e) => [e.degree, e.school].join(" ")).join("\n")}\n${userText}`),
     jd: stems(jd || ""),
+    // No job description (improving the resume on its own): every new word must come from the candidate.
+    strict,
   };
 }
 
@@ -59,6 +83,7 @@ const MAX_SUGGESTIONS = 10;
 /** The resume as numbered lines, for the prompt. */
 export function resumeLines(resume) {
   const lines = [];
+  if (resume?.contact) lines.push(`[C] ${resume.contact}`);
   if (resume?.title) lines.push(`[T] ${resume.title}`);
   if (resume?.summary) lines.push(`[S] ${resume.summary}`);
   (resume?.experience || []).forEach((role, i) => {
@@ -67,6 +92,7 @@ export function resumeLines(resume) {
   });
   (resume?.education || []).forEach((e) => lines.push(`(education) ${[e.degree, e.school, e.year].filter(Boolean).join(" · ")}`));
   if (resume?.skills?.length) lines.push(`[K] Skills: ${resume.skills.join(", ")}`);
+  if (resume?.certifications?.length) lines.push(`[Z] Certifications: ${resume.certifications.join(", ")}`);
   return lines.join("\n");
 }
 
@@ -91,8 +117,22 @@ function withoutInventedNumbers(after, known) {
 export function cleanEdit(edit, resume, ctx) {
   if (!edit || typeof edit !== "object") return null;
   const { target, op } = edit;
-  if (!["replace", "add_bullet", "remove", "add_skills"].includes(op)) return null;
+  if (!["replace", "add_bullet", "remove", "add_skills", "set_skills", "add_certifications"].includes(op)) return null;
   if (textAt(resume, target) == null) return null;
+  if (op === "set_skills") {
+    // Remove or reorder only: every skill must already be on the list.
+    const have = new Set((resume.skills || []).map((x) => String(x).toLowerCase()));
+    const skills = (Array.isArray(edit.skills) ? edit.skills : []).map((x) => String(x).trim()).filter(Boolean);
+    return target === "K" && skills.length && skills.every((x) => have.has(x.toLowerCase())) ? { target, op, skills } : null;
+  }
+  if (op === "add_certifications") {
+    const have = new Set((resume.certifications || []).map((x) => String(x).toLowerCase()));
+    const items = (Array.isArray(edit.items) ? edit.items : []).map((x) => String(x).trim()).filter((x) => x && x.length <= 120 && !have.has(x.toLowerCase()));
+    const said = items.filter((x) => [...stems(x)].every((w) => ctx.supported.has(w) || GENERIC.has(w)));
+    if (target !== "Z") return null;
+    if (said.length) return { target, op, items: said.slice(0, 8) };
+    return items.length ? { unsupported: items.slice(0, 3) } : null;
+  }
   if (op === "add_skills") {
     if (target !== "K") return null;
     const have = new Set((resume.skills || []).map((s) => s.toLowerCase()));
@@ -105,12 +145,12 @@ export function cleanEdit(edit, resume, ctx) {
   }
   if (op === "remove") return /^E\d+B\d+$/.test(target) ? { target, op } : null;
   if (op === "add_bullet" && !/^E\d+$/.test(target)) return null;
-  if (op === "replace" && !/^(T|S|E\d+B\d+)$/.test(target)) return null;
+  if (op === "replace" && !/^(C|T|S|E\d+B\d+)$/.test(target)) return null;
   const after = String(edit.after || "").trim().slice(0, 600);
   // Same words, at most a full stop or capital letter different: not worth a suggestion.
   const plain = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   if (!after || plain(after) === plain(textAt(resume, target))) return null;
-  const unsupported = unsupportedClaims(after, ctx, { strict: op === "add_bullet" });
+  const unsupported = unsupportedClaims(after, ctx, { strict: op === "add_bullet" || target === "C" });
   if (unsupported.length) return { unsupported };
   const { text } = withoutInventedNumbers(after, ctx.known);
   return { target, op, after: text, blanks: (text.match(/\[number\]/g) || []).length };
@@ -124,6 +164,7 @@ function askAbout(terms, jd) {
     return m ? m[0] : t;
   });
   const list = [...new Set(phrases)].slice(0, 3).join(", ");
+  if (!jd) return `I'd need to mention ${list}, which isn't on your resume yet. Have you worked with ${phrases.length > 1 ? "these" : "it"}? Tell me where, and I'll add it.`;
   return `The job mentions ${list}. Have you worked with ${phrases.length > 1 ? "any of these" : "this"}? Tell me where, and I'll add it.`;
 }
 
@@ -140,6 +181,7 @@ const RULES = `Rules:
 - Keep the candidate's facts; change wording, order of emphasis, and the job's own terms where the resume already supports them.
 - A rewritten line may only mention teams, tools, domains and results that the same line (or the candidate in this chat) already states. To add something new, ask a question instead.
 - Never change job titles or seniority (no "Senior", "Lead" or "Head" the resume doesn't already use for that person).
+- Keep the candidate's level of ownership: "helped", "assisted" or "supported" may become "contributed to" or "partnered on", never "led", "owned" or "launched".
 - Bullets: one line, start with a strong verb, at most about 25 words.
 - Refer to resume lines only by their ids in square brackets (T, S, E0, E0B1, K).`;
 
@@ -147,7 +189,10 @@ const EDIT_SHAPE = `An edit is one of:
 {"target":"S","op":"replace","after":"new text"}            (T, S or a bullet id like E0B1)
 {"target":"E0","op":"add_bullet","after":"new bullet"}      (adds a bullet to role E0)
 {"target":"E1B3","op":"remove"}                              (drops a weak or irrelevant bullet)
-{"target":"K","op":"add_skills","skills":["SQL","Tableau"]} (only skills the resume already shows evidence of)`;
+{"target":"K","op":"add_skills","skills":["SQL","Tableau"]} (only skills the resume already shows evidence of)
+{"target":"K","op":"set_skills","skills":["SQL","Jira"]}     (the whole skills list, only removing or reordering)
+{"target":"C","op":"replace","after":"email · phone · city · linkedin.com/in/…"} (the contact line)
+{"target":"Z","op":"add_certifications","items":["PMP (2023)"]} (only certifications the candidate has stated)`;
 
 /** Suggestions for the resume against a job description. */
 export async function suggestForJob({ resume, jd }) {
@@ -267,6 +312,83 @@ async function cleanAll(rawEdits, resume, ctx) {
   return first;
 }
 
+const RESULT_QUESTION = "What changed because of this work? A number helps most – e.g. how many users or customers, % faster, ₹ saved, team size. Tell me and I'll rewrite the line.";
+
+/**
+ * "Improve my resume" (no job description): the review's checks, with the model writing the rewrites
+ * for flagged lines in one call. Every rewrite passes the strict honesty check (only the candidate's own
+ * words, numbers as [number] blanks); one that can't becomes a question instead.
+ */
+export async function reviewForImprove({ resume, pages = null }) {
+  const review = reviewResume(resume, { pages });
+  const toRewrite = review.issues.filter((i) => i.fix === "rewrite");
+  const ctx = claimContext(resume, "", "", { strict: true });
+  let rewrites = {};
+  if (toRewrite.length) {
+    const user = `Improve these resume lines. Each has a problem to fix.
+
+RESUME (line ids in brackets):
+${resumeLines(resume)}
+
+LINES TO FIX:
+${toRewrite.map((i, n) => `${n + 1}. [${i.target}] ${i.hint === "summary_missing" ? "there is no summary: write one (2-3 sentences) from the resume's own facts" : i.hint}`).join("\n")}
+
+${RULES}
+- Bullets start with a strong verb (past tense for past roles); one line, at most about 25 words.
+- Summary: 2-3 sentences, no "I", with years of experience, focus and one strength the resume shows.
+
+Return JSON: {"rewrites": [{"target": "E0B1", "after": "the improved line"}, ...]} – one per line above.`;
+    try {
+      const data = parseJson(await callLLM({ system: "You are a senior resume writer. You improve wording without adding facts. Return ONLY JSON.", user, maxTokens: 1500, json: true }));
+      for (const w of Array.isArray(data.rewrites) ? data.rewrites : []) if (w?.target && typeof w.after === "string") rewrites[w.target] = w.after;
+    } catch (err) {
+      console.warn("[tailor] review rewrites failed:", err.message);
+      rewrites = {};
+    }
+  }
+  const raw = toRewrite.map((i) => (rewrites[i.target] ? { target: i.target, op: "replace", after: rewrites[i.target] } : null));
+  const cleaned = await cleanAll(raw, resume, ctx);
+  // A rewrite must fix what it was flagged for (a "weak opening" rewrite that still opens weakly isn't one).
+  const fixes = (i, e) => !(/weak opening/.test(i.hint || "") && WEAK_START.test(String(e.after || "").trim()) && !/no number|too long|too vague/.test(i.hint || ""));
+  const edits = new Map(toRewrite.map((i, n) => [i.id, cleaned[n] && !cleaned[n].unsupported && fixes(i, cleaned[n]) ? cleaned[n] : null]));
+
+  const order = [...review.categories].sort((a, b) => a.score - b.score).map((c) => c.id);
+  const suggestions = review.issues
+    .map((i) => {
+      let edit = i.fix === "edit" ? i.edit : i.fix === "rewrite" ? edits.get(i.id) : null;
+      let question = i.question || null;
+      if (i.fix === "rewrite" && !edit) {
+        // No honest rewrite: ask for the missing result instead, or leave a vague-but-true line alone.
+        if (!/no number or result|too vague/.test(i.hint || "")) return null;
+        question = RESULT_QUESTION;
+      }
+      // Name the change by what the rewrite actually does.
+      let title = i.title;
+      if (i.fix === "rewrite" && edit && i.target !== "S") {
+        title = edit.blanks ? "Show the result" : /weak opening/.test(i.hint) ? "Start with a strong verb" : /too long/.test(i.hint) ? "Tighten this bullet" : "Sharpen this bullet";
+      }
+      return {
+        id: i.id,
+        category: i.category,
+        priority: i.priority,
+        title,
+        why: i.why,
+        edit: edit || null,
+        question: edit ? null : question,
+        action: i.fix === "action" ? i.action : null,
+        target: i.target || null,
+        before: i.target ? textAt(resume, i.target) : null,
+      };
+    })
+    .filter((s) => s && (s.edit || s.question || s.action))
+    .sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category) || (a.priority === "must" ? 0 : 1) - (b.priority === "must" ? 0 : 1));
+  return {
+    overall: review.overall,
+    categories: review.categories.map((c) => ({ id: c.id, label: c.label, score: c.score })),
+    suggestions,
+  };
+}
+
 /** One chat turn: a reply, plus edits the candidate can apply. */
 export async function chatTurn({ resume, jd, jobTitle = "", history = [], message, answerTo = "" }) {
   // What the candidate has said: their own messages, never the job description they pasted.
@@ -291,7 +413,7 @@ Return an empty "edits" list when no change to the resume is needed.`;
   const raw = await callLLM({ system, user, maxTokens: 2500, json: true });
   const data = parseJson(raw);
   const userText = `${message}\n${own.join("\n")}`;
-  const ctx = claimContext(resume, jd, userText);
+  const ctx = claimContext(resume, jd, userText, { strict: !jd });
   const asks = [];
   const raws = Array.isArray(data.edits) ? data.edits : [];
   const cleanedEdits = await cleanAll(raws.map((e) => (e?.edit && typeof e.edit === "object" ? e.edit : e && typeof e === "object" ? e : null)), resume, ctx);
@@ -318,6 +440,8 @@ Return an empty "edits" list when no change to the resume is needed.`;
     .filter(Boolean)
     .slice(0, 8);
   let reply = String(data.reply || "").slice(0, 800) || (edits.length ? "Here's the change – tap Apply to use it." : "");
+  // The model's reply describes its own edits; when every one was blocked, it would claim a change that didn't happen.
+  if (asks.length && !edits.length) reply = "I couldn't make that change without adding things you haven't told me.";
   if (asks.length) reply = `${reply}${reply ? " " : ""}${askAbout([...new Set(asks)], jd)}`.trim();
   return { reply: reply || "Got it.", suggestions: edits };
 }

@@ -260,7 +260,8 @@ export function buildResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FO
           doc.text(exp.period, margin, y);
           y += lineHSmall;
         }
-        (exp.bullets || []).slice(0, MAX_BULLETS_PER_EXPERIENCE).forEach((b) => {
+        // format.maxBullets: the editor prints every bullet; elsewhere the first few per role.
+        (exp.bullets || []).slice(0, format.maxBullets ?? MAX_BULLETS_PER_EXPERIENCE).forEach((b) => {
           y = checkPage(y);
           const textW = contentW - bulletIndentMm - 2;
           const lines = doc.splitTextToSize(String(b), textW);
@@ -314,6 +315,23 @@ export function buildResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FO
       if (skills.length) {
         drawWrappedText(skills.join(" · "), margin, contentW, lineHSmall);
       }
+    }
+    // Opt-in (add "certifications" to format.sectionOrder): one certification per line.
+    if (key === "certifications" && (resumeData.certifications || []).length) {
+      y = checkPage(y);
+      doc.setFont(fontH, "bold");
+      doc.setFontSize(fs(format.fontSizeLabel, 9));
+      doc.setCharSpace(0);
+      doc.setTextColor(90, 107, 138);
+      doc.text("CERTIFICATIONS", margin, y);
+      doc.setTextColor(fc.r, fc.g, fc.b);
+      y += lineH;
+      doc.setFont(fontB, "normal");
+      doc.setFontSize(fs(format.fontSizeBody, 10));
+      resumeData.certifications.forEach((c) => {
+        y = checkPage(y);
+        drawWrappedText(String(c), margin, contentW, lineHSmall);
+      });
     }
   };
 

@@ -37,7 +37,7 @@ function sendLLMError(res, err, tag) {
 }
 import { runAssistantTurn, listGaps } from "./assistant.js";
 import { generateResume, draftGapEdits } from "./generateResume.js";
-import { suggestForJob, chatTurn } from "./tailorChat.js";
+import { suggestForJob, chatTurn, reviewForImprove } from "./tailorChat.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootEnv = resolve(__dirname, "../.env");
@@ -221,6 +221,15 @@ app.post("/api/tailor/suggest", async (req, res) => {
     res.json(await suggestForJob({ resume, jd }));
   } catch (err) {
     sendLLMError(res, err, "tailor:suggest");
+  }
+});
+app.post("/api/tailor/review", async (req, res) => {
+  const { resume, pages } = req.body || {};
+  if (!resume || typeof resume !== "object") return res.status(400).json({ error: "resume is required" });
+  try {
+    res.json(await reviewForImprove({ resume, pages: Number.isFinite(pages) ? pages : null }));
+  } catch (err) {
+    sendLLMError(res, err, "tailor:review");
   }
 });
 app.post("/api/tailor/chat", async (req, res) => {

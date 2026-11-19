@@ -2,8 +2,9 @@
  * Resume edits for the tailor chat, shared by the page (src/TailorChat.jsx) and the API
  * (server/tailorChat.js) so both read and change resume lines the same way.
  *
- * Line ids: T title · S summary · E{i} a role · E{i}B{j} a bullet · K skills.
- * Edits: { target, op: "replace" | "add_bullet" | "remove" | "add_skills", after?, skills? }.
+ * Line ids: C contact line · T title · S summary · E{i} a role · E{i}B{j} a bullet · K skills · Z certifications.
+ * Edits: { target, op: "replace" | "add_bullet" | "remove" | "add_skills" | "set_skills" | "add_certifications",
+ *          after?, skills?, items? }. set_skills only removes or reorders (it never brings in a new skill).
  * A removed bullet stays as null until finalResume(), so later bullet ids keep pointing at the same lines.
  */
 import { computeLocalMatchScore } from "./matchScore.js";
@@ -19,8 +20,11 @@ export function finalResume(resume) {
 
 /** The current text at a line id ("" for a role, which only takes new bullets), or null when it doesn't exist. */
 export function textAt(resume, target) {
-  if (target === "T") return resume?.title ?? null;
-  if (target === "S") return resume?.summary ?? null;
+  if (target === "C") return resume?.contact ?? "";
+  if (target === "Z") return (resume?.certifications || []).join(", ");
+  // Title and summary can be written even when the resume has none yet.
+  if (target === "T") return resume ? resume.title ?? "" : null;
+  if (target === "S") return resume ? resume.summary ?? "" : null;
   if (target === "K") return (resume?.skills || []).join(", ");
   const bullet = /^E(\d+)B(\d+)$/.exec(target || "");
   if (bullet) return resume?.experience?.[+bullet[1]]?.bullets?.[+bullet[2]] ?? null;
@@ -34,7 +38,8 @@ export function applyEdit(resume, edit, after = edit.after) {
   const r = clone(resume);
   const bullet = /^E(\d+)B(\d+)$/.exec(edit.target || "");
   if (edit.op === "replace") {
-    if (edit.target === "T") r.title = after;
+    if (edit.target === "C") r.contact = after;
+    else if (edit.target === "T") r.title = after;
     else if (edit.target === "S") r.summary = after;
     else if (bullet) r.experience[+bullet[1]].bullets[+bullet[2]] = after;
   } else if (edit.op === "add_bullet") {
@@ -42,6 +47,11 @@ export function applyEdit(resume, edit, after = edit.after) {
     r.experience[i].bullets = [...(r.experience[i].bullets || []), after];
   } else if (edit.op === "remove" && bullet) {
     r.experience[+bullet[1]].bullets[+bullet[2]] = null;
+  } else if (edit.op === "set_skills") {
+    r.skills = [...(edit.skills || [])];
+  } else if (edit.op === "add_certifications") {
+    const have = new Set((r.certifications || []).map((c) => c.toLowerCase()));
+    r.certifications = [...(r.certifications || []), ...(edit.items || []).filter((c) => !have.has(c.toLowerCase()))];
   } else if (edit.op === "add_skills") {
     const have = new Set((r.skills || []).map((s) => s.toLowerCase()));
     r.skills = [...(r.skills || []), ...(edit.skills || []).filter((s) => !have.has(s.toLowerCase()))];

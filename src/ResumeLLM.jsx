@@ -15,6 +15,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase, loadProfile, saveProfile } from "./easyApply/supabaseClient.js";
 import { extractResumeFromText, readResumeFileText, downloadResumePdf, SAMPLE_RESUME } from "./ResumeIQ.jsx";
 import { finalResume, textAt, applyEdit, matchScore, scoreImpact } from "./tailorEdits.js";
+import { reviewResume, CATEGORIES } from "./resumeReview.js";
+import { buildResumePdf, DEFAULT_PDF_FORMAT } from "./resumePdf.js";
 import { track } from "./analytics.js";
 import { trackSignUp } from "./googleAds.js";
 import "./ResumeLLM.css";
@@ -45,6 +47,19 @@ const Icon = {
   menu: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>,
   close: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>,
 };
+
+// The editor's PDF: every bullet, and certifications (the job flow's PDF keeps 3 bullets per role).
+const PDF_FORMAT = { ...DEFAULT_PDF_FORMAT, maxBullets: 12, sectionOrder: [...DEFAULT_PDF_FORMAT.sectionOrder, "certifications"] };
+const pageCount = (resume) => {
+  try {
+    return buildResumePdf(finalResume(resume), null, PDF_FORMAT)?.getNumberOfPages() ?? null;
+  } catch {
+    return null;
+  }
+};
+const GUIDED = ["job", "review"]; // suggestions that come one at a time
+const catLabel = (id) => CATEGORIES.find((c) => c.id === id)?.label || "";
+const tone = (score) => (score >= 75 ? "good" : score >= 50 ? "ok" : "low");
 
 const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const isWide = () => window.matchMedia(WIDE).matches;
@@ -157,7 +172,7 @@ function ResumePaper({ resume, markers, flash, onMarker }) {
     <article className="rl-paper">
       <h1>{r.name}</h1>
       {r.title && <p data-line="T" className={`${cls("T")} rl-p-title`}>{r.title}{marks("T")}</p>}
-      {r.contact && <p className="rl-p-contact">{r.contact}</p>}
+      {r.contact && <p data-line="C" className={`${cls("C")} rl-p-contact`}>{r.contact}{marks("C")}</p>}
       {r.summary && (
         <section>
           <h2>Summary</h2>
@@ -192,6 +207,10 @@ function ResumePaper({ resume, markers, flash, onMarker }) {
           <p data-line="K" className={cls("K")}>{r.skills.join(" · ")}{marks("K")}</p>
         </section>
       )}
+      <section>
+        <h2>Certifications</h2>
+        <p data-line="Z" className={cls("Z")}>{(r.certifications || []).length ? r.certifications.join(" · ") : <span className="rl-p-empty">None added yet</span>}{marks("Z")}</p>
+      </section>
     </article>
   );
 }
@@ -259,6 +278,10 @@ export default function ResumeLLM() {
   const suggestions = useMemo(() => chat?.suggestions || {}, [chat]);
   const messages = chat?.messages || [];
   const score = resume && jd ? matchScore(resume, { title: job?.title, jd }) : null;
+  const improving = chat?.mode === "improve";
+  const pages = useMemo(() => (resume ? pageCount(resume) : null), [resume]);
+  // Live: recomputed from the resume as fixes are applied.
+  const review = useMemo(() => (resume ? reviewResume(resume, { pages }) : null), [resume, pages]);
 
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: "smooth" });
@@ -282,7 +305,7 @@ export default function ResumeLLM() {
     saveToAccount(parsed, s);
     const roles = (parsed.experience || []).length;
     say({ role: "bot", kind: "resume", text: `Got it${firstName(parsed) ? `, ${firstName(parsed)}` : ""}. ${parsed.title || "Your resume"} · ${roles} role${roles === 1 ? "" : "s"} · ${(parsed.skills || []).length} skills${s && parsed !== SAMPLE_RESUME ? " – saved to your account." : "."}` });
-    say({ role: "bot", text: "Now paste the job description you're applying for, and I'll take you through the changes one at a time." });
+    say({ role: "bot", kind: "choose", text: "What would you like to do?" });
     if (isWide()) setResumeOpen(true);
   }
 
@@ -334,6 +357,7 @@ export default function ResumeLLM() {
       update((c) => ({
         ...c,
         resume: c.resume || resume,
+        mode: "tailor",
         jd: text,
         job: { title: data.jobTitle, company: data.company },
         title: [data.jobTitle, data.company].filter(Boolean).join(" · ") || "Tailored resume",
@@ -357,17 +381,21 @@ export default function ResumeLLM() {
    */
   function showNext() {
     update((c) => {
-      const list = Object.values(c.suggestions).filter((x) => x.source === "job");
-      if (!list.length || list.some((x) => x.status === "pending")) return c;
+      const list = Object.values(c.suggestions).filter((x) => GUIDED.includes(x.source));
+      if (!list.length || list.some((x) => x.status === "pending" || x.status === "requested")) return c;
       const next = c.queue.find((id) => c.suggestions[id]?.status === "queued");
       if (!next) {
         if (c.messages.some((m) => m.kind === "done")) return c;
         return { ...c, messages: [...c.messages, { id: uid(), role: "bot", kind: "done" }] };
       }
+      // Improve mode: a short header when moving into a new category.
+      const cat = c.suggestions[next].category;
+      const header = cat && cat !== c.lastCategory ? [{ id: uid(), role: "bot", kind: "category", category: cat }] : [];
       return {
         ...c,
+        lastCategory: cat || c.lastCategory,
         suggestions: { ...c.suggestions, [next]: { ...c.suggestions[next], status: "pending" } },
-        messages: [...c.messages, { id: uid(), role: "bot", kind: "suggestion", sid: next }],
+        messages: [...c.messages, ...header, { id: uid(), role: "bot", kind: "suggestion", sid: next }],
       };
     });
   }
@@ -387,9 +415,11 @@ export default function ResumeLLM() {
       const was = score;
       const nextResume = applyEdit(resume, s.edit, after);
       const now = jd ? matchScore(nextResume, { title: job?.title, jd }) : null;
+      const strengthNow = improving ? reviewResume(nextResume, { pages: pageCount(nextResume) }).overall : null;
+      const strengthWas = improving ? review?.overall : null;
       update((c) => ({ ...c, resume: nextResume, suggestions: { ...c.suggestions, [s.id]: { ...s, status: "applied" } } }));
       say({ role: "user", text: "Apply", small: true });
-      say({ role: "bot", text: `✓ Applied${now != null && was != null && now !== was ? ` · match ${was}% → ${now}%` : ""}.`, small: true });
+      say({ role: "bot", text: `✓ Applied${now != null && was != null && now !== was ? ` · match ${was}% → ${now}%` : ""}${strengthNow != null && strengthWas != null && strengthNow !== strengthWas ? ` · strength ${strengthWas} → ${strengthNow}` : ""}.`, small: true });
       setFlash(s.edit.target);
       setTimeout(() => setFlash(null), 1600);
       track("rllm_applied", { priority: s.priority, op: s.edit.op, source: s.source });
@@ -399,7 +429,7 @@ export default function ResumeLLM() {
       track("rllm_skipped", { priority: s.priority, question: !!s.question, source: s.source });
     }
     // Answering a job question or changing a job suggestion: its replacement counts for it.
-    const jobItem = s.source === "job" || suggestions[s.parent]?.source === "job";
+    const jobItem = GUIDED.includes(s.source) || GUIDED.includes(suggestions[s.parent]?.source);
     if (jobItem) showNext();
   }
 
@@ -410,11 +440,11 @@ export default function ResumeLLM() {
   }
 
   // ---- chat ----
-  async function send(raw) {
+  async function send(raw, { parent = null } = {}) {
     const text = String(raw ?? input).trim();
     if (!text || busy) return;
     setInput("");
-    const m = mode;
+    const m = parent ? { kind: "action", sid: parent } : mode;
     setMode(null);
     if (!resume) {
       if (text.length >= MIN_RESUME_CHARS) return readResume(text);
@@ -422,7 +452,7 @@ export default function ResumeLLM() {
       say({ role: "bot", text: "Let's start with your resume: attach it with + or paste its full text here." });
       return;
     }
-    if (!jd && !m) {
+    if (!jd && (!m || m.kind === "paste")) {
       if (/^https?:\/\/\S+$/i.test(text)) {
         say({ role: "user", text });
         say({ role: "bot", text: "Reading job links is coming soon. For now, open the job, copy the whole description, and paste it here." });
@@ -445,11 +475,11 @@ export default function ResumeLLM() {
       update((c) => {
         const all = { ...c.suggestions };
         cards.forEach((s) => (all[s.id] = s));
-        if (m) all[m.sid] = { ...all[m.sid], status: m.kind === "answer" ? "answered" : "replaced" };
+        if (m?.sid) all[m.sid] = { ...all[m.sid], status: m.kind === "answer" ? "answered" : m.kind === "action" ? "done" : "replaced" };
         return { ...c, suggestions: all, messages: [...c.messages, { id: uid(), role: "bot", text: data.reply }, ...cards.map((s) => ({ id: uid(), role: "bot", kind: "suggestion", sid: s.id }))] };
       });
       // Nothing to apply from an answer: move on to the next job suggestion.
-      if (m && !cards.length && target?.source === "job") showNext();
+      if (m?.sid && !cards.length && GUIDED.includes(target?.source)) showNext();
     } catch (e) {
       say({ role: "bot", text: `Sorry, that didn't work (${e.message}). Please try again.` });
     } finally {
@@ -522,6 +552,53 @@ export default function ResumeLLM() {
   const applied = Object.values(suggestions).filter((s) => s.status === "applied").length;
   const empty = messages.length === 0;
   const name = firstName(resume) || firstName({ name: session?.user?.user_metadata?.full_name });
+  /** "Improve my resume": the category review, then fixes one at a time, weakest category first. */
+  async function startImprove() {
+    if (busy || !resume) return;
+    say({ role: "user", text: "Improve my resume" });
+    setBusy(true);
+    const started = Date.now();
+    try {
+      const data = await post("/api/tailor/review", { resume, pages });
+      const all = {};
+      const perCat = {};
+      data.suggestions.forEach((x) => {
+        perCat[x.category] = (perCat[x.category] || 0) + 1;
+        all[x.id] = { ...x, n: perCat[x.category], status: "queued", source: "review" };
+      });
+      update((c) => ({
+        ...c,
+        mode: "improve",
+        title: "Improve my resume",
+        jd: "",
+        job: null,
+        baseStrength: data.overall,
+        suggestions: { ...Object.fromEntries(Object.entries(c.suggestions).filter(([, x]) => !GUIDED.includes(x.source))), ...all },
+        queue: data.suggestions.map((x) => x.id),
+        lastCategory: null,
+        messages: [
+          ...c.messages,
+          { id: uid(), role: "bot", kind: "strength" },
+          { id: uid(), role: "bot", text: data.suggestions.length ? `I found ${data.suggestions.length} things to improve. We'll start with your weakest area, one change at a time – apply, change or skip each.` : "Your resume is in great shape – nothing important to fix." },
+        ],
+      }));
+      track("rllm_review", { overall: data.overall, count: data.suggestions.length, seconds: Math.round((Date.now() - started) / 100) / 10, pages });
+      showNext();
+    } catch (e) {
+      say({ role: "bot", text: `I couldn't review your resume just now (${e.message}).`, retry: "improve" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function startTailor() {
+    say({ role: "user", text: "Tailor it to a job" });
+    update((c) => ({ ...c, mode: "tailor" }));
+    say({ role: "bot", text: "Paste the job description you're applying for – the whole thing, from the job page – and I'll take you through the changes one at a time." });
+    track("rllm_tailor_chosen");
+    setTimeout(() => inputRef.current?.focus(), 50);
+  }
+
   const starters = !resume
     ? [
         { icon: "📄", label: "Upload my resume", run: () => fileRef.current?.click() },
@@ -530,9 +607,15 @@ export default function ResumeLLM() {
       ]
     : !jd
       ? [
-          { icon: "🎯", label: "Tailor it to a job description", run: () => inputRef.current?.focus() },
-          { icon: "🧪", label: "Try a sample job description", run: () => send(SAMPLE_JD) },
-          { icon: "📝", label: "Improve my summary", run: () => send("Rewrite my summary to be sharper, in 2-3 sentences.") },
+          ...(chat?.mode === "tailor"
+            ? [{ icon: "🧪", label: "Try a sample job description", run: () => send(SAMPLE_JD) }]
+            : improving
+              ? [{ icon: "🎯", label: "Tailor it to a job", run: startTailor }]
+              : [
+                  { icon: "✏️", label: "Improve my resume", run: startImprove },
+                  { icon: "🎯", label: "Tailor it to a job", run: startTailor },
+                ]),
+          ...(improving ? [{ icon: "📏", label: "Make it 1 page", run: () => send("Make my resume fit on one page: tighten wording and drop the least important bullets from older roles.") }] : []),
           { icon: "📄", label: "Use a different resume", run: () => fileRef.current?.click() },
         ]
       : [
@@ -543,7 +626,7 @@ export default function ResumeLLM() {
         ];
   // A resume read before signing in: the sign-in card is the next step, nothing else.
   const signInPending = messages.some((m) => m.kind === "signin" && !m.done);
-  const placeholder = signInPending ? "Sign in above to continue" : mode?.kind === "answer" ? "Type your answer…" : mode?.kind === "change" ? "How should I change it?" : mode?.kind === "paste" || !resume ? "Paste your resume, or attach it with +" : !jd ? "Paste the job description…" : "Ask for any change…";
+  const placeholder = signInPending ? "Sign in above to continue" : mode?.kind === "answer" ? "Type your answer…" : mode?.kind === "change" ? "How should I change it?" : mode?.kind === "paste" || !resume ? "Paste your resume, or attach it with +" : !jd && !improving ? "Paste the job description…" : "Ask for any change…";
 
   const composer = (
     <form className="rl-composer" onSubmit={(e) => { e.preventDefault(); send(); }}>
@@ -578,28 +661,59 @@ export default function ResumeLLM() {
     </form>
   );
 
+  /** Overall strength and a bar per category – live, so it rises as fixes are applied. */
+  function renderStrength() {
+    if (!review) return null;
+    return (
+      <div className="rl-strength">
+        <div className="rl-strength-top">
+          <span className={`rl-strength-num rl-${tone(review.overall)}`}>{review.overall}</span>
+          <div>
+            <b>Resume strength</b>
+            <p className="rl-strength-sub">{chat?.baseStrength != null && chat.baseStrength !== review.overall ? `Up from ${chat.baseStrength} · ` : ""}{pages ? `${pages} page${pages > 1 ? "s" : ""}` : ""}</p>
+          </div>
+        </div>
+        {review.categories.map((c) => (
+          <div key={c.id} className="rl-strength-row">
+            <span className="rl-strength-label">{c.label}</span>
+            <span className="rl-bar"><span className={`rl-bar-fill rl-${tone(c.score)}`} style={{ width: `${Math.max(4, c.score)}%` }} /></span>
+            <span className="rl-strength-score">{c.score}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   function renderSuggestion(s) {
     const before = s.before ?? (s.edit ? textAt(resume, s.edit.target) : null);
     const blanks = s.edit?.after ? (s.edit.after.match(/\[number\]/g) || []).length : 0;
     const impact = s.status === "pending" && s.edit && jd ? scoreImpact(resume, s.edit, { title: job?.title, jd }) : null;
     const jobCount = Object.values(suggestions).filter((x) => x.source === "job").length;
+    const catCount = s.category ? Object.values(suggestions).filter((x) => x.source === "review" && x.category === s.category).length : 0;
     return (
       <div className={`rl-sugg rl-sugg-${s.status}`} data-sid={s.id}>
         <div className="rl-sugg-head">
           {s.source === "job" && <span className="rl-step">{s.n} of {jobCount}</span>}
+          {s.source === "review" && <span className="rl-step">{catLabel(s.category)} · {s.n} of {catCount}</span>}
           {s.priority === "must" && <span className="rl-tag-must">Must-fix</span>}
           {impact > 0 && <span className="rl-tag-impact">+{impact}% match</span>}
         </div>
         <p className="rl-sugg-title">{s.title}</p>
         {s.why && <p className="rl-sugg-why">{s.why}</p>}
         {s.question && <p className="rl-sugg-q">{s.question}</p>}
-        {s.edit && s.edit.op !== "add_skills" && (
+        {s.edit && !["add_skills", "set_skills", "add_certifications"].includes(s.edit.op) && (
           <div className="rl-diff">
             {before ? <del>{before}</del> : <span className="rl-diff-note">New bullet</span>}
             {s.edit.op === "remove" ? <span className="rl-diff-note">Remove this bullet</span> : <ins>{s.edit.after}</ins>}
           </div>
         )}
         {s.edit?.op === "add_skills" && <div className="rl-diff"><ins>Add skills: {s.edit.skills.join(", ")}</ins></div>}
+        {s.edit?.op === "set_skills" && (() => {
+          const keep = new Set(s.edit.skills.map((x) => x.toLowerCase()));
+          const dropped = (resume.skills || []).filter((x, i, all) => !keep.has(String(x).toLowerCase()) || all.findIndex((y) => String(y).toLowerCase() === String(x).toLowerCase()) !== i);
+          return <div className="rl-diff">{dropped.length > 0 && <del>Remove: {dropped.join(", ")}</del>}<ins>Keep: {s.edit.skills.join(", ")}</ins></div>;
+        })()}
+        {s.edit?.op === "add_certifications" && <div className="rl-diff"><ins>Add: {s.edit.items.join(", ")}</ins></div>}
         {s.status === "pending" && blanks > 0 && (
           <div className="rl-blanks">
             {Array.from({ length: blanks }, (_, k) => (
@@ -614,6 +728,8 @@ export default function ResumeLLM() {
           <div className="rl-actions">
             {s.edit ? (
               <button type="button" className="rl-btn rl-btn-primary" disabled={blanks > 0 && (blankValues[s.id] || []).filter((v) => v && v.trim()).length < blanks} onClick={() => decide(s, "apply")}>Apply</button>
+            ) : s.action ? (
+              <button type="button" className="rl-btn rl-btn-primary" disabled={busy} onClick={() => { track("rllm_action", { category: s.category }); update((c) => ({ ...c, suggestions: { ...c.suggestions, [s.id]: { ...s, status: "requested" } } })); send(s.action, { parent: s.id }); }}>Do it</button>
             ) : (
               <button type="button" className="rl-btn rl-btn-primary" onClick={() => startAnswer(s, "answer")}>Answer</button>
             )}
@@ -622,7 +738,7 @@ export default function ResumeLLM() {
             {(s.edit?.target || s.target) && <button type="button" className="rl-link rl-see" onClick={() => showLine(s)}>See on resume</button>}
           </div>
         ) : (
-          <p className="rl-sugg-status">{{ applied: "✓ Applied", skipped: "Skipped", answered: "Answered", replaced: "Changed – see below" }[s.status]}</p>
+          <p className="rl-sugg-status">{{ applied: "✓ Applied", skipped: "Skipped", answered: "Answered", replaced: "Changed – see below", requested: "Working on it…", done: "Done – see below" }[s.status]}</p>
         )}
       </div>
     );
@@ -672,6 +788,7 @@ export default function ResumeLLM() {
           <span className="rl-top-title">{chat?.title && chat.title !== "New chat" ? chat.title : "Resume LLM"}</span>
           <div className="rl-top-right">
             {score != null && <span className="rl-score" title="Keyword and skills match with this job (estimate)"><b>{score}%</b> match</span>}
+            {improving && review && <span className="rl-score" title="Resume strength (all areas)"><b>{review.overall}</b> strength</span>}
             {resume && !empty && <button type="button" className="rl-btn rl-btn-sm" onClick={() => setResumeOpen((o) => !o)}>{resumeOpen && isWide() ? "Hide resume" : "Resume"}</button>}
             {resume && !empty && <button type="button" className="rl-btn rl-btn-sm rl-btn-primary" onClick={() => { setDownload(true); track("rllm_download_clicked", { applied }); }}>Download</button>}
             {session ? (
@@ -715,12 +832,24 @@ export default function ResumeLLM() {
                     const s = suggestions[m.sid];
                     return s ? <div key={m.id} className="rl-msg rl-bot">{renderSuggestion(s)}</div> : null;
                   }
+                  if (m.kind === "strength") return <div key={m.id} className="rl-msg rl-bot">{renderStrength()}</div>;
+                  if (m.kind === "category") {
+                    const c = review?.categories.find((x) => x.id === m.category);
+                    const count = Object.values(suggestions).filter((x) => x.source === "review" && x.category === m.category).length;
+                    return (
+                      <div key={m.id} className="rl-msg rl-bot rl-cat">
+                        <p><b>{catLabel(m.category)}</b>{c ? <span className={`rl-cat-score rl-${tone(c.score)}`}>{c.score}/100</span> : null}</p>
+                        <p className="rl-cat-sub">{count} thing{count === 1 ? "" : "s"} to improve here.</p>
+                      </div>
+                    );
+                  }
                   if (m.kind === "done") {
                     const list = Object.values(suggestions);
                     return (
                       <div key={m.id} className="rl-msg rl-bot">
                         <div className="rl-done">
-                          <p><b>All done.</b> {list.filter((s) => s.status === "applied").length} applied, {list.filter((s) => s.status === "skipped").length} skipped.{chat?.baseScore != null && score != null ? ` Match ${chat.baseScore}% → ${score}%.` : ""}</p>
+                          <p><b>All done.</b> {list.filter((s) => s.status === "applied").length} applied, {list.filter((s) => s.status === "skipped").length} skipped.{!improving && chat?.baseScore != null && score != null ? ` Match ${chat.baseScore}% → ${score}%.` : ""}{improving && chat?.baseStrength != null && review ? ` Strength ${chat.baseStrength} → ${review.overall}.` : ""}</p>
+                          {improving && renderStrength()}
                           <div className="rl-actions">
                             <button type="button" className="rl-btn rl-btn-primary" onClick={() => setDownload(true)}>Download PDF</button>
                             <button type="button" className="rl-btn" onClick={() => setResumeOpen(true)}>View resume</button>
@@ -733,6 +862,13 @@ export default function ResumeLLM() {
                     <div key={m.id} className={`rl-msg rl-${m.role}${m.small ? " rl-small" : ""}`}>
                       {m.file ? <p className="rl-file">📄 {m.file}</p> : m.text && <p>{m.note && <span className="rl-note">{m.note}</span>}{m.text}</p>}
                       {m.kind === "resume" && <button type="button" className="rl-link" onClick={() => setResumeOpen(true)}>View resume</button>}
+                      {m.kind === "choose" && !chat?.mode && (
+                        <div className="rl-choose">
+                          <button type="button" className="rl-choice" onClick={startImprove} disabled={busy}><span aria-hidden="true">✏️</span><b>Improve my resume</b><small>A full check – basic info, summary, every bullet, skills, length – scored by area, fixed one at a time.</small></button>
+                          <button type="button" className="rl-choice" onClick={startTailor} disabled={busy}><span aria-hidden="true">🎯</span><b>Tailor it to a job</b><small>Paste a job description and I'll match your resume to it.</small></button>
+                        </div>
+                      )}
+                      {m.retry === "improve" && <button type="button" className="rl-btn" onClick={startImprove} disabled={busy}>Try again</button>}
                       {m.kind === "signin" && !m.done && supabase && <SignInCard initialEmail={m.email} onSignedIn={onSignedIn} />}
                     </div>
                   );
@@ -771,7 +907,7 @@ export default function ResumeLLM() {
             <h2>Download your resume</h2>
             {Object.values(suggestions).some((s) => s.status === "pending" || s.status === "queued") && <p className="rl-warn">Some suggestions are still open.</p>}
             <p className="rl-pay">Payment step goes here. (Prototype: download is free.)</p>
-            <button type="button" className="rl-btn rl-btn-primary rl-wide" onClick={() => { const out = finalResume(resume); downloadResumePdf(out, typeof out.photoUrl === "string" && out.photoUrl.startsWith("data:") ? out.photoUrl : null); track("rllm_downloaded", { applied, score }); setDownload(false); }}>Download PDF</button>
+            <button type="button" className="rl-btn rl-btn-primary rl-wide" onClick={() => { const out = finalResume(resume); downloadResumePdf(out, typeof out.photoUrl === "string" && out.photoUrl.startsWith("data:") ? out.photoUrl : null, PDF_FORMAT); track("rllm_downloaded", { applied, score }); setDownload(false); }}>Download PDF</button>
             <button type="button" className="rl-btn rl-btn-quiet rl-wide" onClick={() => setDownload(false)}>Keep editing</button>
           </div>
         </div>
