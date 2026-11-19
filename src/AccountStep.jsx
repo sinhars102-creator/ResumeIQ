@@ -26,7 +26,7 @@ const RESEND_AFTER_S = 30;
  * the resume and the job board, so the copy says the matches are ready. job: shown after picking a job
  * (the resume is being tailored for it meanwhile), so the copy says so; onBack returns to the job board.
  */
-export default function AccountStep({ onDone, homeHref, afterUpload = false, job = null, forEditor = false, initialEmail = "", onBack = null }) {
+export default function AccountStep({ onDone, homeHref, afterUpload = false, job = null, forEditor = false, editorFirst = false, initialEmail = "", onBack = null }) {
   // The email on the uploaded resume, so most people only have to tap "Send my code".
   const [email, setEmail] = useState(() => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(initialEmail || "") ? initialEmail.trim() : ""));
   const [code, setCode] = useState("");
@@ -117,12 +117,25 @@ export default function AccountStep({ onDone, homeHref, afterUpload = false, job
     <section className="us-split">
       <aside className="us-guide" aria-labelledby="as-guide-title">
         <p className="us-eyebrow">Your ResumeIQ account</p>
-        <h2 id="as-guide-title" className="us-guide-title">One account for matching, tailoring and applying</h2>
-        <ul className="as-points">
-          <li><b>Your resume, saved.</b> Upload once; come back to your matches and tailored versions any time.</li>
-          <li><b>The resume editor, already signed in.</b> Fine-tune any tailored resume without a second login.</li>
-          <li><b>Faster applications.</b> The Chrome extension fills forms from your profile and remembers your answers.</li>
-        </ul>
+        {editorFirst ? (
+          <>
+            <h2 id="as-guide-title" className="us-guide-title">Edit your resume, free</h2>
+            <ul className="as-points">
+              <li><b>Every section, editable.</b> Change wording, reorder sections, add or remove anything.</li>
+              <li><b>Professional templates.</b> Switch the design in one click; your content stays.</li>
+              <li><b>Saved to your account.</b> Come back any time and download a PDF whenever you like.</li>
+            </ul>
+          </>
+        ) : (
+          <>
+            <h2 id="as-guide-title" className="us-guide-title">One account for matching, tailoring and applying</h2>
+            <ul className="as-points">
+              <li><b>Your resume, saved.</b> Upload once; come back to your matches and tailored versions any time.</li>
+              <li><b>The resume editor, already signed in.</b> Fine-tune any tailored resume without a second login.</li>
+              <li><b>Faster applications.</b> The Chrome extension fills forms from your profile and remembers your answers.</li>
+            </ul>
+          </>
+        )}
         <div className="us-tip"><b>No password.</b> We email you a 6-digit code each time you sign in.</div>
       </aside>
 
@@ -153,8 +166,13 @@ export default function AccountStep({ onDone, homeHref, afterUpload = false, job
           </>
         ) : stage === "email" ? (
           <>
-            <h1 className="us-title">{forEditor ? "Your resume is ready to edit" : job ? "Your tailored resume is being written" : afterUpload ? "Your job matches are ready" : "Create your account"}</h1>
-            {forEditor ? (
+            <h1 className="us-title">{editorFirst ? "Sign in to edit your resume" : forEditor ? "Your resume is ready to edit" : job ? "Your tailored resume is being written" : afterUpload ? "Your job matches are ready" : "Create your account"}</h1>
+            {editorFirst ? (
+              <p className="us-sub">
+                Enter your email and we'll send you a 6-digit code. Your resume opens in the editor right after.
+                New here? The same code creates your free account.
+              </p>
+            ) : forEditor ? (
               <p className="us-sub">
                 Create your free account to open it in the editor – {email ? "check your email below" : "enter your email"} and we'll send you a 6-digit code.
                 Your edits and downloads are saved to your account. Already have an account? Same here – it signs you in.

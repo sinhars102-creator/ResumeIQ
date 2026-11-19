@@ -4228,6 +4228,22 @@ export default function ResumeIQ() {
     handleSearchLinkedInJobs(roles[0], years);
   };
 
+  // Resume editor entry, signed in: open the editor with the account's resume. A resume read while
+  // signed out (kept in this browser) becomes the account's; with neither, they upload one.
+  const openEditorWithAccountResume = (profile) => {
+    const guest = readGuestResume();
+    const start = profile?.resume || guest;
+    if (!start) {
+      setStep("upload");
+      return;
+    }
+    if (!profile?.resume) saveResumeToAccount(start);
+    clearGuestResume();
+    setResume(start);
+    setStep("preview");
+    track("returning_user_editor", { guest: !profile?.resume });
+  };
+
   // Signed in with a saved resume: open the job board straight away instead of asking for the resume
   // again (links from the extension – ?tailor, ?easyApply, ?signin – and /app/onboarding keep their own flow).
   const [restoringAccount, setRestoringAccount] = useState(() => {
@@ -4241,10 +4257,16 @@ export default function ResumeIQ() {
         const session = (await supabaseClient.auth.getSession()).data.session;
         const profile = session ? await loadProfile(session.user.id).catch(() => null) : null;
         const guest = profile?.resume ? null : readGuestResume();
-        if ((profile?.resume || guest) && !resume && editorEntry) {
-          setResume(profile?.resume || guest);
-          setStep("preview");
-          track("returning_user_editor", { guest: !profile?.resume });
+        if (editorEntry) {
+          // The resume editor on its own: sign in first, then straight into the editor with the
+          // account's resume (or upload one if the account has none yet).
+          if (!session) {
+            setSignInForEditor(true);
+            setStep("account");
+            track("signin_wall_shown", { at: "editor_start", editor_entry: true });
+          } else if (!resume) {
+            openEditorWithAccountResume(profile);
+          }
         } else if (profile?.resume && !resume) {
           setResume(profile.resume);
           setStep("select");
@@ -5077,11 +5099,17 @@ body {
 
         <header style={styles.stickyHeader}>
           <div className="rq-header-row" style={styles.headerRow}>
-            <div style={styles.logo}>
+            <a
+              href={HOME_URL}
+              aria-label="ResumeIQ home"
+              onClick={() => track("logo_home_clicked", { step, editor_entry: editorEntry })}
+              style={{ ...styles.logo, color: "inherit", textDecoration: "none" }}
+            >
               <span style={styles.logoMark}>◈</span>
               <span>ResumeIQ</span>
-            </div>
-            <nav className="rq-step-nav" style={styles.stepNav}>
+            </a>
+            {/* The resume editor on its own (/app/editor) has no job steps. */}
+            {!editorEntry && <nav className="rq-step-nav" style={styles.stepNav}>
               {[
                 { id: "upload", num: 1, label: "Upload" },
                 { id: "parsing", num: 2, label: "Parsing" },
@@ -5124,7 +5152,7 @@ body {
                   </button>
                 );
               })}
-            </nav>
+            </nav>}
           </div>
         </header>
 
@@ -5141,6 +5169,7 @@ body {
               afterUpload={accountAfterUpload}
               job={signInForJob}
               forEditor={signInForEditor}
+              editorFirst={signInForEditor && !accountAfterUpload}
               initialEmail={resume && resume !== SAMPLE_RESUME ? (String(resume.contact || "").match(/[^\s@·|,;<>()]+@[^\s@·|,;<>()]+\.[a-z]{2,}/i) || [""])[0] : ""}
               onBack={signInForJob ? () => {
                 track("signin_wall_back", { at: "job_click" });
@@ -5149,6 +5178,11 @@ body {
                 setStep("select");
               } : null}
               onDone={(session) => {
+                if (!accountAfterUpload && signInForEditor) {
+                  // Resume editor entry: signed in first, now into the editor.
+                  setSignInForEditor(false);
+                  return void loadProfile(session.user.id).catch(() => null).then(openEditorWithAccountResume);
+                }
                 if (!accountAfterUpload) {
                   // Signing in (e.g. "Sign in" on the home page): a saved resume opens the job board.
                   return void loadProfile(session.user.id).catch(() => null).then((profile) => {
@@ -5170,7 +5204,7 @@ body {
             />
           )}
           {step === "upload" && restoringAccount && (
-            <p style={{ textAlign: "center", padding: "80px 0", color: "var(--rq-text-2)" }} aria-live="polite">Loading your job matches…</p>
+            <p style={{ textAlign: "center", padding: "80px 0", color: "var(--rq-text-2)" }} aria-live="polite">{editorEntry ? "Opening your resume…" : "Loading your job matches…"}</p>
           )}
           {step === "upload" && !restoringAccount && (
             <UploadStep
@@ -6204,7 +6238,7 @@ body {
                     <button type="button" style={styles.smallBackButton} onClick={() => setStep("suggestions")}>
                       ← Back to Suggestions
                     </button>
-                  ) : (
+                  ) : editorEntry ? null : (
                     <button
                       type="button"
                       style={styles.smallBackButton}
@@ -6267,7 +6301,7 @@ body {
                     Classic editor
                   </button>
                   <button type="button" style={styles.ghostButton} onClick={handleReset}>
-                    ← Analyze another job
+                    {editorEntry ? "Edit a different resume" : "← Analyze another job"}
                   </button>
                 </div>
               </div>
