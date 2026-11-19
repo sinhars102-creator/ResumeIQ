@@ -30,17 +30,75 @@ const words = (t) => String(t || "").trim().split(/\s+/).filter(Boolean).length;
 const clamp = (n) => Math.max(0, Math.min(100, Math.round(n)));
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-/** The contact line's parts: email, phone, LinkedIn, location. */
+const EMAIL_RE = /[^\s@·|,;<>()]+@[^\s@·|,;<>()]+\.[a-z]{2,}/i;
+const LINKEDIN_RE = /(https?:\/\/)?([a-z]{2,3}\.)?linkedin\.com\/in\/[^\s·|,;]+/i;
+const URL_RE = /(https?:\/\/)?(www\.)?[a-z0-9-]+(\.[a-z0-9-]+)*\.(com|io|dev|me|in|org|net|ai|app)(\/[^\s·|,;]*)?/gi;
+
+/** The contact line's parts: email, phone, LinkedIn, location (city), and other links (GitHub, portfolio…). */
 export function contactParts(contact) {
   const text = String(contact || "");
-  const email = (text.match(/[^\s@·|,;<>()]+@[^\s@·|,;<>()]+\.[a-z]{2,}/i) || [""])[0];
-  const phone = (text.match(/\+?\d[\d\s().-]{8,}\d/) || [""])[0];
-  const linkedin = (text.match(/(https?:\/\/)?(www\.)?linkedin\.com\/in\/[^\s·|,;]+/i) || [""])[0];
+  const email = (text.match(EMAIL_RE) || [""])[0];
+  const phoneRaw = (text.match(/\+?\(?\d[\d\s().-]{8,}\d/) || [""])[0];
+  const linkedin = (text.match(LINKEDIN_RE) || [""])[0];
+  const others = (text.match(URL_RE) || []).filter((u) => !/linkedin\.com/i.test(u) && !email.includes(u.replace(/^https?:\/\//, "")));
   const location = text
-    .split(/[·|•;]|\s{2,}/)
+    .split(/[·|•;,]|\s{2,}/)
     .map((p) => p.trim())
-    .find((p) => p && !p.includes("@") && !/\d{5,}|linkedin|http|www\.|github/i.test(p) && /[a-z]{3,}/i.test(p)) || "";
-  return { email, phone: phone.replace(/\D/g, "").length >= 10 ? phone : "", linkedin, location };
+    .find((p) => p && !p.includes("@") && !/\d{3,}|linkedin|github|kaggle|http|www\.|\.com|\.io/i.test(p) && /[a-z]{3,}/i.test(p)) || "";
+  return { email, phone: phoneRaw.replace(/\D/g, "").length >= 10 ? phoneRaw.trim() : "", linkedin, location, others };
+}
+
+// Cities people type most, for spelling correction ("Banaglore" -> "Bangalore").
+const CITIES = ["Bangalore", "Bengaluru", "Mumbai", "Delhi", "New Delhi", "Gurgaon", "Gurugram", "Noida", "Hyderabad", "Chennai", "Kolkata", "Pune", "Ahmedabad", "Jaipur", "Chandigarh", "Kochi", "Coimbatore", "Indore", "Bhopal", "Lucknow", "Nagpur", "Visakhapatnam", "Thiruvananthapuram", "Mysore", "Mangalore", "Surat", "Vadodara", "Bhubaneswar", "Patna", "Ranchi", "Guwahati", "Dehradun", "Goa", "Nashik", "Navi Mumbai", "Thane", "Faridabad", "Ghaziabad", "Kanpur", "Ludhiana", "Amritsar", "Vijayawada", "Madurai", "Trichy", "Raipur", "Jodhpur", "Udaipur", "Remote", "Dubai", "Singapore", "London", "New York", "San Francisco", "Seattle", "Toronto", "Sydney", "Berlin"];
+
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++)
+      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1), i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1] ? d[i - 2][j - 2] + 1 : Infinity);
+  return d[a.length][b.length];
+}
+const titleCase = (t) => t.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase());
+
+/**
+ * What the candidate typed for one contact field, cleaned to just the essential value – or "" when it
+ * doesn't look like one. Location keeps the city only, with its spelling corrected when it's close to a known one.
+ */
+export function normalizeContactField(field, input) {
+  const text = String(input || "").trim();
+  if (field === "email") return ((text.match(EMAIL_RE) || [""])[0] || "").toLowerCase();
+  if (field === "phone") {
+    const digits = text.replace(/\D/g, "");
+    if (digits.length === 10) return `+91 ${digits}`;
+    if (digits.length === 12 && digits.startsWith("91")) return `+91 ${digits.slice(2)}`;
+    return digits.length >= 10 && digits.length <= 15 ? `+${digits}` : "";
+  }
+  if (field === "linkedin") {
+    const url = (text.match(LINKEDIN_RE) || [""])[0];
+    if (url) return url.replace(/^https?:\/\/(www\.)?/i, "").replace(/\/$/, "");
+    const slug = text.replace(/^@/, "").match(/^[a-z0-9-]{3,100}$/i);
+    return slug ? `linkedin.com/in/${slug[0]}` : "";
+  }
+  if (field === "location") {
+    const first = text.split(/[,;|·\n]/)[0].replace(/^(i'?m |i am |based in |in |at )+/i, "").replace(/[^a-z\s.-]/gi, "").trim();
+    if (!first || first.length > 40) return "";
+    const lower = first.toLowerCase();
+    let best = null;
+    for (const c of CITIES) {
+      const dist = editDistance(lower, c.toLowerCase());
+      if (dist <= Math.max(1, Math.floor(c.length / 4)) && (!best || dist < best.dist)) best = { c, dist };
+    }
+    return best ? best.c : titleCase(first);
+  }
+  return "";
+}
+
+/** The contact line with one field set, rebuilt as "email · phone · city · linkedin · other links". */
+export function setContactField(contact, field, value) {
+  const parts = contactParts(contact);
+  parts[field] = value;
+  return [parts.email, parts.phone, parts.location, parts.linkedin, ...parts.others].filter(Boolean).join(" · ");
 }
 
 function periodStyle(period) {
@@ -65,11 +123,11 @@ export function reviewResume(resume, { pages = null } = {}) {
   {
     const c = contactParts(r.contact);
     const checks = [!!String(r.name || "").trim(), !!c.email, !!c.phone, !!c.location, !!c.linkedin];
-    if (!c.email) add("basic", { target: "C", priority: "must", fix: "ask", title: "Add your email", why: "Recruiters can't reach you without it, and many ATS reject resumes with no email.", question: "What email should recruiters use? I'll add it to your contact line." });
-    else if (/\d{4,}/.test(c.email.split("@")[0])) add("basic", { target: "C", fix: "ask", title: "Use a simpler email", why: `"${c.email}" has a long string of numbers – a firstname.lastname style address looks more professional.`, question: "Do you have a simpler email (like firstname.lastname@…)? Type it and I'll swap it in, or skip." });
-    if (!c.phone) add("basic", { target: "C", priority: "must", fix: "ask", title: "Add your phone number", why: "Most recruiters in India call first – a missing number loses calls.", question: "What phone number should recruiters call? Include +91 if you're in India." });
-    if (!c.location) add("basic", { target: "C", fix: "ask", title: "Add your location", why: "Recruiters and ATS filters search by city; without one you can miss location-based searches.", question: "Which city are you based in (and are you open to relocating)?" });
-    if (!c.linkedin) add("basic", { target: "C", fix: "ask", title: "Add your LinkedIn", why: "Most recruiters check LinkedIn before calling; a link saves them a search.", question: "What's your LinkedIn profile link (linkedin.com/in/…)?" });
+    if (!c.email) add("basic", { target: "C", field: "email", priority: "must", fix: "ask", title: "Add your email", why: "Recruiters can't reach you without it, and many ATS reject resumes with no email.", question: "What email should recruiters use? I'll add it to your contact line." });
+    else if (/\d{4,}/.test(c.email.split("@")[0])) add("basic", { target: "C", field: "email", fix: "ask", title: "Use a simpler email", why: `"${c.email}" has a long string of numbers – a firstname.lastname style address looks more professional.`, question: "Do you have a simpler email (like firstname.lastname@…)? Type it and I'll swap it in, or skip." });
+    if (!c.phone) add("basic", { target: "C", field: "phone", priority: "must", fix: "ask", title: "Add your phone number", why: "Most recruiters in India call first – a missing number loses calls.", question: "What phone number should recruiters call? Include +91 if you're in India." });
+    if (!c.location) add("basic", { target: "C", field: "location", fix: "ask", title: "Add your location", why: "Recruiters and ATS filters search by city; without one you can miss location-based searches.", question: "Which city are you based in?" });
+    if (!c.linkedin) add("basic", { target: "C", field: "linkedin", fix: "ask", title: "Add your LinkedIn", why: "Most recruiters check LinkedIn before calling; a link saves them a search.", question: "What's your LinkedIn profile link (linkedin.com/in/…)?" });
     scores.basic = clamp((checks.filter(Boolean).length / checks.length) * 100 - (c.email && /\d{4,}/.test(c.email.split("@")[0]) ? 8 : 0));
   }
 

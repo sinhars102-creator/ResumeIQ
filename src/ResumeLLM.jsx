@@ -15,7 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase, loadProfile, saveProfile } from "./easyApply/supabaseClient.js";
 import { extractResumeFromText, readResumeFileText, downloadResumePdf, SAMPLE_RESUME } from "./ResumeIQ.jsx";
 import { finalResume, textAt, applyEdit, matchScore, scoreImpact } from "./tailorEdits.js";
-import { reviewResume, CATEGORIES } from "./resumeReview.js";
+import { reviewResume, CATEGORIES, normalizeContactField, setContactField } from "./resumeReview.js";
 import { buildResumePdf, DEFAULT_PDF_FORMAT } from "./resumePdf.js";
 import { track } from "./analytics.js";
 import { trackSignUp } from "./googleAds.js";
@@ -433,6 +433,37 @@ export default function ResumeLLM() {
     if (jobItem) showNext();
   }
 
+  /** A different version of a suggested rewrite, straight away. The original stays if there's no better one. */
+  async function regenerate(s) {
+    if (busy || !s.edit) return;
+    setBusy(true);
+    track("rllm_regenerate", { category: s.category || null, source: s.source });
+    try {
+      const data = await post("/api/tailor/chat", {
+        resume,
+        jd,
+        jobTitle: job?.title || "",
+        history: [],
+        message: `Write a different version of line ${s.edit.target} (currently: "${textAt(resume, s.edit.target)}"). Don't repeat this earlier suggestion: "${s.edit.after}". It should fix: ${s.why || s.title}. Same facts only.`,
+      });
+      const alt = (data.suggestions || []).find((x) => x.edit?.target === s.edit.target && x.edit.after !== s.edit.after);
+      if (!alt) {
+        say({ role: "bot", text: "That's the best honest version I can write without more details. Apply it, skip it, or tell me what to change." });
+        return;
+      }
+      const card = { ...alt, title: s.title, why: s.why, category: s.category, priority: s.priority, n: s.n, status: "pending", source: "chat", parent: s.parent || s.id };
+      update((c) => ({
+        ...c,
+        suggestions: { ...c.suggestions, [s.id]: { ...c.suggestions[s.id], status: "replaced" }, [card.id]: card },
+        messages: [...c.messages, { id: uid(), role: "bot", text: "Here's another version:", small: true }, { id: uid(), role: "bot", kind: "suggestion", sid: card.id }],
+      }));
+    } catch (e) {
+      say({ role: "bot", text: `Couldn't get another version (${e.message}).` });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function startAnswer(s, kind) {
     setMode({ kind, sid: s.id });
     track(kind === "answer" ? "rllm_answer_started" : "rllm_change_started");
@@ -461,6 +492,26 @@ export default function ResumeLLM() {
       if (text.length >= MIN_JD_CHARS) return readJob(text);
     }
     say({ role: "user", text });
+    // Contact details (email, phone, city, LinkedIn): set in code, not by the AI – the typed value is cleaned
+    // up (spelling of the city, phone format) and only the essential part is kept.
+    const asked = m?.kind === "answer" ? suggestions[m.sid] : null;
+    if (asked?.field) {
+      const value = normalizeContactField(asked.field, text);
+      const label = { email: "email", phone: "phone number", location: "city", linkedin: "LinkedIn link" }[asked.field];
+      if (!value) {
+        say({ role: "bot", text: `I couldn't find a ${label} in that. Try again – e.g. ${{ email: "name@gmail.com", phone: "+91 98765 43210", location: "Bangalore", linkedin: "linkedin.com/in/yourname" }[asked.field]}.` });
+        setMode(m);
+        return;
+      }
+      const nextResume = { ...resume, contact: setContactField(resume.contact, asked.field, value) };
+      update((c) => ({ ...c, resume: nextResume, suggestions: { ...c.suggestions, [asked.id]: { ...asked, status: "applied" } } }));
+      say({ role: "bot", text: `✓ ${label[0].toUpperCase()}${label.slice(1)} set to ${value}.`, small: true });
+      setFlash("C");
+      setTimeout(() => setFlash(null), 1600);
+      track("rllm_contact_set", { field: asked.field });
+      showNext();
+      return;
+    }
     setBusy(true);
     track("rllm_chat_sent", { mode: m?.kind || "free", has_jd: !!jd });
     try {
@@ -733,12 +784,12 @@ export default function ResumeLLM() {
             ) : (
               <button type="button" className="rl-btn rl-btn-primary" onClick={() => startAnswer(s, "answer")}>Answer</button>
             )}
-            {s.edit && <button type="button" className="rl-btn" onClick={() => startAnswer(s, "change")}>Change it</button>}
+            {s.edit && s.edit.after != null && <button type="button" className="rl-btn" disabled={busy} onClick={() => regenerate(s)}>↻ Regenerate</button>}
             <button type="button" className="rl-btn rl-btn-quiet" onClick={() => decide(s, "skip")}>Skip</button>
             {(s.edit?.target || s.target) && <button type="button" className="rl-link rl-see" onClick={() => showLine(s)}>See on resume</button>}
           </div>
         ) : (
-          <p className="rl-sugg-status">{{ applied: "✓ Applied", skipped: "Skipped", answered: "Answered", replaced: "Changed – see below", requested: "Working on it…", done: "Done – see below" }[s.status]}</p>
+          <p className="rl-sugg-status">{{ applied: "✓ Applied", skipped: "Skipped", answered: "Answered", replaced: "Replaced – see below", requested: "Working on it…", done: "Done – see below" }[s.status]}</p>
         )}
       </div>
     );

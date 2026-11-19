@@ -23,7 +23,7 @@ function callLLM(args) {
 }
 import { tokenizeForMatch, buildResumeCorpus } from "../src/matchScore.js";
 import { textAt, scoreImpact } from "../src/tailorEdits.js";
-import { reviewResume, WEAK_START } from "../src/resumeReview.js";
+import { reviewResume, WEAK_START, contactParts, normalizeContactField, setContactField } from "../src/resumeReview.js";
 
 // A suggestion that lowers the job match by more than this (it drops the job's keywords) is left out.
 const MAX_SCORE_LOSS = 2;
@@ -150,9 +150,17 @@ export function cleanEdit(edit, resume, ctx) {
   // Same words, at most a full stop or capital letter different: not worth a suggestion.
   const plain = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   if (!after || plain(after) === plain(textAt(resume, target))) return null;
-  const unsupported = unsupportedClaims(after, ctx, { strict: op === "add_bullet" || target === "C" });
+  // The contact line only holds the candidate's own details (city, links), so it isn't checked for invented
+  // claims – numbers still are (a phone number must come from them).
+  const unsupported = target === "C" ? [] : unsupportedClaims(after, ctx, { strict: op === "add_bullet" });
   if (unsupported.length) return { unsupported };
-  const { text } = withoutInventedNumbers(after, ctx.known);
+  let { text } = withoutInventedNumbers(after, ctx.known);
+  if (target === "C") {
+    // Same clean-up as a typed answer: the city's spelling corrected, city only; parts in a standard order.
+    const parts = contactParts(text);
+    const city = parts.location ? normalizeContactField("location", parts.location) : "";
+    text = setContactField(text, "location", city);
+  }
   return { target, op, after: text, blanks: (text.match(/\[number\]/g) || []).length };
 }
 
@@ -299,7 +307,7 @@ Return JSON: {"edits": ["rewritten text" or null, ...]} – one entry per edit, 
 }
 
 const neutralTitle = (edit) =>
-  ({ T: "Sharpen your headline", S: "Sharpen your summary", K: "Add skills" })[edit.target] || (edit.op === "add_bullet" ? "Add a bullet" : "Sharpen this bullet");
+  ({ C: "Tidy your contact line", T: "Sharpen your headline", S: "Sharpen your summary", K: "Add skills", Z: "Add certifications" })[edit.target] || (edit.op === "add_bullet" ? "Add a bullet" : "Sharpen this bullet");
 
 /** First pass over the model's edits; edits with unclaimed terms get one rewrite before giving up. */
 async function cleanAll(rawEdits, resume, ctx) {
@@ -376,6 +384,7 @@ Return JSON: {"rewrites": [{"target": "E0B1", "after": "the improved line"}, ...
         edit: edit || null,
         question: edit ? null : question,
         action: i.fix === "action" ? i.action : null,
+        field: i.field || null,
         target: i.target || null,
         before: i.target ? textAt(resume, i.target) : null,
       };
