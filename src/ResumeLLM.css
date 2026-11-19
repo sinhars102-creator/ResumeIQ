@@ -242,3 +242,4 @@
 .rl-cat-sub { font-size: 13.5px !important; color: var(--rl-text-2); }
 .rl-p-empty { color: #8A9396; font-style: italic; }
 @media (max-width: 899px) { .rl-strength-row { grid-template-columns: minmax(0, 9.5em) 1fr 2.2em; font-size: 13.5px; } }
+.rl-chip-primary { background: var(--rl-accent); border-color: var(--rl-accent); color: #fff; font-weight: 600; }

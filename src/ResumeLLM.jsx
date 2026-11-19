@@ -45,6 +45,7 @@ const Icon = {
   mic: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>,
   send: <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M4 12 20 4l-4 16-4-7-8-1Z" /></svg>,
   menu: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>,
+  newChat: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6" /><path d="M17.5 3.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4 8.5-8.5Z" /></svg>,
   close: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>,
 };
 
@@ -630,7 +631,7 @@ export default function ResumeLLM() {
         messages: [
           ...c.messages,
           { id: uid(), role: "bot", kind: "strength" },
-          { id: uid(), role: "bot", text: data.suggestions.length ? `I found ${data.suggestions.length} things to improve. We'll start with your weakest area, one change at a time – apply, change or skip each.` : "Your resume is in great shape – nothing important to fix." },
+          { id: uid(), role: "bot", text: data.suggestions.length ? `I found ${data.suggestions.length} things to improve. We'll start with your weakest area, one change at a time – apply, regenerate or skip each.` : "Your resume is in great shape – nothing important to fix." },
         ],
       }));
       track("rllm_review", { overall: data.overall, count: data.suggestions.length, seconds: Math.round((Date.now() - started) / 100) / 10, pages });
@@ -838,10 +839,8 @@ export default function ResumeLLM() {
           <button type="button" className="rl-icon rl-menu" onClick={() => setDrawer(true)} aria-label="Menu">{Icon.menu}</button>
           <span className="rl-top-title">{chat?.title && chat.title !== "New chat" ? chat.title : "Resume LLM"}</span>
           <div className="rl-top-right">
-            {score != null && <span className="rl-score" title="Keyword and skills match with this job (estimate)"><b>{score}%</b> match</span>}
-            {improving && review && <span className="rl-score" title="Resume strength (all areas)"><b>{review.overall}</b> strength</span>}
-            {resume && !empty && <button type="button" className="rl-btn rl-btn-sm" onClick={() => setResumeOpen((o) => !o)}>{resumeOpen && isWide() ? "Hide resume" : "Resume"}</button>}
-            {resume && !empty && <button type="button" className="rl-btn rl-btn-sm rl-btn-primary" onClick={() => { setDownload(true); track("rllm_download_clicked", { applied }); }}>Download</button>}
+            {/* Like ChatGPT: a new-chat button and the profile, nothing else. */}
+            <button type="button" className="rl-icon" onClick={startNewChat} aria-label="New chat" title="New chat">{Icon.newChat}</button>
             {session ? (
               <div className="rl-acct">
                 <button type="button" className="rl-avatar rl-avatar-btn" onClick={() => setAccountMenu((o) => !o)} aria-label="Account" aria-expanded={accountMenu}>
@@ -930,6 +929,12 @@ export default function ResumeLLM() {
             <div className="rl-bottom">
               {!busy && !mode && !signInPending && (
                 <div className="rl-chips">
+                  {resume && (
+                    <>
+                      <button type="button" className="rl-chip" onClick={() => setResumeOpen((o) => !(o && isWide()))}>{resumeOpen && isWide() ? "Hide resume" : "View resume"}</button>
+                      <button type="button" className="rl-chip rl-chip-primary" onClick={() => { setDownload(true); track("rllm_download_clicked", { applied, where: "chip" }); }}>Download PDF</button>
+                    </>
+                  )}
                   {starters.slice(0, 4).map((s) => <button key={s.label} type="button" className="rl-chip" onClick={s.run}>{s.label}</button>)}
                 </div>
               )}
