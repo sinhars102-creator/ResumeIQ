@@ -4798,7 +4798,7 @@ export default function ResumeIQ() {
       // which one) and brought up to date with this content, keeping the design chosen in the editor.
       // Always signed in: the editor opens through the user's own sign-in link (the editor has no guest access).
       const session = supabaseClient ? (await supabaseClient.auth.getSession()).data.session : null;
-      const response = await fetch(`${base}/api/rxresume/open-in-builder`, {
+      const open = () => fetch(`${base}/api/rxresume/open-in-builder`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(session ? { Authorization: `Bearer ${session.access_token}` } : {}) },
         body: JSON.stringify({
@@ -4810,15 +4810,24 @@ export default function ResumeIQ() {
             .join(" – "),
         }),
       });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !data.builderUrl) {
-        throw new Error(data?.details || data?.error || `Failed to open in Reactive Resume (${response.status})`);
+      // A sleeping editor server can fail the first call: try once more before giving up.
+      let response = await open().catch(() => null);
+      if (!response?.ok) {
+        await new Promise((r) => setTimeout(r, 1500));
+        response = await open().catch(() => null);
+      }
+      const data = response ? await response.json().catch(() => ({})) : {};
+      if (!response?.ok || !data.builderUrl) {
+        const err = new Error(data?.details || data?.error || `Failed to open in Reactive Resume (${response?.status ?? "network"})`);
+        err.status = response?.status ?? "network";
+        throw err;
       }
       // rxresu.me refuses to be framed; only a self-hosted instance can be embedded.
       setRxEditor({ builderUrl: data.builderUrl, embeddable: !!data.embeddable });
       track("editor_api_ready", { seconds: Math.round((Date.now() - editorOpenStartedRef.current) / 100) / 10, warmed: !!editorWarm });
     } catch (e) {
       console.error("Open in Reactive Resume failed:", e);
+      track("editor_open_failed", { status: e.status ?? "client", editor_entry: editorEntry, has_job: !!selectedJob });
       setOpenInBuilderError(e.message || "Failed to open in Reactive Resume.");
     } finally {
       setOpeningInBuilder(false);
@@ -4981,7 +4990,8 @@ export default function ResumeIQ() {
 @media (max-width: 640px) {
   .rq-app-root { padding: 12px 12px 32px !important; }
   .rq-header-row { flex-wrap: wrap; row-gap: 10px !important; }
-  .rq-step-nav { width: 100%; overflow-x: auto; justify-content: space-between; gap: 6px !important; scrollbar-width: none; }
+  .rq-header-signout { margin-left: auto; }
+  .rq-step-nav { order: 3; width: 100%; overflow-x: auto; justify-content: space-between; gap: 6px !important; scrollbar-width: none; }
   .rq-step:not(.rq-step-active) .rq-step-label { display: none; }
   .rq-step-arrow { display: none; }
   .rq-main-card { padding: 16px !important; border-radius: 14px !important; }
@@ -5153,6 +5163,20 @@ body {
                 );
               })}
             </nav>}
+            {/* On every screen and size (the job board's sidebar row scrolls it out of view on phones). */}
+            {signedIn && (
+              <button
+                type="button"
+                className="rq-header-signout"
+                onClick={() => {
+                  track("sign_out_clicked", { where: "header", step, editor_entry: editorEntry });
+                  handleSignOut();
+                }}
+                style={{ background: "none", border: "1px solid var(--rq-border)", borderRadius: 8, padding: "6px 12px", fontSize: 13, fontFamily: "inherit", color: "var(--rq-text-2)", cursor: "pointer", whiteSpace: "nowrap" }}
+              >
+                Sign out
+              </button>
+            )}
           </div>
         </header>
 
@@ -6455,18 +6479,20 @@ body {
 
           {step === "preview" && !editorWorkspace && (
             <section style={styles.stepSection}>
-              <div style={styles.backRow}>
-                <button
-                  type="button"
-                  style={styles.smallBackButton}
-                  onClick={() => setStep("suggestions")}
-                >
-                  ← Back to Suggestions
-                </button>
-                <div style={styles.analyzeTitle}>Updated Resume</div>
-              </div>
+              {!editorEntry && (
+                <div style={styles.backRow}>
+                  <button
+                    type="button"
+                    style={styles.smallBackButton}
+                    onClick={() => setStep("suggestions")}
+                  >
+                    ← Back to Suggestions
+                  </button>
+                  <div style={styles.analyzeTitle}>Updated Resume</div>
+                </div>
+              )}
               <div style={styles.sectionHeader}>
-                <h2 style={styles.sectionTitle}>Updated Resume</h2>
+                <h2 style={styles.sectionTitle}>{editorEntry ? "Your resume" : "Updated Resume"}</h2>
                 <p style={styles.sectionSubtitle}>
                   {approvedIds.size
                     ? `${approvedIds.size} approved change${approvedIds.size > 1 ? "s" : ""} applied. `
@@ -6508,10 +6534,22 @@ body {
                   </p>
                 )}
                 {openInBuilderError && (
-                  // The editor is optional: when it can't load, the classic editor below still covers editing and PDF export.
-                  <p style={{ fontSize: 13, color: "var(--rq-text-2)", margin: "4px 0 0" }}>
-                    The design editor isn't available right now — you can edit your resume and download it as a PDF below.
-                  </p>
+                  // The classic editor below still covers editing and PDF export meanwhile.
+                  <div role="alert" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", padding: "12px 14px", borderRadius: 10, fontSize: 14, color: "var(--rq-text)", background: "color-mix(in srgb, var(--rq-danger) 8%, var(--rq-bg))", border: "1px solid color-mix(in srgb, var(--rq-danger) 30%, transparent)" }}>
+                    <span>We couldn't open the resume editor. Please try again – or edit below and download a PDF.</span>
+                    <button
+                      type="button"
+                      style={{ ...styles.primaryButton, ...(openingInBuilder ? styles.disabledButton : {}) }}
+                      disabled={openingInBuilder}
+                      onClick={() => {
+                        track("editor_retry_clicked");
+                        setShowClassicPreview(false);
+                        handleOpenInReactiveResume();
+                      }}
+                    >
+                      {openingInBuilder ? "Opening…" : "Try again"}
+                    </button>
+                  </div>
                 )}
               </div>
 
