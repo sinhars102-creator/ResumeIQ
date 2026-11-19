@@ -80,7 +80,7 @@ export default function Landing({ onStart }) {
     track("upload_cta_clicked", { location: where });
     openApp(e);
   };
-  // The resume editor on its own (/app/editor): upload, then straight into the editor.
+  // The resume editor (/app/editor) opens Resume LLM (see App.jsx): upload the resume, sign in, then edit in chat.
   const openEditor = (where) => (e) => {
     e.preventDefault();
     track("editor_cta_clicked", { location: where });

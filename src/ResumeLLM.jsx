@@ -541,7 +541,9 @@ export default function ResumeLLM() {
           { icon: "✅", label: "Fix grammar & tone", run: () => send("Fix grammar and make the wording consistent and confident, without changing facts.") },
           { icon: "🎯", label: "Tailor for another job", run: startNewChat },
         ];
-  const placeholder = mode?.kind === "answer" ? "Type your answer…" : mode?.kind === "change" ? "How should I change it?" : mode?.kind === "paste" || !resume ? "Paste your resume, or attach it with +" : !jd ? "Paste the job description…" : "Ask for any change…";
+  // A resume read before signing in: the sign-in card is the next step, nothing else.
+  const signInPending = messages.some((m) => m.kind === "signin" && !m.done);
+  const placeholder = signInPending ? "Sign in above to continue" : mode?.kind === "answer" ? "Type your answer…" : mode?.kind === "change" ? "How should I change it?" : mode?.kind === "paste" || !resume ? "Paste your resume, or attach it with +" : !jd ? "Paste the job description…" : "Ask for any change…";
 
   const composer = (
     <form className="rl-composer" onSubmit={(e) => { e.preventDefault(); send(); }}>
@@ -688,7 +690,7 @@ export default function ResumeLLM() {
                 )}
               </div>
             ) : (
-              supabase && !messages.some((m) => m.kind === "signin" && !m.done) && <button type="button" className="rl-btn rl-btn-sm" onClick={askSignIn}>Sign in</button>
+              supabase && !signInPending && <button type="button" className="rl-btn rl-btn-sm" onClick={askSignIn}>Sign in</button>
             )}
           </div>
         </header>
@@ -739,7 +741,7 @@ export default function ResumeLLM() {
               </div>
             </div>
             <div className="rl-bottom">
-              {!busy && !mode && (
+              {!busy && !mode && !signInPending && (
                 <div className="rl-chips">
                   {starters.slice(0, 4).map((s) => <button key={s.label} type="button" className="rl-chip" onClick={s.run}>{s.label}</button>)}
                 </div>

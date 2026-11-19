@@ -4,7 +4,8 @@ import Landing from "./Landing";
 
 // The product (PDF parsing, jsPDF, etc.) is a large bundle, so it only loads when someone opens it.
 const ResumeIQ = lazy(() => import("./ResumeIQ"));
-// Prototype: Resume LLM, chat-first resume tailoring (/app/resume-llm, and the older /app/tailor). Not linked yet.
+// Resume LLM: chat-first resume editing. The home page's "Edit my resume" / "Resume editor" (/app/editor)
+// opens it; /app/resume-llm and the older /app/tailor too.
 const ResumeLLM = lazy(() => import("./ResumeLLM"));
 
 // "/app" shows the product; every other path shows the marketing landing page.
@@ -29,7 +30,7 @@ function App() {
     <>
       {isAppPath(path) ? (
         <Suspense fallback={<div style={{ padding: 48, textAlign: "center", color: "#5b6068" }}>Loading ResumeIQ…</div>}>
-          {/^\/app\/(resume-llm|tailor)/.test(path) ? <ResumeLLM /> : <ResumeIQ />}
+          {/^\/app\/(editor|resume-llm|tailor)/.test(path) ? <ResumeLLM /> : <ResumeIQ />}
         </Suspense>
       ) : (
         <Landing onStart={openApp} />
