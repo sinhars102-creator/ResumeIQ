@@ -208,6 +208,7 @@ export default function ResumeLLM() {
   const [resumeOpen, setResumeOpen] = useState(() => isWide()); // wide: panel; phone: full screen
   const [flash, setFlash] = useState(null);
   const [download, setDownload] = useState(false);
+  const [accountMenu, setAccountMenu] = useState(false);
   const [listening, setListening] = useState(false);
   const fileRef = useRef(null);
   const inputRef = useRef(null);
@@ -492,6 +493,20 @@ export default function ResumeLLM() {
     setTimeout(() => resumeRef.current?.querySelector(`[data-line="${s.edit?.target || s.target}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 120);
   }
 
+  /** Sign out and start over signed out, on this page (chats in this browser are cleared). */
+  async function signOut(where) {
+    track("signed_out", { location: "resume_llm", where });
+    await supabase?.auth.signOut();
+    saveStore({ chats: [], activeId: null });
+    window.location.replace(window.location.pathname);
+  }
+
+  /** "Sign in" from the top bar: the same email -> code card, in the chat. */
+  function askSignIn() {
+    say({ role: "bot", kind: "signin", text: "Sign in with your email – we'll send you a 6-digit code. Your resume and edits are saved to your account.", email: emailIn(resume?.contact) });
+    track("signin_wall_shown", { at: "resume_llm_topbar" });
+  }
+
   function trySampleResume() {
     say({ role: "user", text: "Use a sample resume" });
     track("rllm_sample_resume");
@@ -633,7 +648,7 @@ export default function ResumeLLM() {
           <>
             <span className="rl-avatar" aria-hidden="true">{(session.user.email || "?")[0].toUpperCase()}</span>
             <span className="rl-account-email">{session.user.email}</span>
-            <button type="button" className="rl-link" onClick={async () => { track("signed_out", { location: "resume_llm" }); await supabase.auth.signOut(); saveStore({ chats: [], activeId: null }); window.location.href = "/"; }}>Sign out</button>
+            <button type="button" className="rl-link" onClick={() => signOut("sidebar")}>Sign out</button>
           </>
         ) : (
           <span className="rl-account-email">Not signed in</span>
@@ -655,8 +670,26 @@ export default function ResumeLLM() {
           <span className="rl-top-title">{chat?.title && chat.title !== "New chat" ? chat.title : "Resume LLM"}</span>
           <div className="rl-top-right">
             {score != null && <span className="rl-score" title="Keyword and skills match with this job (estimate)"><b>{score}%</b> match</span>}
-            {resume && <button type="button" className="rl-btn rl-btn-sm" onClick={() => setResumeOpen((o) => !o)}>{resumeOpen && isWide() ? "Hide resume" : "Resume"}</button>}
-            {resume && <button type="button" className="rl-btn rl-btn-sm rl-btn-primary" onClick={() => { setDownload(true); track("rllm_download_clicked", { applied }); }}>Download</button>}
+            {resume && !empty && <button type="button" className="rl-btn rl-btn-sm" onClick={() => setResumeOpen((o) => !o)}>{resumeOpen && isWide() ? "Hide resume" : "Resume"}</button>}
+            {resume && !empty && <button type="button" className="rl-btn rl-btn-sm rl-btn-primary" onClick={() => { setDownload(true); track("rllm_download_clicked", { applied }); }}>Download</button>}
+            {session ? (
+              <div className="rl-acct">
+                <button type="button" className="rl-avatar rl-avatar-btn" onClick={() => setAccountMenu((o) => !o)} aria-label="Account" aria-expanded={accountMenu}>
+                  {(session.user.email || "?")[0].toUpperCase()}
+                </button>
+                {accountMenu && (
+                  <>
+                    <div className="rl-menu-scrim" onClick={() => setAccountMenu(false)} aria-hidden="true" />
+                    <div className="rl-acct-menu" role="menu">
+                      <p className="rl-acct-email">{session.user.email}</p>
+                      <button type="button" role="menuitem" className="rl-btn rl-wide" onClick={() => signOut("topbar")}>Sign out</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              supabase && !messages.some((m) => m.kind === "signin" && !m.done) && <button type="button" className="rl-btn rl-btn-sm" onClick={askSignIn}>Sign in</button>
+            )}
           </div>
         </header>
 

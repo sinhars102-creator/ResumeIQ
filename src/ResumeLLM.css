@@ -209,3 +209,10 @@
   .rl-modal { border-radius: 22px 22px 0 0; }
   .rl-msg p { font-size: 15px; }
 }
+
+/* Account avatar + menu (top right) */
+.rl-acct { position: relative; }
+.rl-avatar-btn { border: none; cursor: pointer; font: inherit; font-weight: 700; width: 36px; height: 36px; }
+.rl-menu-scrim { position: fixed; inset: 0; z-index: 35; }
+.rl-acct-menu { position: absolute; right: 0; top: calc(100% + 8px); z-index: 36; width: 260px; background: var(--rl-surface); border: 1px solid var(--rl-border); border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,.14); padding: 14px; }
+.rl-acct-email { margin: 0 0 6px; font-size: 13.5px; color: var(--rl-text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
