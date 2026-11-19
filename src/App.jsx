@@ -4,6 +4,8 @@ import Landing from "./Landing";
 
 // The product (PDF parsing, jsPDF, etc.) is a large bundle, so it only loads when someone opens it.
 const ResumeIQ = lazy(() => import("./ResumeIQ"));
+// Prototype: resume + chat tailoring on phones (/app/tailor). Not linked from anywhere yet.
+const TailorChat = lazy(() => import("./TailorChat"));
 
 // "/app" shows the product; every other path shows the marketing landing page.
 const isAppPath = (path) => path.startsWith("/app");
@@ -27,7 +29,7 @@ function App() {
     <>
       {isAppPath(path) ? (
         <Suspense fallback={<div style={{ padding: 48, textAlign: "center", color: "#5b6068" }}>Loading ResumeIQ…</div>}>
-          <ResumeIQ />
+          {path.startsWith("/app/tailor") ? <TailorChat /> : <ResumeIQ />}
         </Suspense>
       ) : (
         <Landing onStart={openApp} />

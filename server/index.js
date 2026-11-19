@@ -37,6 +37,7 @@ function sendLLMError(res, err, tag) {
 }
 import { runAssistantTurn, listGaps } from "./assistant.js";
 import { generateResume, draftGapEdits } from "./generateResume.js";
+import { suggestForJob, chatTurn } from "./tailorChat.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootEnv = resolve(__dirname, "../.env");
@@ -208,6 +209,27 @@ app.post("/api/llm", async (req, res) => {
     res.json({ text, provider: llmProvider(), model: llmModel() });
   } catch (err) {
     sendLLMError(res, err, `llm:${llmProvider()}`);
+  }
+});
+
+/** Tailor chat prototype (/app/tailor): suggestions tied to resume lines, and chat turns. See server/tailorChat.js. */
+const tailorInputOk = (resume, text) => resume && typeof resume === "object" && typeof text === "string" && text.trim().length > 0;
+app.post("/api/tailor/suggest", async (req, res) => {
+  const { resume, jd } = req.body || {};
+  if (!tailorInputOk(resume, jd)) return res.status(400).json({ error: "resume and jd are required" });
+  try {
+    res.json(await suggestForJob({ resume, jd }));
+  } catch (err) {
+    sendLLMError(res, err, "tailor:suggest");
+  }
+});
+app.post("/api/tailor/chat", async (req, res) => {
+  const { resume, jd, jobTitle, history, message, answerTo } = req.body || {};
+  if (!tailorInputOk(resume, message)) return res.status(400).json({ error: "resume and message are required" });
+  try {
+    res.json(await chatTurn({ resume, jd: typeof jd === "string" ? jd : "", jobTitle: typeof jobTitle === "string" ? jobTitle : "", history: Array.isArray(history) ? history : [], message, answerTo: typeof answerTo === "string" ? answerTo : "" }));
+  } catch (err) {
+    sendLLMError(res, err, "tailor:chat");
   }
 });
 

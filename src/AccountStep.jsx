@@ -26,7 +26,7 @@ const RESEND_AFTER_S = 30;
  * the resume and the job board, so the copy says the matches are ready. job: shown after picking a job
  * (the resume is being tailored for it meanwhile), so the copy says so; onBack returns to the job board.
  */
-export default function AccountStep({ onDone, homeHref, afterUpload = false, job = null, forEditor = false, editorFirst = false, initialEmail = "", onBack = null }) {
+export default function AccountStep({ onDone, homeHref, afterUpload = false, job = null, forEditor = false, editorFirst = false, copy = null, initialEmail = "", onBack = null }) {
   // The email on the uploaded resume, so most people only have to tap "Send my code".
   const [email, setEmail] = useState(() => (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(initialEmail || "") ? initialEmail.trim() : ""));
   const [code, setCode] = useState("");
@@ -149,7 +149,7 @@ export default function AccountStep({ onDone, homeHref, afterUpload = false, job
             <span aria-hidden="true">←</span> Back to home
           </a>
         )}
-        <p className="us-eyebrow">{afterUpload || job ? "Last step" : "Step 1 of 2"}</p>
+        <p className="us-eyebrow">{copy?.eyebrow || (afterUpload || job ? "Last step" : "Step 1 of 2")}</p>
         {stage === "checking" ? (
           <p className="us-sub" aria-live="polite">One moment…</p>
         ) : stage === "signedIn" ? (
@@ -166,8 +166,10 @@ export default function AccountStep({ onDone, homeHref, afterUpload = false, job
           </>
         ) : stage === "email" ? (
           <>
-            <h1 className="us-title">{editorFirst ? "Sign in to edit your resume" : forEditor ? "Your resume is ready to edit" : job ? "Your tailored resume is being written" : afterUpload ? "Your job matches are ready" : "Create your account"}</h1>
-            {editorFirst ? (
+            <h1 className="us-title">{copy?.title || (editorFirst ? "Sign in to edit your resume" : forEditor ? "Your resume is ready to edit" : job ? "Your tailored resume is being written" : afterUpload ? "Your job matches are ready" : "Create your account")}</h1>
+            {copy?.sub ? (
+              <p className="us-sub">{copy.sub}</p>
+            ) : editorFirst ? (
               <p className="us-sub">
                 Enter your email and we'll send you a 6-digit code. Your resume opens in the editor right after.
                 New here? The same code creates your free account.

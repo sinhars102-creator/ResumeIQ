@@ -49,7 +49,8 @@ const sourceLabel = (source) => SOURCE_LABELS[source] || null;
 const SOURCE_SITES = { linkedin: "LinkedIn", adzuna: "Adzuna", naukri: "Naukri", glassdoor: "Glassdoor" };
 const postingLinkText = (source) => (SOURCE_SITES[source] ? `on ${SOURCE_SITES[source]}` : "on the company's career page");
 
-const SAMPLE_RESUME = {
+// eslint-disable-next-line react-refresh/only-export-components -- shared with the /app/tailor prototype
+export const SAMPLE_RESUME = {
   name: "Alex Chen",
   title: "Product Manager",
   contact:
@@ -1611,7 +1612,8 @@ ${job.jd || ""}`;
   }
 }
 
-async function extractResumeFromText(pastedText) {
+// eslint-disable-next-line react-refresh/only-export-components -- shared with the /app/tailor prototype
+export async function extractResumeFromText(pastedText) {
   try {
     const system =
       "You are a resume parser. Extract structured data from resume text. Return ONLY valid JSON, no markdown, no explanation.";
@@ -1914,7 +1916,40 @@ async function extractPdfPhoto(file) {
   }
 }
 
-function downloadResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FORMAT) {
+/** A resume file's text: PDF pages in reading order, or a text file as-is. */
+// eslint-disable-next-line react-refresh/only-export-components -- shared with the /app/tailor prototype
+export async function readResumeFileText(file) {
+  const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
+  if (isPdf) {
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const numPages = pdf.numPages;
+      let fullText = "";
+      for (let i = 1; i <= numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        fullText += pageTextInReadingOrder(content.items, page.getViewport({ scale: 1 }).width) + "\n\n";
+      }
+      return fullText.trim();
+    } catch (e) {
+      const msg = e?.message || String(e);
+      if (/load failed|worker|invalid/i.test(msg)) {
+        throw new Error("Could not read this PDF. Try saving your resume as TXT or paste the text into the box below.");
+      }
+      throw e;
+    }
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
+    reader.onerror = () => reject(new Error("Failed to read file"));
+    reader.readAsText(file);
+  });
+}
+
+// eslint-disable-next-line react-refresh/only-export-components -- shared with the /app/tailor prototype
+export function downloadResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FORMAT) {
   const doc = buildResumePdf(resumeData, photoDataUrl, format);
   if (!doc) return;
   const safeName = (resumeData.name || "resume").replace(/[^a-z0-9-_]/gi, "_").slice(0, 40);
@@ -4169,35 +4204,7 @@ export default function ResumeIQ() {
     }
   };
 
-  const readFileToText = async (file) => {
-    const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-    if (isPdf) {
-      try {
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        const numPages = pdf.numPages;
-        let fullText = "";
-        for (let i = 1; i <= numPages; i++) {
-          const page = await pdf.getPage(i);
-          const content = await page.getTextContent();
-          fullText += pageTextInReadingOrder(content.items, page.getViewport({ scale: 1 }).width) + "\n\n";
-        }
-        return fullText.trim();
-      } catch (e) {
-        const msg = e?.message || String(e);
-        if (/load failed|worker|invalid/i.test(msg)) {
-          throw new Error("Could not read this PDF. Try saving your resume as TXT or paste the text into the box below.");
-        }
-        throw e;
-      }
-    }
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");
-      reader.onerror = () => reject(new Error("Failed to read file"));
-      reader.readAsText(file);
-    });
-  };
+  const readFileToText = readResumeFileText;
 
   /** Onboarding: keep the parsed resume (and name/email) in the signed-in user's profile. */
   const saveResumeToAccount = async (parsed) => {
