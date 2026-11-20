@@ -339,7 +339,7 @@ RESUME (line ids in brackets):
 ${resumeLines(resume)}
 
 LINES TO FIX:
-${toRewrite.map((i, n) => `${n + 1}. [${i.target}] ${i.hint === "summary_missing" ? "there is no summary: write one (2-3 sentences) from the resume's own facts" : i.hint}`).join("\n")}
+${toRewrite.map((i, n) => `${n + 1}. [${i.target}] ${i.hint === "summary_missing" ? "there is no summary: write one (2-3 sentences) from the resume's own facts" : String(i.hint).replace("no number or result", "no number or result – end with the outcome this work had, using a [number] blank for the figure (e.g. \"…, cutting release time by [number]%\")")}`).join("\n")}
 
 ${RULES}
 - Bullets start with a strong verb (past tense for past roles); one line, at most about 25 words.
@@ -357,7 +357,14 @@ Return JSON: {"rewrites": [{"target": "E0B1", "after": "the improved line"}, ...
   const raw = toRewrite.map((i) => (rewrites[i.target] ? { target: i.target, op: "replace", after: rewrites[i.target] } : null));
   const cleaned = await cleanAll(raw, resume, ctx);
   // A rewrite must fix what it was flagged for (a "weak opening" rewrite that still opens weakly isn't one).
-  const fixes = (i, e) => !(/weak opening/.test(i.hint || "") && WEAK_START.test(String(e.after || "").trim()) && !/no number|too long|too vague/.test(i.hint || ""));
+  const fixes = (i, e) => {
+    const hint = i.hint || "";
+    const after = String(e.after || "").trim();
+    // "No result" is only fixed by a number (or a blank for one); otherwise we ask for the result.
+    if (/no number or result/.test(hint) && !/\d|\[number\]|%|₹|\$/.test(after)) return false;
+    if (/weak opening/.test(hint) && WEAK_START.test(after) && !/too long|too vague/.test(hint)) return false;
+    return true;
+  };
   const edits = new Map(toRewrite.map((i, n) => [i.id, cleaned[n] && !cleaned[n].unsupported && fixes(i, cleaned[n]) ? cleaned[n] : null]));
 
   const order = [...review.categories].sort((a, b) => a.score - b.score).map((c) => c.id);

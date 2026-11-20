@@ -25,7 +25,6 @@ const API_BASE = (import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http:/
 const STORE_KEY = "riq_resume_llm_v1";
 const MIN_RESUME_CHARS = 300;
 const MIN_JD_CHARS = 200;
-const WIDE = "(min-width: 900px)";
 
 const SAMPLE_JD = `Senior Product Manager – Payments (Bengaluru)
 We are looking for a Senior Product Manager to own our merchant payments experience. You will define the product roadmap, work closely with engineering and design, and use data to drive decisions.
@@ -63,7 +62,6 @@ const catLabel = (id) => CATEGORIES.find((c) => c.id === id)?.label || "";
 const tone = (score) => (score >= 75 ? "good" : score >= 50 ? "ok" : "low");
 
 const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-const isWide = () => window.matchMedia(WIDE).matches;
 const firstName = (r) => String(r?.name || "").trim().split(/\s+/)[0] || "";
 const emailIn = (text) => (String(text || "").match(/[^\s@·|,;<>()]+@[^\s@·|,;<>()]+\.[a-z]{2,}/i) || [""])[0];
 
@@ -156,28 +154,52 @@ function SignInCard({ initialEmail, onSignedIn }) {
   );
 }
 
-/** The resume as a page, with numbered markers on lines that have a suggestion. */
-function ResumePaper({ resume, markers, flash, onMarker }) {
+/**
+ * The resume as a page. Lines with a recommendation carry its numbered pointer; the open recommendation
+ * (`active`) is shown in place – old text struck through, the proposed text highlighted – so it's clear
+ * exactly what will change.
+ */
+function ResumePaper({ resume, markers, flash, onMarker, active }) {
   const r = resume || {};
+  const edit = active?.edit || null;
+  const at = active ? active.edit?.target || active.target : null;
   const marks = (line) =>
     (markers.get(line) || []).map((s) => (
-      <button key={s.id} type="button" className={`rl-marker rl-marker-${s.status === "applied" ? "done" : s.question ? "ask" : s.priority}`} onClick={() => onMarker(s.id)} aria-label={`Suggestion ${s.n}: ${s.title}`}>
-        {s.status === "applied" ? "✓" : s.n}
+      <button key={s.id} type="button" className={`rl-marker rl-marker-${s.status === "applied" ? "done" : s.question ? "ask" : s.priority}${active?.id === s.id ? " rl-marker-active" : ""}`} onClick={() => onMarker(s.id)} aria-label={`Recommendation ${s.pin ?? s.n}: ${s.title}`}>
+        {s.status === "applied" ? "✓" : s.pin ?? s.n}
       </button>
     ));
   const cls = (line) => {
     const open = (markers.get(line) || []).find((s) => s.status === "pending");
-    return `rl-line${open ? ` rl-line-${open.question ? "ask" : open.priority}` : ""}${flash === line ? " rl-line-flash" : ""}`;
+    return `rl-line${open ? ` rl-line-${open.question ? "ask" : open.priority}` : ""}${at === line ? " rl-line-active" : ""}${flash === line ? " rl-line-flash" : ""}`;
   };
+  // A line's text, or – when the open recommendation replaces or removes it – the before/after.
+  const text = (line, value) => {
+    if (!edit || edit.target !== line) return value;
+    if (edit.op === "replace") return <><del>{value}</del> <ins>{edit.after}</ins></>;
+    if (edit.op === "remove") return <del>{value}</del>;
+    return value;
+  };
+  const skills = () => {
+    const list = r.skills || [];
+    if (edit?.op === "set_skills") {
+      const keep = new Set(edit.skills.map((x) => x.toLowerCase()));
+      return list.map((x, i) => <span key={i}>{i ? " · " : ""}{keep.has(String(x).toLowerCase()) ? x : <del>{x}</del>}</span>);
+    }
+    const added = edit?.op === "add_skills" ? edit.skills : [];
+    return <>{list.join(" · ")}{added.map((x) => <span key={x}> · <ins>{x}</ins></span>)}</>;
+  };
+  const certs = r.certifications || [];
+  const addedCerts = edit?.op === "add_certifications" ? edit.items : [];
   return (
     <article className="rl-paper">
       <h1>{r.name}</h1>
-      {r.title && <p data-line="T" className={`${cls("T")} rl-p-title`}>{r.title}{marks("T")}</p>}
-      {r.contact && <p data-line="C" className={`${cls("C")} rl-p-contact`}>{r.contact}{marks("C")}</p>}
-      {r.summary && (
+      <p data-line="T" className={`${cls("T")} rl-p-title`}>{text("T", r.title) || <span className="rl-p-empty">No headline</span>}{marks("T")}</p>
+      {(r.contact || at === "C") && <p data-line="C" className={`${cls("C")} rl-p-contact`}>{text("C", r.contact)}{marks("C")}</p>}
+      {(r.summary || at === "S") && (
         <section>
           <h2>Summary</h2>
-          <p data-line="S" className={cls("S")}>{r.summary}{marks("S")}</p>
+          <p data-line="S" className={cls("S")}>{r.summary ? text("S", r.summary) : <ins>{edit?.after}</ins>}{marks("S")}</p>
         </section>
       )}
       {(r.experience || []).length > 0 && (
@@ -190,7 +212,8 @@ function ResumePaper({ resume, markers, flash, onMarker }) {
                 <span className="rl-p-period">{e.period}</span>
               </div>
               <ul>
-                {(e.bullets || []).map((b, j) => (b == null ? null : <li key={j} data-line={`E${i}B${j}`} className={cls(`E${i}B${j}`)}>{b}{marks(`E${i}B${j}`)}</li>))}
+                {(e.bullets || []).map((b, j) => (b == null ? null : <li key={j} data-line={`E${i}B${j}`} className={cls(`E${i}B${j}`)}>{text(`E${i}B${j}`, b)}{marks(`E${i}B${j}`)}</li>))}
+                {edit?.op === "add_bullet" && edit.target === `E${i}` && <li className="rl-line rl-line-active"><ins>{edit.after}</ins></li>}
               </ul>
             </div>
           ))}
@@ -202,15 +225,20 @@ function ResumePaper({ resume, markers, flash, onMarker }) {
           {r.education.map((ed, i) => <p key={i}>{[ed.degree, ed.school, ed.year].filter(Boolean).join(" · ")}</p>)}
         </section>
       )}
-      {(r.skills || []).length > 0 && (
+      {((r.skills || []).length > 0 || at === "K") && (
         <section>
           <h2>Skills</h2>
-          <p data-line="K" className={cls("K")}>{r.skills.join(" · ")}{marks("K")}</p>
+          <p data-line="K" className={cls("K")}>{skills()}{marks("K")}</p>
         </section>
       )}
       <section>
         <h2>Certifications</h2>
-        <p data-line="Z" className={cls("Z")}>{(r.certifications || []).length ? r.certifications.join(" · ") : <span className="rl-p-empty">None added yet</span>}{marks("Z")}</p>
+        <p data-line="Z" className={cls("Z")}>
+          {certs.join(" · ")}
+          {addedCerts.map((x, i) => <span key={x}>{certs.length || i ? " · " : ""}<ins>{x}</ins></span>)}
+          {!certs.length && !addedCerts.length && <span className="rl-p-empty">None added yet</span>}
+          {marks("Z")}
+        </p>
       </section>
     </article>
   );
@@ -225,7 +253,7 @@ export default function ResumeLLM() {
   const [mode, setMode] = useState(null); // { kind: "answer" | "change", sid } – what the next message is for
   const [blankValues, setBlankValues] = useState({});
   const [drawer, setDrawer] = useState(false); // phone: sidebar
-  const [resumeOpen, setResumeOpen] = useState(() => isWide()); // wide: panel; phone: full screen
+  const [resumeOpen, setResumeOpen] = useState(false); // the resume full screen (the pane beside the chat is always there)
   const [flash, setFlash] = useState(null);
   const [download, setDownload] = useState(false);
   const [accountMenu, setAccountMenu] = useState(false);
@@ -277,7 +305,7 @@ export default function ResumeLLM() {
   const jd = chat?.jd || "";
   const job = chat?.job || null;
   const suggestions = useMemo(() => chat?.suggestions || {}, [chat]);
-  const messages = chat?.messages || [];
+  const messages = useMemo(() => chat?.messages || [], [chat]);
   const score = resume && jd ? matchScore(resume, { title: job?.title, jd }) : null;
   const improving = chat?.mode === "improve";
   const pages = useMemo(() => (resume ? pageCount(resume) : null), [resume]);
@@ -307,7 +335,6 @@ export default function ResumeLLM() {
     const roles = (parsed.experience || []).length;
     say({ role: "bot", kind: "resume", text: `Got it${firstName(parsed) ? `, ${firstName(parsed)}` : ""}. ${parsed.title || "Your resume"} · ${roles} role${roles === 1 ? "" : "s"} · ${(parsed.skills || []).length} skills${s && parsed !== SAMPLE_RESUME ? " – saved to your account." : "."}` });
     say({ role: "bot", kind: "choose", text: "What would you like to do?" });
-    if (isWide()) setResumeOpen(true);
   }
 
   async function readResume(fileOrText) {
@@ -392,10 +419,13 @@ export default function ResumeLLM() {
       // Improve mode: a short header when moving into a new category.
       const cat = c.suggestions[next].category;
       const header = cat && cat !== c.lastCategory ? [{ id: uid(), role: "bot", kind: "category", category: cat }] : [];
+      // Each recommendation gets the pointer number shown on the resume when it appears.
+      const pin = (c.pinCount || 0) + 1;
       return {
         ...c,
+        pinCount: pin,
         lastCategory: cat || c.lastCategory,
-        suggestions: { ...c.suggestions, [next]: { ...c.suggestions[next], status: "pending" } },
+        suggestions: { ...c.suggestions, [next]: { ...c.suggestions[next], status: "pending", pin } },
         messages: [...c.messages, ...header, { id: uid(), role: "bot", kind: "suggestion", sid: next }],
       };
     });
@@ -452,7 +482,7 @@ export default function ResumeLLM() {
         say({ role: "bot", text: "That's the best honest version I can write without more details. Apply it, skip it, or tell me what to change." });
         return;
       }
-      const card = { ...alt, title: s.title, why: s.why, category: s.category, priority: s.priority, n: s.n, status: "pending", source: "chat", parent: s.parent || s.id };
+      const card = { ...alt, title: s.title, why: s.why, category: s.category, priority: s.priority, n: s.n, pin: s.pin, status: "pending", source: "chat", parent: s.parent || s.id };
       update((c) => ({
         ...c,
         suggestions: { ...c.suggestions, [s.id]: { ...c.suggestions[s.id], status: "replaced" }, [card.id]: card },
@@ -526,9 +556,10 @@ export default function ResumeLLM() {
       const cards = (data.suggestions || []).map((s, i) => ({ ...s, n: base + i + 1, status: "pending", source: "chat", parent: m?.sid || null }));
       update((c) => {
         const all = { ...c.suggestions };
-        cards.forEach((s) => (all[s.id] = s));
+        let pinCount = c.pinCount || 0;
+        cards.forEach((s, i) => (all[s.id] = { ...s, pin: m?.sid && i === 0 ? c.suggestions[m.sid]?.pin ?? ++pinCount : ++pinCount }));
         if (m?.sid) all[m.sid] = { ...all[m.sid], status: m.kind === "answer" ? "answered" : m.kind === "action" ? "done" : "replaced" };
-        return { ...c, suggestions: all, messages: [...c.messages, { id: uid(), role: "bot", text: data.reply }, ...cards.map((s) => ({ id: uid(), role: "bot", kind: "suggestion", sid: s.id }))] };
+        return { ...c, pinCount, suggestions: all, messages: [...c.messages, { id: uid(), role: "bot", text: data.reply }, ...cards.map((s) => ({ id: uid(), role: "bot", kind: "suggestion", sid: s.id }))] };
       });
       // Nothing to apply from an answer: move on to the next job suggestion.
       if (m?.sid && !cards.length && GUIDED.includes(target?.source)) showNext();
@@ -566,11 +597,32 @@ export default function ResumeLLM() {
     return map;
   }, [suggestions]);
 
+  // The open recommendation: the newest one still waiting for a decision. The resume scrolls to its line.
+  const active = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const x = messages[i].kind === "suggestion" ? suggestions[messages[i].sid] : null;
+      if (x?.status === "pending") return x;
+    }
+    return null;
+  }, [messages, suggestions]);
+  const paneRef = useRef(null);
+  useEffect(() => {
+    const line = active?.edit?.target || active?.target;
+    if (!line) return;
+    const t = setTimeout(() => {
+      for (const root of [paneRef.current, resumeRef.current]) root?.querySelector(`[data-line="${line}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 150);
+    return () => clearTimeout(t);
+  }, [active?.id]); // eslint-disable-line react-hooks/exhaustive-deps -- scroll once per newly opened recommendation
+
   function jumpToMessage(sid) {
-    if (!isWide()) setResumeOpen(false);
+    setResumeOpen(false);
     setTimeout(() => document.querySelector(`[data-sid="${sid}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
   }
   function showLine(s) {
+    const line = s.edit?.target || s.target;
+    const el = paneRef.current?.querySelector(`[data-line="${line}"]`);
+    if (el && paneRef.current.offsetParent) return el.scrollIntoView({ behavior: "smooth", block: "center" });
     setResumeOpen(true);
     setTimeout(() => resumeRef.current?.querySelector(`[data-line="${s.edit?.target || s.target}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 120);
   }
@@ -745,6 +797,11 @@ export default function ResumeLLM() {
     return (
       <div className={`rl-sugg rl-sugg-${s.status}`} data-sid={s.id}>
         <div className="rl-sugg-head">
+          {s.pin != null && (
+            <button type="button" className={`rl-pin rl-pin-${s.status === "applied" ? "done" : s.question ? "ask" : s.priority}`} onClick={() => showLine(s)} aria-label={`Show pointer ${s.pin} on the resume`}>
+              {s.status === "applied" ? "✓" : s.pin}
+            </button>
+          )}
           {s.source === "job" && <span className="rl-step">{s.n} of {jobCount}</span>}
           {s.source === "review" && <span className="rl-step">{catLabel(s.category)} · {s.n} of {catCount}</span>}
           {s.priority === "must" && <span className="rl-tag-must">Must-fix</span>}
@@ -830,7 +887,7 @@ export default function ResumeLLM() {
   if (session === undefined) return <div className="rl-app rl-loading">Loading…</div>;
 
   return (
-    <div className={`rl-app${resumeOpen && resume ? " rl-with-resume" : ""}${drawer ? " rl-drawer-open" : ""}`}>
+    <div className={`rl-app${drawer ? " rl-drawer-open" : ""}`}>
       {sidebar}
       {drawer && <div className="rl-scrim" onClick={() => setDrawer(false)} aria-hidden="true" />}
 
@@ -874,7 +931,18 @@ export default function ResumeLLM() {
             </div>
           </div>
         ) : (
-          <>
+          <div className={`rl-work${resume ? " rl-split" : ""}`}>
+            {resume && (
+              <section className="rl-pane" ref={paneRef} aria-label="Your resume">
+                <div className="rl-pane-bar">
+                  <b>Your resume</b>
+                  {applied > 0 && <span className="rl-resume-count">{applied} change{applied > 1 ? "s" : ""} applied</span>}
+                  <button type="button" className="rl-link rl-pane-full" onClick={() => setResumeOpen(true)}>Full screen</button>
+                </div>
+                <ResumePaper resume={resume} markers={markers} flash={flash} onMarker={jumpToMessage} active={active} />
+              </section>
+            )}
+            <div className="rl-chatcol">
             <div className="rl-messages" ref={listRef}>
               <div className="rl-thread">
                 {messages.map((m) => {
@@ -931,7 +999,7 @@ export default function ResumeLLM() {
                 <div className="rl-chips">
                   {resume && (
                     <>
-                      <button type="button" className="rl-chip" onClick={() => setResumeOpen((o) => !(o && isWide()))}>{resumeOpen && isWide() ? "Hide resume" : "View resume"}</button>
+                      <button type="button" className="rl-chip rl-phone-only" onClick={() => setResumeOpen(true)}>Full resume</button>
                       <button type="button" className="rl-chip rl-chip-primary" onClick={() => { setDownload(true); track("rllm_download_clicked", { applied, where: "chip" }); }}>Download PDF</button>
                     </>
                   )}
@@ -940,7 +1008,8 @@ export default function ResumeLLM() {
               )}
               {composer}
             </div>
-          </>
+            </div>
+          </div>
         )}
       </main>
 
@@ -952,7 +1021,7 @@ export default function ResumeLLM() {
             <button type="button" className="rl-icon" onClick={() => setResumeOpen(false)} aria-label="Close resume">{Icon.close}</button>
           </div>
           <div className="rl-resume-scroll">
-            <ResumePaper resume={resume} markers={markers} flash={flash} onMarker={jumpToMessage} />
+            <ResumePaper resume={resume} markers={markers} flash={flash} onMarker={jumpToMessage} active={active} />
           </div>
         </aside>
       )}
