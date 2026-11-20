@@ -14,7 +14,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase, loadProfile, saveProfile } from "./easyApply/supabaseClient.js";
 import { extractResumeFromText, readResumeFileText, downloadResumePdf, SAMPLE_RESUME } from "./ResumeIQ.jsx";
-import { finalResume, textAt, applyEdit, matchScore, scoreImpact } from "./tailorEdits.js";
+import { finalResume, textAt, applyEdit, matchScore, scoreImpact, captureUndo, applyUndo, lineOrder } from "./tailorEdits.js";
+import ResumeWorkspace from "./ResumeWorkspace.jsx";
+import { isReady, finalText as finalTextFor } from "./workspaceText.js";
+import { tokenizeForMatch } from "./matchScore.js";
 import { reviewResume, CATEGORIES, normalizeContactField, setContactField } from "./resumeReview.js";
 import { buildResumePdf, DEFAULT_PDF_FORMAT } from "./resumePdf.js";
 import { track } from "./analytics.js";
@@ -60,6 +63,28 @@ const pageCount = (resume) => {
 const GUIDED = ["job", "review"]; // suggestions that come one at a time
 const catLabel = (id) => CATEGORIES.find((c) => c.id === id)?.label || "";
 const tone = (score) => (score >= 75 ? "good" : score >= 50 ? "ok" : "low");
+
+/** "Kartly · bullet 2", "Summary", … – where on the resume a suggestion lands. */
+function whereOf(resume, target, category) {
+  const fixed = { C: "Contact details", T: "Headline", S: "Summary", K: "Skills", Z: "Certifications" }[target];
+  if (fixed) return fixed;
+  const m = /^E(\d+)(?:B(\d+))?$/.exec(target || "");
+  if (m) {
+    const role = resume?.experience?.[+m[1]] || {};
+    const at = role.company || role.role || `Role ${+m[1] + 1}`;
+    if (m[2] == null) return `${at} · new bullet`;
+    const shown = (role.bullets || []).slice(0, +m[2] + 1).filter((b) => b != null).length;
+    return `${at} · bullet ${shown}`;
+  }
+  return CATEGORIES.find((c) => c.id === category)?.label || "Whole resume";
+}
+
+/** Number suggestions top to bottom in reading order (pins), starting after `from`. */
+function withPins(list, resume, from = 0) {
+  return [...list]
+    .sort((a, b) => lineOrder(a.edit?.target || a.target) - lineOrder(b.edit?.target || b.target))
+    .map((x, i) => ({ ...x, pin: from + i + 1, where: x.where || whereOf(resume, x.edit?.target || x.target, x.category), status: "pending" }));
+}
 
 const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 const firstName = (r) => String(r?.name || "").trim().split(/\s+/)[0] || "";
@@ -339,6 +364,8 @@ export default function ResumeLLM() {
 
   async function readResume(fileOrText) {
     const isText = typeof fileOrText === "string";
+    // A new resume starts over: back to the chat, no suggestions for the old one.
+    update((c) => ({ ...c, workspace: false, mode: null, suggestions: {}, queue: [], jd: "", job: null }));
     say({ role: "user", ...(isText ? { text: `${fileOrText.slice(0, 160)}${fileOrText.length > 160 ? "…" : ""}`, note: "Pasted resume" } : { file: fileOrText.name }) });
     setBusy(true);
     const started = Date.now();
@@ -378,9 +405,8 @@ export default function ResumeLLM() {
       const data = await post("/api/tailor/suggest", { resume, jd: text });
       const before = matchScore(resume, { title: data.jobTitle, jd: text });
       const all = {};
-      // Must-fixes first, then the rest, as the model ranked them.
-      const ordered = [...data.suggestions.filter((s) => s.priority === "must"), ...data.suggestions.filter((s) => s.priority !== "must")];
-      ordered.forEach((s, i) => (all[s.id] = { ...s, n: i + 1, status: "queued", source: "job" }));
+      const ordered = withPins(data.suggestions.map((s) => ({ ...s, source: "job" })), resume);
+      ordered.forEach((s) => (all[s.id] = s));
       const must = ordered.filter((s) => s.priority === "must").length;
       update((c) => ({
         ...c,
@@ -391,11 +417,14 @@ export default function ResumeLLM() {
         title: [data.jobTitle, data.company].filter(Boolean).join(" · ") || "Tailored resume",
         baseScore: before,
         suggestions: all,
-        queue: ordered.map((s) => s.id),
+        queue: [],
+        pinCount: ordered.length,
+        original: c.resume || resume,
+        workspace: true,
       }));
       say({ role: "bot", text: `${data.intro || ""}\n\nMatch now: ${before ?? "–"}%. I have ${ordered.length} change${ordered.length === 1 ? "" : "s"}${must ? ` – ${must} must-fix` : ""}. ${TIP}`.trim() });
       track("rllm_suggestions", { count: ordered.length, must, questions: ordered.filter((s) => s.question).length, seconds: Math.round((Date.now() - started) / 100) / 10, score: before });
-      showNext();
+      track("tailor_viewed", { suggestion_count: ordered.length, base_score: before, mode: "tailor", layout: window.matchMedia("(max-width: 899px)").matches ? "mobile" : "desktop" });
     } catch (e) {
       say({ role: "bot", text: `I couldn't read that job just now (${e.message}). Please try again.` });
     } finally {
@@ -652,6 +681,196 @@ export default function ResumeLLM() {
     }
   }
 
+  // ---- review workspace (after suggestions are ready) ----
+  const [wsStatus, setWsStatus] = useState("");
+  const finalTextOf = (x) => finalTextFor(x, blankValues[x.id]);
+  const wsSet = (id, patch) => update((c) => ({ ...c, suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], ...patch } } }));
+  const flashLine = (line) => {
+    setFlash(line);
+    setTimeout(() => setFlash(null), 1300);
+  };
+  /** New suggestions from the chat (answers, "do it", ask): pinned after the existing ones. */
+  function addCards(c, cards) {
+    const pinned = withPins(cards.map((x) => ({ ...x, source: "chat" })), c.resume, c.pinCount || 0);
+    const all = { ...c.suggestions };
+    pinned.forEach((x) => (all[x.id] = x));
+    return { ...c, suggestions: all, pinCount: (c.pinCount || 0) + pinned.length };
+  }
+  async function chatFor(message, extra = {}) {
+    const history = [];
+    return post("/api/tailor/chat", { resume, jd, jobTitle: job?.title || "", history, message, ...extra });
+  }
+  const scoreNow = (r) => (improving ? reviewResume(r, { pages }).overall : matchScore(r, { title: job?.title, jd }));
+
+  const act = {
+    opened: (id, from) => track("suggestion_opened", { suggestion_id: id, type: suggestions[id]?.category || suggestions[id]?.source, source: from }),
+    apply(id, text) {
+      const s = suggestions[id];
+      if (!s?.edit) return;
+      update((c) => {
+        const cur = c.suggestions[id];
+        const undo = captureUndo(c.resume, cur.edit);
+        return { ...c, resume: applyEdit(c.resume, cur.edit, text ?? cur.edit.after), suggestions: { ...c.suggestions, [id]: { ...cur, status: "applied", undo, appliedText: text ?? cur.edit.after ?? null } } };
+      });
+      flashLine(s.edit.target);
+      setWsStatus(`Applied to ${s.where}`);
+      track("suggestion_applied", { suggestion_id: id, type: s.category || s.source, edited: s.custom != null, had_input: /\[number\]/.test(s.edit.after || ""), score_after: scoreNow(applyEdit(resume, s.edit, text ?? s.edit.after)) });
+    },
+    undo(id) {
+      const s = suggestions[id];
+      update((c) => ({ ...c, resume: applyUndo(c.resume, c.suggestions[id].undo), suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], status: "pending", undo: null } } }));
+      flashLine(s.edit?.target);
+      setWsStatus(`Undid change to ${s.where}`);
+      track("suggestion_undone", { suggestion_id: id });
+    },
+    dismiss(id) {
+      wsSet(id, { status: "dismissed" });
+      setWsStatus(`Dismissed suggestion for ${suggestions[id].where}`);
+      track("suggestion_dismissed", { suggestion_id: id, type: suggestions[id].category || suggestions[id].source });
+    },
+    restore(id) {
+      wsSet(id, { status: "pending" });
+    },
+    reset() {
+      update((c) => ({
+        ...c,
+        resume: c.original || c.resume,
+        suggestions: Object.fromEntries(Object.entries(c.suggestions).map(([k, x]) => [k, x.status === "applied" || x.status === "dismissed" ? { ...x, status: "pending", undo: null } : x])),
+      }));
+      setWsStatus("Reset to your original resume");
+      track("tailor_reset");
+    },
+    applyAll() {
+      // Decide outside the state update (React may run an update function twice in development).
+      const ready = [];
+      const waiting = [];
+      Object.values(suggestions)
+        .filter((x) => x.status === "pending" && x.edit && !x.question && !x.action)
+        .sort((a, b) => a.pin - b.pin)
+        .forEach((x) => (isReady(x, blankValues[x.id]) ? ready.push({ id: x.id, text: finalTextOf(x) }) : waiting.push(x.pin)));
+      update((c) => {
+        let res = c.resume;
+        const all = { ...c.suggestions };
+        ready.forEach(({ id, text }) => {
+          const x = all[id];
+          const undo = captureUndo(res, x.edit);
+          res = applyEdit(res, x.edit, text ?? x.edit.after);
+          all[id] = { ...x, status: "applied", undo, appliedText: text ?? null };
+        });
+        return { ...c, resume: res, suggestions: all };
+      });
+      setWsStatus(`Applied ${ready.length}${waiting.length ? `. #${waiting.join(", #")} need${waiting.length > 1 ? "" : "s"} your input first` : ""}`);
+      track("apply_all_clicked", { applied_count: ready.length, skipped_needing_input: waiting.length });
+    },
+    saveEdit(id, text) {
+      wsSet(id, { custom: text });
+      setWsStatus("Edit saved – apply it when ready");
+      track("suggestion_edited", { suggestion_id: id });
+    },
+    async answer(id, text) {
+      const s = suggestions[id];
+      if (s.field) {
+        // Contact details: cleaned up in code (city spelling, phone format), applied straight away.
+        const value = normalizeContactField(s.field, text);
+        if (!value) return wsSet(id, { note: `That doesn't look like a ${s.field === "linkedin" ? "LinkedIn link" : s.field}. Try again.` });
+        const edit = { target: "C", op: "replace", after: setContactField(resume.contact, s.field, value) };
+        update((c) => ({ ...c, resume: applyEdit(c.resume, edit), suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], edit, question: null, before: c.resume.contact, status: "applied", undo: captureUndo(c.resume, edit), appliedText: edit.after, note: null } } }));
+        flashLine("C");
+        setWsStatus(`${s.where} updated`);
+        return;
+      }
+      setBusy(true);
+      try {
+        const data = await chatFor(text, { answerTo: s.question });
+        const cards = data.suggestions || [];
+        update((c) => {
+          if (!cards.length) return { ...c, suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], note: data.reply } } };
+          // The first edit takes the question's place (same pin); any others are added after.
+          const [first, ...rest] = cards;
+          const turned = { ...c.suggestions[id], edit: first.edit, question: null, before: first.before, note: null, where: whereOf(c.resume, first.edit.target, c.suggestions[id].category) };
+          return addCards({ ...c, suggestions: { ...c.suggestions, [id]: turned } }, rest);
+        });
+        setWsStatus(cards.length ? "Here's the change – check it and apply" : "");
+      } catch (e) {
+        wsSet(id, { note: `That didn't work (${e.message}). Try again.` });
+      } finally {
+        setBusy(false);
+      }
+    },
+    async action(id) {
+      const s = suggestions[id];
+      setBusy(true);
+      try {
+        const data = await chatFor(s.action);
+        const cards = data.suggestions || [];
+        update((c) => addCards({ ...c, suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], status: "done", note: cards.length ? `Done – ${cards.length} new suggestion${cards.length > 1 ? "s" : ""} added` : data.reply } } }, cards));
+        setWsStatus(cards.length ? `${cards.length} new suggestion${cards.length > 1 ? "s" : ""} to review` : data.reply);
+      } catch (e) {
+        setWsStatus(`That didn't work (${e.message}).`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    async regenerate(id) {
+      const s = suggestions[id];
+      setBusy(true);
+      track("rllm_regenerate", { category: s.category || null, source: s.source });
+      try {
+        const data = await chatFor(`Write a different version of line ${s.edit.target} (currently: "${textAt(resume, s.edit.target)}"). Don't repeat this earlier suggestion: "${s.edit.after}". It should fix: ${s.why || s.title}. Same facts only.`);
+        const alt = (data.suggestions || []).find((x) => x.edit?.target === s.edit.target && x.edit.after !== s.edit.after);
+        if (!alt) return setWsStatus("That's the best honest version without more details – apply, edit or dismiss it.");
+        wsSet(id, { edit: alt.edit, custom: null });
+        setBlankValues((v) => ({ ...v, [id]: [] }));
+        setWsStatus(`New version for ${s.where}`);
+      } catch (e) {
+        setWsStatus(`Couldn't get another version (${e.message}).`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    async ask(text) {
+      setBusy(true);
+      try {
+        const data = await chatFor(text);
+        const cards = data.suggestions || [];
+        if (cards.length) update((c) => addCards(c, cards));
+        setWsStatus(cards.length ? `${data.reply} (${cards.length} new suggestion${cards.length > 1 ? "s" : ""})` : data.reply);
+        track("rllm_chat_sent", { mode: "workspace", has_jd: !!jd });
+      } catch (e) {
+        setWsStatus(`That didn't work (${e.message}).`);
+      } finally {
+        setBusy(false);
+      }
+    },
+    download() {
+      const list = Object.values(suggestions);
+      track("tailor_finished", { applied: list.filter((x) => x.status === "applied").length, dismissed: list.filter((x) => x.status === "dismissed").length, pending: list.filter((x) => x.status === "pending").length, final_score: improving ? review?.overall : score });
+      setDownload(true);
+    },
+  };
+  const wsDelta = (s, text) => {
+    if (!s.edit || !resume) return 0;
+    const fill = (text ?? s.edit.after ?? "").replace(/\[number\]/g, "10");
+    const next = applyEdit(resume, s.edit, s.edit.after != null ? fill : undefined);
+    return improving ? reviewResume(next, { pages }).overall - (review?.overall ?? 0) : (matchScore(next, { title: job?.title, jd }) ?? 0) - (score ?? 0);
+  };
+  const jdTerms = useMemo(() => new Set(tokenizeForMatch(jd)), [jd]);
+  const wsKeywords = (s, text) => {
+    if (!jd || !text) return [];
+    const had = new Set(tokenizeForMatch(s.before || ""));
+    return [...new Set(tokenizeForMatch(text).filter((w) => jdTerms.has(w) && !had.has(w) && w.length > 3))].slice(0, 4);
+  };
+  const wsScore = (() => {
+    if (!resume) return { label: "Strength", unit: "", base: 0, now: 0, potential: 0 };
+    let all = resume;
+    Object.values(suggestions).filter((x) => x.status === "pending" && x.edit && !x.question).forEach((x) => {
+      if (x.edit.after == null || x.custom != null || isReady(x, blankValues[x.id])) all = applyEdit(all, x.edit, x.custom ?? (x.edit.after ?? undefined)?.replace(/\[number\]/g, "10"));
+    });
+    return improving
+      ? { label: "Strength", unit: "", base: chat?.baseStrength ?? review?.overall ?? 0, now: review?.overall ?? 0, potential: reviewResume(all, { pages }).overall }
+      : { label: "Match", unit: "%", base: chat?.baseScore ?? score ?? 0, now: score ?? 0, potential: matchScore(all, { title: job?.title, jd }) ?? 0 };
+  })();
+
   // ---- render ----
   const applied = Object.values(suggestions).filter((s) => s.status === "applied").length;
   const empty = messages.length === 0;
@@ -665,11 +884,7 @@ export default function ResumeLLM() {
     try {
       const data = await post("/api/tailor/review", { resume, pages });
       const all = {};
-      const perCat = {};
-      data.suggestions.forEach((x) => {
-        perCat[x.category] = (perCat[x.category] || 0) + 1;
-        all[x.id] = { ...x, n: perCat[x.category], status: "queued", source: "review" };
-      });
+      withPins(data.suggestions.map((x) => ({ ...x, source: "review" })), resume).forEach((x) => (all[x.id] = x));
       update((c) => ({
         ...c,
         mode: "improve",
@@ -677,8 +892,11 @@ export default function ResumeLLM() {
         jd: "",
         job: null,
         baseStrength: data.overall,
-        suggestions: { ...Object.fromEntries(Object.entries(c.suggestions).filter(([, x]) => !GUIDED.includes(x.source))), ...all },
-        queue: data.suggestions.map((x) => x.id),
+        suggestions: all,
+        queue: [],
+        pinCount: Object.keys(all).length,
+        original: c.resume || resume,
+        workspace: true,
         lastCategory: null,
         messages: [
           ...c.messages,
@@ -687,7 +905,7 @@ export default function ResumeLLM() {
         ],
       }));
       track("rllm_review", { overall: data.overall, count: data.suggestions.length, seconds: Math.round((Date.now() - started) / 100) / 10, pages });
-      showNext();
+      track("tailor_viewed", { suggestion_count: data.suggestions.length, base_score: data.overall, mode: "improve", layout: window.matchMedia("(max-width: 899px)").matches ? "mobile" : "desktop" });
     } catch (e) {
       say({ role: "bot", text: `I couldn't review your resume just now (${e.message}).`, retry: "improve" });
     } finally {
@@ -761,7 +979,6 @@ export default function ResumeLLM() {
         )}
         {input.trim() && <button type="submit" className="rl-send" disabled={busy} aria-label="Send">{Icon.send}</button>}
       </div>
-      <input ref={fileRef} type="file" accept=".pdf,.txt,application/pdf,text/plain" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) readResume(f); }} />
     </form>
   );
 
@@ -888,6 +1105,8 @@ export default function ResumeLLM() {
 
   return (
     <div className={`rl-app${drawer ? " rl-drawer-open" : ""}`}>
+      {/* Outside the chat box, so "Use a different resume" works from the review screen too. */}
+      <input ref={fileRef} type="file" accept=".pdf,.txt,application/pdf,text/plain" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) readResume(f); }} />
       {sidebar}
       {drawer && <div className="rl-scrim" onClick={() => setDrawer(false)} aria-hidden="true" />}
 
@@ -919,7 +1138,29 @@ export default function ResumeLLM() {
           </div>
         </header>
 
-        {empty ? (
+        {chat?.workspace && resume ? (
+          <ResumeWorkspace
+            resume={resume}
+            suggestions={suggestions}
+            title={improving ? "Improving your resume" : `Tailoring for ${job?.title || "this job"}`}
+            subtitle={improving ? "" : job?.company || ""}
+            score={wsScore}
+            busy={busy}
+            status={wsStatus}
+            blankValues={blankValues}
+            setBlankValues={setBlankValues}
+            flash={flash}
+            deltaOf={wsDelta}
+            keywordsOf={wsKeywords}
+            act={act}
+            extras={[
+              improving
+                ? { label: "Tailor it to a job", run: () => { update((c) => ({ ...c, workspace: false })); startTailor(); } }
+                : { label: "Improve my resume", run: startImprove },
+              { label: "Use a different resume", run: () => fileRef.current?.click() },
+            ]}
+          />
+        ) : empty ? (
           <div className="rl-hero">
             <h1>{name ? `Hi ${name}, where should we start?` : "Where should we start?"}</h1>
             <p className="rl-hero-sub">{resume ? "Your resume is ready. Paste a job description and I'll tailor it, one change at a time." : "Attach or paste your resume, then the job you want. I'll take you through every change."}</p>

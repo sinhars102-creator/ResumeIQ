@@ -80,6 +80,21 @@ export function claimContext(resume, jd, userText = "", { strict = false } = {})
 
 const MAX_SUGGESTIONS = 10;
 
+/** At most one suggestion per resume line (must-fixes win); suggestions without a line are kept. */
+function onePerLine(list) {
+  const seen = new Set();
+  return [...list]
+    .sort((a, b) => (a.priority === "must" ? 0 : 1) - (b.priority === "must" ? 0 : 1))
+    .filter((x) => {
+      const line = x.edit?.target || x.target;
+      if (!line) return true;
+      if (seen.has(line)) return false;
+      seen.add(line);
+      return true;
+    });
+}
+
+
 /** The resume as numbered lines, for the prompt. */
 export function resumeLines(resume) {
   const lines = [];
@@ -264,17 +279,13 @@ Give 4 to ${MAX_SUGGESTIONS} suggestions, most important first, "must" for gaps 
     })
     .filter(Boolean)
     // One card per question and one per line: the model sometimes repeats itself.
-    .filter((s, i, all) => {
-      if (s.edit?.op === "add_bullet") return true;
-      const same = (o) => (s.question ? o.question === s.question : o.edit?.target === s.edit.target && o.edit?.op === s.edit.op);
-      return all.findIndex(same) === i;
-    })
-    .slice(0, MAX_SUGGESTIONS);
+    .filter((s, i, all) => !s.question || all.findIndex((o) => o.question === s.question) === i);
+  const unique = onePerLine(suggestions).slice(0, MAX_SUGGESTIONS);
   return {
     jobTitle: String(data.jobTitle || "").slice(0, 120),
     company: String(data.company || "").slice(0, 120),
     intro: String(data.intro || "").slice(0, 500),
-    suggestions,
+    suggestions: unique,
   };
 }
 
@@ -397,6 +408,7 @@ Return JSON: {"rewrites": [{"target": "E0B1", "after": "the improved line"}, ...
       };
     })
     .filter((s) => s && (s.edit || s.question || s.action))
+    .filter((s, i, all) => onePerLine(all).includes(s))
     .sort((a, b) => order.indexOf(a.category) - order.indexOf(b.category) || (a.priority === "must" ? 0 : 1) - (b.priority === "must" ? 0 : 1));
   return {
     overall: review.overall,

@@ -71,3 +71,43 @@ export function scoreImpact(resume, edit, job) {
   const next = matchScore(applyEdit(resume, edit, after), job);
   return now == null || next == null ? 0 : next - now;
 }
+
+/**
+ * What an edit is about to overwrite, so Undo can put back exactly that (and nothing else): the old text of
+ * the line, the old skills/certifications list, or the index of a bullet being added.
+ */
+export function captureUndo(resume, edit) {
+  const bullet = /^E(\d+)B(\d+)$/.exec(edit.target || "");
+  if (edit.op === "add_bullet") {
+    const i = +/^E(\d+)$/.exec(edit.target)[1];
+    return { kind: "added_bullet", role: i, index: (resume.experience?.[i]?.bullets || []).length };
+  }
+  if (edit.op === "add_skills" || edit.op === "set_skills") return { kind: "skills", value: [...(resume.skills || [])] };
+  if (edit.op === "add_certifications") return { kind: "certifications", value: [...(resume.certifications || [])] };
+  if (bullet) return { kind: "bullet", role: +bullet[1], index: +bullet[2], value: resume.experience?.[+bullet[1]]?.bullets?.[+bullet[2]] ?? null };
+  const field = { C: "contact", T: "title", S: "summary" }[edit.target];
+  return field ? { kind: "field", field, value: resume[field] ?? "" } : null;
+}
+
+/** A copy of the resume with one change undone (see captureUndo). */
+export function applyUndo(resume, token) {
+  if (!token) return resume;
+  const r = clone(resume);
+  if (token.kind === "added_bullet") {
+    if (r.experience?.[token.role]?.bullets) r.experience[token.role].bullets[token.index] = null;
+  } else if (token.kind === "bullet") {
+    if (r.experience?.[token.role]?.bullets) r.experience[token.role].bullets[token.index] = token.value;
+  } else if (token.kind === "skills") r.skills = [...token.value];
+  else if (token.kind === "certifications") r.certifications = [...token.value];
+  else if (token.kind === "field") r[token.field] = token.value;
+  return r;
+}
+
+/** Reading order of a line on the page, for numbering pins top to bottom. */
+export function lineOrder(target) {
+  if (!target) return 1e6;
+  const base = { C: 0, T: 1, S: 2, K: 9e5, Z: 9.5e5 }[target];
+  if (base != null) return base;
+  const m = /^E(\d+)(?:B(\d+))?$/.exec(target);
+  return m ? 10 + +m[1] * 1000 + (m[2] != null ? +m[2] + 1 : 999) : 1e6;
+}
