@@ -402,6 +402,7 @@ export default function ResumeLLM() {
     say({ role: "user", ...(isText ? { text: `${fileOrText.slice(0, 160)}${fileOrText.length > 160 ? "…" : ""}`, note: "Pasted resume" } : { file: fileOrText.name }) });
     setBusy(true);
     const started = Date.now();
+    track("rllm_upload_started", { pasted: isText, type: isText ? "text" : /\.pdf$/i.test(fileOrText.name || "") ? "pdf" : "other" });
     try {
       const text = isText ? fileOrText : await readResumeFileText(fileOrText);
       const parsed = await extractResumeFromText(text);
@@ -420,6 +421,7 @@ export default function ResumeLLM() {
         resumeLoaded(parsed);
       }
     } catch (e) {
+      track("rllm_resume_read_failed", { pasted: isText });
       say({ role: "bot", text: `I couldn't read that resume (${e.message}). Try another file, or paste the text.` });
     } finally {
       setBusy(false);
@@ -427,6 +429,7 @@ export default function ResumeLLM() {
   }
 
   function onSignedIn(s) {
+    track("rllm_signed_in");
     setSession(s);
     const parsed = pendingResumeRef.current;
     pendingResumeRef.current = null;
