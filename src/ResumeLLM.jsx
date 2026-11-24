@@ -21,6 +21,7 @@ import { tokenizeForMatch } from "./matchScore.js";
 import { reviewResume, CATEGORIES, normalizeContactField, setContactField } from "./resumeReview.js";
 import { buildResumePdf, DEFAULT_PDF_FORMAT } from "./resumePdf.js";
 import { checkRead } from "./readCheck.js";
+import DownloadPaywall from "./DownloadPaywall.jsx";
 import { limitState, mergeStores } from "./rllmSync.js";
 import { track } from "./analytics.js";
 import { trackSignUp } from "./googleAds.js";
@@ -1305,16 +1306,20 @@ export default function ResumeLLM() {
         </aside>
       )}
 
-      {download && (
-        <div className="rl-modal-scrim" role="dialog" aria-modal="true" aria-label="Download your resume" onClick={() => setDownload(false)}>
-          <div className="rl-modal" onClick={(e) => e.stopPropagation()}>
-            <h2>Download your resume</h2>
-            {Object.values(suggestions).some((s) => s.status === "pending" || s.status === "queued") && <p className="rl-warn">Some suggestions are still open.</p>}
-            <p className="rl-pay">Payment step goes here. (Prototype: download is free.)</p>
-            <button type="button" className="rl-btn rl-btn-primary rl-wide" onClick={() => { const out = finalResume(resume); downloadResumePdf(out, typeof out.photoUrl === "string" && out.photoUrl.startsWith("data:") ? out.photoUrl : null, PDF_FORMAT); track("rllm_downloaded", { applied, score }); setDownload(false); }}>Download PDF</button>
-            <button type="button" className="rl-btn rl-btn-quiet rl-wide" onClick={() => setDownload(false)}>Keep editing</button>
-          </div>
-        </div>
+      {download && resume && (
+        <DownloadPaywall
+          session={session}
+          paymentsRequired={!!supabase}
+          notice={Object.values(suggestions).some((s) => s.status === "pending" || s.status === "queued") ? "Some suggestions are still open." : ""}
+          buildAndSave={() => {
+            const out = finalResume(resume);
+            downloadResumePdf(out, typeof out.photoUrl === "string" && out.photoUrl.startsWith("data:") ? out.photoUrl : null, PDF_FORMAT);
+            track("rllm_downloaded", { applied, score });
+          }}
+          onClose={() => setDownload(false)}
+          onSignIn={() => { setDownload(false); askSignIn(); }}
+          track={track}
+        />
       )}
     </div>
   );

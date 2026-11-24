@@ -22,10 +22,10 @@ function loadCheckout() {
   return loading;
 }
 
-async function post(path, body) {
+async function post(path, body, token = "") {
   const r = await fetch(`${API_BASE.replace(/\/$/, "")}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: JSON.stringify(body),
   });
   const data = await r.json().catch(() => ({}));
@@ -38,8 +38,11 @@ async function post(path, body) {
  * has verified the payment, or { status: "cancelled" } if the modal is closed; rejects with a
  * message to show when the payment fails or can't be verified.
  */
-export async function payForPlan(plan, { email, contact } = {}) {
-  const [order] = await Promise.all([post("/api/create-order", { plan, email }), loadCheckout()]);
+export async function payForPlan(plan, { email, contact, token = "" } = {}) {
+  // With a sign-in token this is a Resume LLM download plan: the order is tied to the account and the server
+  // adds the plan to it once Razorpay confirms the payment (/api/downloads/purchase). `purchase` carries the result.
+  const verifyPath = token ? "/api/downloads/purchase" : "/api/verify-payment";
+  const [order] = await Promise.all([post("/api/create-order", { plan, email }, token), loadCheckout()]);
   return new Promise((resolve, reject) => {
     let settled = false;
     const rzp = new window.Razorpay({
@@ -54,8 +57,8 @@ export async function payForPlan(plan, { email, contact } = {}) {
       handler: async (response) => {
         settled = true;
         try {
-          const v = await post("/api/verify-payment", response);
-          resolve({ status: "paid", paymentId: v.payment_id, orderId: v.order_id });
+          const v = await post(verifyPath, response, token);
+          resolve({ status: "paid", paymentId: v.payment_id || response.razorpay_payment_id, orderId: v.order_id || response.razorpay_order_id, purchase: v });
         } catch (err) {
           reject(new Error(`We couldn't confirm your payment (${err.message}). If money was taken, write to rahul@myresumeiq.io with payment ID ${response.razorpay_payment_id}.`));
         }

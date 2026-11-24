@@ -109,6 +109,8 @@ export function registerPaymentRoutes(app) {
     if (!user) return res.status(401).json({ error: "Sign in to download" });
     try {
       res.set("Cache-Control", "no-store");
+      // DOWNLOADS_FREE=1 turns the paywall off (testing, or a free launch period); downloads then aren't counted.
+      if (process.env.DOWNLOADS_FREE === "1") return res.json({ allowed: true, free: true, plan: null, remaining: null, unlimited: true, expiresAt: null });
       res.json(statusOf(await listEntitlements(user.id)));
     } catch (err) {
       console.warn("[downloads] status failed:", err.message);
@@ -140,6 +142,7 @@ export function registerPaymentRoutes(app) {
   app.post("/api/downloads/complete", async (req, res) => {
     const user = await signedInUser(req);
     if (!user) return res.status(401).json({ error: "Sign in to download" });
+    if (process.env.DOWNLOADS_FREE === "1") return res.json({ counted: false, free: true });
     try {
       const result = await completeDownload({ store: entitlementStore, userId: user.id, downloadId: String(req.body?.downloadId || "").slice(0, 80) });
       res.status(result.counted ? 200 : result.reason === "not_entitled" ? 402 : 400).json(result);

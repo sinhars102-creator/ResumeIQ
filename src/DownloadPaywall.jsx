@@ -1,0 +1,174 @@
+/**
+ * Module M5 – the download dialog with the paywall.
+ *
+ * Opens when the user taps Download. For a signed-in user it asks the server what they've paid for
+ * (GET /api/downloads/status):
+ *   - nothing yet  -> three plans (₹79 / ₹399 / ₹799), pay with Razorpay, then a Download button
+ *   - something    -> a Download button, and what's left
+ * The PDF is built and saved by `buildAndSave` (the page's own PDF code). Only after that returns is the
+ * download counted (POST /api/downloads/complete), so a failed PDF never uses up a download.
+ * The paywall appears only here, at the first download; everything before it is free.
+ *
+ * Props: session (Supabase session or null), paymentsRequired (false when there's no account system, e.g. a bare
+ * local setup), buildAndSave() -> void (throws if the PDF fails), onClose, onSignIn, track, notice (optional text).
+ */
+import { useEffect, useRef, useState } from "react";
+import { payForPlan } from "./razorpayCheckout.js";
+
+const API_BASE = (import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://localhost:3001" : "")).replace(/\/$/, "");
+
+const PLANS = [
+  { id: "dl1", title: "1 download", price: 79, note: "This resume, one PDF" },
+  { id: "dl10", title: "10 downloads", price: 399, note: "30 days · about ₹40 each" },
+  { id: "dlunlimited", title: "Unlimited", price: 799, note: "30 days · as many as you need" },
+];
+
+const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+
+async function api(path, token, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}`, ...(options.headers || {}) } });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, data };
+}
+
+const leftText = (s) => (s?.free ? "" : s?.unlimited ? `Unlimited downloads${s.expiresAt ? ` until ${new Date(s.expiresAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : ""}.` : s?.remaining != null ? `${s.remaining} download${s.remaining === 1 ? "" : "s"} left.` : "");
+
+export default function DownloadPaywall({ session, paymentsRequired, buildAndSave, onClose, onSignIn, track, notice }) {
+  const token = session?.access_token || "";
+  const email = session?.user?.email || "";
+  // loading | signin | paywall | ready | done
+  const [stage, setStage] = useState(paymentsRequired ? (session ? "loading" : "signin") : "ready");
+  const [status, setStatus] = useState(null);
+  const [plan, setPlan] = useState("dl1");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const trackRef = useRef(track);
+  trackRef.current = track;
+  // One id for this dialog: tapping Download again (say, the phone blocked the first save) isn't counted twice.
+  const downloadIdRef = useRef(uid());
+
+  useEffect(() => {
+    if (!paymentsRequired || !token) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await api("/api/downloads/status", token);
+        if (cancelled) return;
+        if (!r.ok) throw new Error(r.data.error || `status ${r.status}`);
+        setStatus(r.data);
+        setStage(r.data.allowed ? "ready" : "paywall");
+        trackRef.current?.(r.data.allowed ? "rllm_download_ready" : "rllm_paywall_shown", { plan: r.data.plan });
+      } catch (e) {
+        if (cancelled) return;
+        setError(`We couldn't check your downloads (${e.message}). Please try again.`);
+        setStage("error");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [paymentsRequired, token]);
+
+  async function pay() {
+    setError("");
+    setBusy(true);
+    trackRef.current?.("rllm_pay_clicked", { plan });
+    try {
+      const r = await payForPlan(plan, { email, token });
+      if (r.status === "cancelled") {
+        trackRef.current?.("rllm_pay_cancelled", { plan });
+        return;
+      }
+      setStatus(r.purchase);
+      setStage("ready");
+      trackRef.current?.("rllm_paid", { plan });
+    } catch (e) {
+      setError(e.message);
+      trackRef.current?.("rllm_pay_failed", { plan });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function download() {
+    setError("");
+    setBusy(true);
+    try {
+      buildAndSave(); // throws if the PDF can't be made; nothing is counted then
+    } catch (e) {
+      setError(`The PDF couldn't be made (${e.message}). Nothing was used from your downloads.`);
+      setBusy(false);
+      return;
+    }
+    try {
+      if (paymentsRequired && token) {
+        const r = await api("/api/downloads/complete", token, { method: "POST", body: JSON.stringify({ downloadId: downloadIdRef.current }) });
+        if (r.ok && r.data.status) setStatus(r.data.status);
+        else if (r.status === 402) {
+          setError("Your downloads have run out. Choose a plan to download again.");
+          setStage("paywall");
+          return;
+        }
+      }
+      trackRef.current?.("rllm_downloaded_counted", { plan: status?.plan || null });
+      setStage("done");
+    } catch {
+      setStage("done"); // the file was saved; a failed count shouldn't turn the user away
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const selected = PLANS.find((p) => p.id === plan);
+
+  return (
+    <div className="rl-modal-scrim" role="dialog" aria-modal="true" aria-label="Download your resume" onClick={onClose}>
+      <div className="rl-modal" onClick={(e) => e.stopPropagation()}>
+        <h2>{stage === "done" ? "Downloaded" : "Download your resume"}</h2>
+        {notice && stage !== "done" && <p className="rl-warn">{notice}</p>}
+
+        {stage === "loading" && <p className="rl-pay">Checking your downloads…</p>}
+
+        {stage === "signin" && (
+          <>
+            <p className="rl-pay">Sign in so your resume and downloads are saved to your account.</p>
+            <button type="button" className="rl-btn rl-btn-primary rl-wide" onClick={onSignIn}>Sign in</button>
+          </>
+        )}
+
+        {stage === "paywall" && (
+          <>
+            <p className="rl-pay-lead">Your resume is ready. Choose how many PDFs you need.</p>
+            <div className="rl-plans" role="radiogroup" aria-label="Plans">
+              {PLANS.map((p) => (
+                <button key={p.id} type="button" role="radio" aria-checked={plan === p.id} className={`rl-plan${plan === p.id ? " is-on" : ""}`} onClick={() => setPlan(p.id)}>
+                  <span className="rl-plan-main"><b>{p.title}</b><small>{p.note}</small></span>
+                  <span className="rl-plan-price">₹{p.price}</span>
+                </button>
+              ))}
+            </div>
+            <p className="rl-pay-fine">One-time payment by UPI, card or netbanking. No subscription.</p>
+            <button type="button" className="rl-btn rl-btn-primary rl-wide" disabled={busy} onClick={pay}>{busy ? "Opening payment…" : `Pay ₹${selected.price} and continue`}</button>
+          </>
+        )}
+
+        {stage === "ready" && (
+          <>
+            {leftText(status) && <p className="rl-pay">{leftText(status)}</p>}
+            <button type="button" className="rl-btn rl-btn-primary rl-wide" disabled={busy} onClick={download}>{busy ? "Preparing your PDF…" : "Download PDF"}</button>
+          </>
+        )}
+
+        {stage === "done" && (
+          <>
+            <p className="rl-pay">Your PDF has been saved to your device. {leftText(status)}</p>
+            <button type="button" className="rl-btn rl-btn-primary rl-wide" onClick={download} disabled={busy}>Didn't save? Download again</button>
+          </>
+        )}
+
+        {stage === "error" && <p className="rl-warn">{error}</p>}
+        {error && stage !== "error" && <p className="rl-warn" role="alert">{error}</p>}
+
+        <button type="button" className="rl-btn rl-btn-quiet rl-wide" onClick={onClose}>{stage === "done" ? "Close" : "Keep editing"}</button>
+      </div>
+    </div>
+  );
+}
