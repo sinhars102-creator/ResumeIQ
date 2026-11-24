@@ -11,6 +11,7 @@
  */
 
 import Anthropic from "@anthropic-ai/sdk";
+import { resolveRoute, spend } from "./modelRouter.js";
 
 const GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
@@ -64,7 +65,7 @@ const BUSY_MESSAGE = "ResumeIQ has reached its AI usage limit for the moment. Pl
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const MAX_RATE_LIMIT_WAIT_MS = 20000;
 
-async function callGroq({ system, user, maxTokens, json }, model, attempt = 0) {
+async function callGroq({ system, user, maxTokens, json, onUsage }, model, attempt = 0) {
   const response = await fetch(GROQ_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
@@ -93,7 +94,7 @@ async function callGroq({ system, user, maxTokens, json }, model, attempt = 0) {
     if (waitMs <= MAX_RATE_LIMIT_WAIT_MS) {
       console.log(`[llm] Groq rate limit on ${model} – retrying in ${(waitMs / 1000).toFixed(1)}s`);
       await sleep(waitMs);
-      return callGroq({ system, user, maxTokens, json }, model, attempt + 1);
+      return callGroq({ system, user, maxTokens, json, onUsage }, model, attempt + 1);
     }
   }
   if (response.status === 429 || response.status === 404 || data?.error?.code === "model_not_found" || data?.error?.code === "model_decommissioned") {
@@ -103,6 +104,7 @@ async function callGroq({ system, user, maxTokens, json }, model, attempt = 0) {
   if (!response.ok) {
     throw new Error(data?.error?.message || `Groq API error ${response.status}`);
   }
+  onUsage?.("groq", model, { in: data.usage?.prompt_tokens, out: data.usage?.completion_tokens });
   const choice = data.choices?.[0];
   if (choice?.finish_reason === "length") throw new LLMUserError(TRUNCATED_MESSAGE);
   return choice?.message?.content || "";
@@ -110,7 +112,7 @@ async function callGroq({ system, user, maxTokens, json }, model, attempt = 0) {
 
 let anthropicClient;
 
-async function callAnthropic({ system, user, maxTokens, effort }, model) {
+async function callAnthropic({ system, user, maxTokens, effort, onUsage }, model) {
   anthropicClient ??= new Anthropic({ apiKey: anthropicKey() });
   let response;
   try {
@@ -129,6 +131,7 @@ async function callAnthropic({ system, user, maxTokens, effort }, model) {
     if (err instanceof Anthropic.RateLimitError) throw new RateLimitedError(err.message);
     throw err;
   }
+  onUsage?.("anthropic", model, { in: response.usage?.input_tokens, out: response.usage?.output_tokens });
   if (response.stop_reason === "refusal") throw new LLMUserError(DECLINED_MESSAGE, { status: 422 });
   if (response.stop_reason === "max_tokens") throw new LLMUserError(TRUNCATED_MESSAGE);
   return response.content
@@ -143,12 +146,19 @@ async function callAnthropic({ system, user, maxTokens, effort }, model) {
  * quality matters more than speed – with the other still as the fallback. `effort` ("low" | "medium" |
  * "high") overrides how long Claude thinks for this call – lower answers sooner.
  */
-export async function callLLM({ system, user, maxTokens = 1500, json = false, provider: preferred, effort }) {
-  const provider = preferred === "anthropic" && anthropicKey() ? "anthropic" : preferred === "groq" && process.env.GROQ_API_KEY ? "groq" : llmProvider();
+export async function callLLM({ system, user, maxTokens = 1500, json = false, provider: preferred, effort, task = "general" }) {
+  // Which provider goes first: the caller's choice, else this task's setting (see server/modelRouter.js), else the default.
+  const route = resolveRoute(task);
+  const want = preferred || route.provider;
+  const provider = want === "anthropic" && anthropicKey() ? "anthropic" : want === "groq" && process.env.GROQ_API_KEY ? "groq" : llmProvider();
   if (!provider) throw new Error("No LLM provider configured. Set GROQ_API_KEY or ANTHROPIC_API_KEY in .env.");
-  const prompt = { system, user, maxTokens, json, effort };
-  const groq = process.env.GROQ_API_KEY ? groqModels().map((m) => () => callGroq(prompt, m)) : [];
-  const anthropic = anthropicKey() ? [() => callAnthropic(prompt, process.env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL)] : [];
+  // Tokens used by each call are priced and added to the day's spend (alert only, never blocks).
+  const onUsage = (usedProvider, model, u) => spend.record({ task, model, tokensIn: u?.in || 0, tokensOut: u?.out || 0, provider: usedProvider });
+  const prompt = { system, user, maxTokens, json, effort, onUsage };
+  const taskModel = (forProvider) => (route.provider === forProvider ? route.model : null);
+  const groqList = [...new Set([taskModel("groq"), ...groqModels()].filter(Boolean))];
+  const groq = process.env.GROQ_API_KEY ? groqList.map((m) => () => callGroq(prompt, m)) : [];
+  const anthropic = anthropicKey() ? [() => callAnthropic(prompt, taskModel("anthropic") || process.env.ANTHROPIC_MODEL || DEFAULT_ANTHROPIC_MODEL)] : [];
   const attempts = provider === "anthropic" ? [...anthropic, ...groq] : [...groq, ...anthropic];
   let lastLimit;
   let lastError;

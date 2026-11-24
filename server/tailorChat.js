@@ -247,7 +247,7 @@ Return JSON:
   ]
 }
 Give 4 to ${MAX_SUGGESTIONS} suggestions, most important first, "must" for gaps that would get the resume rejected.`;
-  const raw = await callLLM({ system, user, maxTokens: 3500, json: true });
+  const raw = await callLLM({ system, user, maxTokens: 3500, json: true, task: "write" });
   const data = parseJson(raw);
   const ctx = claimContext(resume, jd);
   const job = { title: String(data.jobTitle || ""), jd };
@@ -306,7 +306,7 @@ ${blocked.map((b, i) => `${i + 1}. ${b.edit.target} (${b.edit.op}): "${b.edit.af
 
 Return JSON: {"edits": ["rewritten text" or null, ...]} – one entry per edit, same order.`;
   try {
-    const data = parseJson(await callLLM({ system: "You edit resume lines precisely and never add facts. Return ONLY JSON.", user, maxTokens: 1200, json: true }));
+    const data = parseJson(await callLLM({ system: "You edit resume lines precisely and never add facts. Return ONLY JSON.", user, maxTokens: 1200, json: true, task: "write" }));
     return blocked.map((b, i) => {
       const after = data.edits?.[i];
       return typeof after === "string" && after.trim() ? cleanEdit({ ...b.edit, after }, resume, ctx) : null;
@@ -358,7 +358,7 @@ ${RULES}
 
 Return JSON: {"rewrites": [{"target": "E0B1", "after": "the improved line"}, ...]} – one per line above.`;
     try {
-      const data = parseJson(await callLLM({ system: "You are a senior resume writer. You improve wording without adding facts. Return ONLY JSON.", user, maxTokens: 1500, json: true }));
+      const data = parseJson(await callLLM({ system: "You are a senior resume writer. You improve wording without adding facts. Return ONLY JSON.", user, maxTokens: 1500, json: true, task: "write" }));
       for (const w of Array.isArray(data.rewrites) ? data.rewrites : []) if (w?.target && typeof w.after === "string") rewrites[w.target] = w.after;
     } catch (err) {
       console.warn("[tailor] review rewrites failed:", err.message);
@@ -438,7 +438,7 @@ ${EDIT_SHAPE}
 
 Return JSON: {"reply": "short answer (1-3 sentences)", "edits": [{"title": "short label", "edit": <an edit>}]}
 Return an empty "edits" list when no change to the resume is needed.`;
-  const raw = await callLLM({ system, user, maxTokens: 2500, json: true });
+  const raw = await callLLM({ system, user, maxTokens: 2500, json: true, task: "command" });
   const data = parseJson(raw);
   const userText = `${message}\n${own.join("\n")}`;
   const ctx = claimContext(resume, jd, userText, { strict: !jd });

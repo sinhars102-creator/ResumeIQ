@@ -29,6 +29,7 @@ import { registerExtensionRoutes } from "./extensionApi.js";
 import { registerPaymentRoutes } from "./payments.js";
 import { searchApiSources, adzunaConfigured, loadCompanies } from "./jobSources.js";
 import { callLLM, llmProvider, llmModel, LLMUserError } from "./llm.js";
+import { spend } from "./modelRouter.js";
 
 /** Provider errors can leak account details (e.g. Groq org ids); only our own messages reach users. */
 function sendLLMError(res, err, tag) {
@@ -193,7 +194,7 @@ const LLM_MAX_PROMPT_CHARS = 60000;
 const LLM_MAX_TOKENS = 4096;
 
 app.post("/api/llm", async (req, res) => {
-  const { system, user, maxTokens, json } = req.body || {};
+  const { system, user, maxTokens, json, task } = req.body || {};
   if (typeof system !== "string" || typeof user !== "string" || !user.trim()) {
     return res.status(400).json({ error: "system and user prompts are required" });
   }
@@ -206,11 +207,20 @@ app.post("/api/llm", async (req, res) => {
       user,
       maxTokens: Math.min(Number(maxTokens) || 1500, LLM_MAX_TOKENS),
       json: !!json,
+      task: ["extract", "command", "write"].includes(task) ? task : "general",
     });
     res.json({ text, provider: llmProvider(), model: llmModel() });
   } catch (err) {
     sendLLMError(res, err, `llm:${llmProvider()}`);
   }
+});
+
+/** Today's AI spend by task and model (module M6). Needs ADMIN_KEY set and sent as the x-admin-key header; hidden otherwise. */
+app.get("/api/llm/spend", (req, res) => {
+  const key = process.env.ADMIN_KEY;
+  if (!key) return res.status(404).json({ error: "Not found" });
+  if (req.headers["x-admin-key"] !== key) return res.status(401).json({ error: "Unauthorized" });
+  res.json(spend.summary());
 });
 
 /** Tailor chat prototype (/app/tailor): suggestions tied to resume lines, and chat turns. See server/tailorChat.js. */

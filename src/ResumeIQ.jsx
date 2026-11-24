@@ -1441,12 +1441,12 @@ function writeCachedScore(key, value) {
  * Run a prompt through the API server (server/llm.js picks Groq or Claude),
  * so no model API key is shipped to the browser. Every caller expects JSON.
  */
-async function callLLM(system, user, maxTokens) {
+async function callLLM(system, user, maxTokens, task) {
   const base = API_BASE.replace(/\/$/, "");
   const response = await fetch(`${base}/api/llm`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ system, user, maxTokens, json: true }),
+    body: JSON.stringify({ system, user, maxTokens, json: true, task }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -1659,7 +1659,7 @@ Rules:
 
 Resume text:
 ${pastedText}`;
-    const text = await callLLM(system, user, 4096);
+    const text = await callLLM(system, user, 4096, "extract");
     if (!text || typeof text !== "string") {
       throw new Error("The AI model returned no content. Check your API key and quota.");
     }
