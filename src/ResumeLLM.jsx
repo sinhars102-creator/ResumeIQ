@@ -52,7 +52,8 @@ const Icon = {
 };
 
 // The editor's PDF: every bullet, and certifications (the job flow's PDF keeps 3 bullets per role).
-const PDF_FORMAT = { ...DEFAULT_PDF_FORMAT, maxBullets: 12, sectionOrder: [...DEFAULT_PDF_FORMAT.sectionOrder, "certifications"] };
+// No bullet limit: the PDF flows onto more pages instead of silently dropping approved content.
+const PDF_FORMAT = { ...DEFAULT_PDF_FORMAT, maxBullets: Infinity, sectionOrder: [...DEFAULT_PDF_FORMAT.sectionOrder, "certifications"] };
 const pageCount = (resume) => {
   try {
     return buildResumePdf(finalResume(resume), null, PDF_FORMAT)?.getNumberOfPages() ?? null;
