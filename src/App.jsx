@@ -8,6 +8,13 @@ const ResumeIQ = lazy(() => import("./ResumeIQ"));
 // opens it; /app/resume-llm and the older /app/tailor too.
 const ResumeLLM = lazy(() => import("./ResumeLLM"));
 
+// Launch switch (module M9). When on, /app/editor (what the home page's "Edit my resume" and the editor ads open) shows
+// Resume LLM; when off it shows the earlier sign-in-first editor. /app/resume-llm and /app/tailor always open Resume LLM,
+// so it can be tried on the live site before the switch. Local development always has it on. To switch it on in
+// production set VITE_RESUME_LLM=1 and redeploy; to switch back, remove it and redeploy.
+const RESUME_LLM_EDITOR = import.meta.env.DEV || import.meta.env.VITE_RESUME_LLM === "1";
+const isResumeLlmPath = (path) => /^\/app\/(resume-llm|tailor)/.test(path) || (RESUME_LLM_EDITOR && /^\/app\/editor/.test(path));
+
 // "/app" shows the product; every other path shows the marketing landing page.
 const isAppPath = (path) => path.startsWith("/app");
 
@@ -30,7 +37,7 @@ function App() {
     <>
       {isAppPath(path) ? (
         <Suspense fallback={<div style={{ padding: 48, textAlign: "center", color: "#5b6068" }}>Loading ResumeIQ…</div>}>
-          {/^\/app\/(editor|resume-llm|tailor)/.test(path) ? <ResumeLLM /> : <ResumeIQ />}
+          {isResumeLlmPath(path) ? <ResumeLLM /> : <ResumeIQ />}
         </Suspense>
       ) : (
         <Landing onStart={openApp} />

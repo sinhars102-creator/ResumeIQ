@@ -13,7 +13,10 @@ Branch: `resume-llm`. Scope and reasons: see SCALE_PLAN.md. Status: todo / build
 | M6 | Model layer | Per-task model choice, paid provider config, fallback, spend logging for an alert | `server/llm.js`, `server/tailorChat.js` | `server/llm.test.js` | done |
 | M7 | Analytics events | Events for each step (upload, read, sign-in, goal, edits, approve, paywall, pay, download) | `src/analytics.js`, `src/ResumeLLM.jsx` | PostHog check | done (see FUNNEL.md) |
 | M8 | Abuse guard | Technical limits only (no product cap): sign-in before expensive AI calls, per-IP rate limit | `server/index.js` | `server/rateLimit.test.js` | done |
-| M9 | Launch switch | Point ad traffic at `/app/editor`; keep the Reactive Resume flow as fallback until tests pass | routing, ads | manual | todo |
+| M9 | Launch switch | Point ad traffic at `/app/editor`; keep the Reactive Resume flow as fallback until tests pass | routing, ads | manual | done (flag VITE_RESUME_LLM; see LAUNCH.md, not switched on) |
 
 Order is by dependency: M1, M2, M3, M4, M5, M6, M7, M8, M9.
 Rules for every module: one small change set, a test or check, a commit message naming the module, and a line here updating the status.
+
+Other docs in this folder: SCALE_PLAN.md (scope, costs, pricing, later work), TESTING.md (what to test), LAUNCH.md (going live and switching back), FUNNEL.md (analytics events).
+Migrations to run before the new features work: `20261125000000_rllm_state.sql` (M3) and `20261125010000_download_entitlements.sql` (M4).
