@@ -539,3 +539,41 @@ export async function saveRllmState(userId, state) {
   const { error } = await db().from("rllm_state").upsert({ user_id: userId, state, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
   if (error) throw new Error(`saving Resume LLM state failed: ${error.message}`);
 }
+
+/* ---------- Resume LLM downloads: what a user paid for and what they've used (module M4, see server/entitlements.js) ---------- */
+
+export async function listEntitlements(userId) {
+  const { data, error } = await db().from("download_entitlements").select("*").eq("user_id", userId).order("created_at", { ascending: true });
+  if (error) throw new Error(`reading downloads failed: ${error.message}`);
+  return data || [];
+}
+
+/** Store a paid plan; buying with the same Razorpay payment id twice returns the first row instead of a second. */
+export async function insertEntitlement(row) {
+  const { data, error } = await db().from("download_entitlements").insert(row).select("*").single();
+  if (!error) return data;
+  if (error.code === "23505") {
+    const { data: existing, error: e2 } = await db().from("download_entitlements").select("*").eq("payment_id", row.payment_id).single();
+    if (e2) throw new Error(`reading the purchase failed: ${e2.message}`);
+    return existing;
+  }
+  throw new Error(`saving the purchase failed: ${error.message}`);
+}
+
+/** Use one download of an entitlement, only if nobody else used one since it was read (returns false if they did). */
+export async function incrementEntitlement(e) {
+  const { data, error } = await db().from("download_entitlements").update({ downloads_used: (e.downloads_used || 0) + 1 }).eq("id", e.id).eq("downloads_used", e.downloads_used || 0).select("id");
+  if (error) throw new Error(`counting the download failed: ${error.message}`);
+  return (data || []).length > 0;
+}
+
+export async function hasDownloadLog(userId, downloadId) {
+  const { data, error } = await db().from("download_log").select("id").eq("user_id", userId).eq("download_id", downloadId).maybeSingle();
+  if (error) throw new Error(`reading the download log failed: ${error.message}`);
+  return !!data;
+}
+
+export async function addDownloadLog(row) {
+  const { error } = await db().from("download_log").insert(row);
+  if (error && error.code !== "23505") throw new Error(`logging the download failed: ${error.message}`);
+}
