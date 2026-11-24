@@ -6,7 +6,7 @@ Branch: `resume-llm`. Scope and reasons: see SCALE_PLAN.md. Status: todo / build
 | # | Module | What it does | Files | Test | Status |
 |---|---|---|---|---|---|
 | M1 | Export integrity | The PDF never silently drops approved content (no bullet limit; flows onto more pages) | `src/resumePdf.js`, `PDF_FORMAT` in `src/ResumeLLM.jsx` | build with many bullets, count pages | done |
-| M2 | Read check | After reading a file, compare the raw text with the parsed resume (numbers, dates, emails, URLs, leftover text); warn and let the user fix | `src/readCheck.js` (new), notice in `src/ResumeLLM.jsx` | `server/readCheck.test.js` | todo |
+| M2 | Read check | After reading a file, compare the raw text with the parsed resume (numbers, dates, emails, URLs, leftover text); warn and let the user fix | `src/readCheck.js` (new), notice in `src/ResumeLLM.jsx` | `server/readCheck.test.js` | done |
 | M3 | Resume storage | Save the resume per signed-in user on the server (not only the browser) and load it back | new migration in `supabase/migrations`, routes in `server/index.js`, `src/ResumeLLM.jsx` | `server/resumeStore.test.js` | todo |
 | M4 | Plans and entitlements (server) | Three plans: 1 download ₹79, 10 downloads/month ₹399, unlimited/month ₹799. Count a download only when the PDF download completes | `server/payments.js`, new migration, new routes | `server/payments.test.js` | todo |
 | M5 | Paywall (front end) | Pricing popup at the first download only; pay with Razorpay; then download | `src/ResumeLLM.jsx` download modal, `src/razorpayCheckout.js` | browser test | todo |

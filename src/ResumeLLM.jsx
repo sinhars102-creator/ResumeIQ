@@ -20,6 +20,7 @@ import { isReady, finalText as finalTextFor } from "./workspaceText.js";
 import { tokenizeForMatch } from "./matchScore.js";
 import { reviewResume, CATEGORIES, normalizeContactField, setContactField } from "./resumeReview.js";
 import { buildResumePdf, DEFAULT_PDF_FORMAT } from "./resumePdf.js";
+import { checkRead } from "./readCheck.js";
 import { track } from "./analytics.js";
 import { trackSignUp } from "./googleAds.js";
 import "./ResumeLLM.css";
@@ -374,6 +375,12 @@ export default function ResumeLLM() {
       const text = isText ? fileOrText : await readResumeFileText(fileOrText);
       const parsed = await extractResumeFromText(text);
       track("rllm_resume_read", { seconds: Math.round((Date.now() - started) / 1000), pasted: isText });
+      // M2: compare what the file said with what we kept, and say so when something looks lost.
+      const check = checkRead(text, parsed);
+      if (!check.ok) {
+        track("rllm_read_check_flagged", { emails: check.missing.emails.length, links: check.missing.links.length, phones: check.missing.phones.length, years: check.missing.years.length, numbers: check.missing.numbers.length, lines: check.missing.lines.length });
+        say({ role: "bot", text: `Heads-up: I may have missed some of what's in your file – ${check.summary}. Check your resume on the left. You can tell me anything that's missing here in the chat, or paste the text of the resume instead.` });
+      }
       if (supabase && !session) {
         pendingResumeRef.current = parsed;
         say({ role: "bot", kind: "signin", text: `I've read your resume${firstName(parsed) ? `, ${firstName(parsed)}` : ""}. Sign in so it's saved – you won't have to upload it again for the next job.`, email: emailIn(parsed.contact) });
