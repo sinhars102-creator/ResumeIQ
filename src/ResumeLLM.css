@@ -108,6 +108,10 @@
 .rl-msg p { margin: 0; white-space: pre-wrap; font-size: 15.5px; line-height: 1.55; }
 .rl-user { align-items: flex-end; }
 .rl-user > p, .rl-user > .rl-file { max-width: 85%; background: var(--rl-user); padding: 10px 14px; border-radius: 20px 20px 6px 20px; max-height: 12em; overflow: hidden; }
+.rl-msg-actions { display: flex; gap: 2px; justify-content: flex-end; }
+.rl-msg-actions button { font: inherit; font-size: 12.5px; min-height: 32px; padding: 4px 10px; border: 0; border-radius: 14px; background: none; color: var(--rl-text-2); cursor: pointer; }
+.rl-msg-actions button:hover:not(:disabled) { background: var(--rl-user); color: var(--rl-text); }
+.rl-msg-actions button:disabled { opacity: .4; cursor: default; }
 .rl-bot { align-items: flex-start; }
 .rl-small p { font-size: 13.5px !important; color: var(--rl-text-2); }
 .rl-user.rl-small > p { background: none; padding: 0 4px; }

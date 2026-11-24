@@ -351,7 +351,46 @@ export default function ResumeLLM() {
       return { chats: chats.map((c) => (c.id === current.id ? next : c)), activeId: current.id };
     });
   }
-  const say = (msg) => update((c) => ({ ...c, messages: [...c.messages, { id: uid(), ...msg }] }));
+  const say = (msg) => {
+    const id = uid();
+    update((c) => ({ ...c, messages: [...c.messages, { id, ...msg }] }));
+    return id;
+  };
+
+  // Copy, edit and rerun on the user's own messages.
+  const [copiedId, setCopiedId] = useState(null);
+  const sourceText = (m) => m.full || m.text || "";
+  async function copyMessage(m) {
+    const text = sourceText(m);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    setCopiedId(m.id);
+    setTimeout(() => setCopiedId((id) => (id === m.id ? null : id)), 1500);
+    track("rllm_message_copied");
+  }
+  function editMessage(m) {
+    setInput(sourceText(m));
+    setTimeout(() => inputRef.current?.focus(), 30);
+    track("rllm_message_edit");
+  }
+  function rerunMessage(m) {
+    if (busy) return;
+    track("rllm_message_rerun", { kind: m.note || "chat" });
+    const text = sourceText(m);
+    if (m.note === "Job description") return readJob(text, { again: true, msgId: m.id });
+    if (m.note === "Pasted resume") return readResume(text, { again: true });
+    return send(text);
+  }
+  // A message gets these buttons when its full text is known (typed in the composer, or a pasted resume or job).
+  const hasActions = (m) => m.role === "user" && !m.file && (m.full || m.typed);
 
   function startNewChat() {
     const c = newChat(accountResume || chat?.resume || null);
@@ -397,11 +436,11 @@ export default function ResumeLLM() {
     say({ role: "bot", kind: "choose", text: "What would you like to do?" });
   }
 
-  async function readResume(fileOrText) {
+  async function readResume(fileOrText, { again = false } = {}) {
     const isText = typeof fileOrText === "string";
     // A new resume starts over: back to the chat, no suggestions for the old one.
     update((c) => ({ ...c, workspace: false, mode: null, suggestions: {}, queue: [], jd: "", job: null }));
-    say({ role: "user", ...(isText ? { text: `${fileOrText.slice(0, 160)}${fileOrText.length > 160 ? "…" : ""}`, note: "Pasted resume" } : { file: fileOrText.name }) });
+    if (!again) say({ role: "user", ...(isText ? { text: `${fileOrText.slice(0, 160)}${fileOrText.length > 160 ? "…" : ""}`, full: fileOrText, note: "Pasted resume" } : { file: fileOrText.name }) });
     setBusy(true);
     const started = Date.now();
     track("rllm_upload_started", { pasted: isText, type: isText ? "text" : /\.pdf$/i.test(fileOrText.name || "") ? "pdf" : "other" });
@@ -441,8 +480,8 @@ export default function ResumeLLM() {
   }
 
   // ---- job description -> suggestions, one at a time ----
-  async function readJob(text) {
-    say({ role: "user", text: `${text.slice(0, 220)}${text.length > 220 ? "…" : ""}`, note: "Job description" });
+  async function readJob(text, { again = false, msgId = null } = {}) {
+    const userMsgId = again ? msgId : say({ role: "user", text: `${text.slice(0, 220)}${text.length > 220 ? "…" : ""}`, full: text, note: "Job description" });
     setBusy(true);
     const started = Date.now();
     try {
@@ -470,7 +509,7 @@ export default function ResumeLLM() {
       track("rllm_suggestions", { count: ordered.length, must, questions: ordered.filter((s) => s.question).length, seconds: Math.round((Date.now() - started) / 100) / 10, score: before });
       track("tailor_viewed", { suggestion_count: ordered.length, base_score: before, mode: "tailor", layout: window.matchMedia("(max-width: 899px)").matches ? "mobile" : "desktop" });
     } catch (e) {
-      say({ role: "bot", text: `I couldn't read that job just now (${e.message}). Please try again.` });
+      say({ role: "bot", text: `I couldn't read that job just now (${e.message}).`, retryOf: userMsgId });
     } finally {
       setBusy(false);
     }
@@ -595,7 +634,7 @@ export default function ResumeLLM() {
       }
       if (text.length >= MIN_JD_CHARS) return readJob(text);
     }
-    say({ role: "user", text });
+    say({ role: "user", text, typed: true });
     // Contact details (email, phone, city, LinkedIn): set in code, not by the AI – the typed value is cleaned
     // up (spelling of the city, phone format) and only the essential part is kept.
     const asked = m?.kind === "answer" ? suggestions[m.sid] : null;
@@ -1264,6 +1303,14 @@ export default function ResumeLLM() {
                   return (
                     <div key={m.id} className={`rl-msg rl-${m.role}${m.small ? " rl-small" : ""}`}>
                       {m.file ? <p className="rl-file">📄 {m.file}</p> : m.text && <p>{m.note && <span className="rl-note">{m.note}</span>}{m.text}</p>}
+                      {hasActions(m) && (
+                        <div className="rl-msg-actions">
+                          <button type="button" onClick={() => copyMessage(m)}>{copiedId === m.id ? "Copied" : "Copy"}</button>
+                          <button type="button" onClick={() => editMessage(m)}>Edit</button>
+                          <button type="button" onClick={() => rerunMessage(m)} disabled={busy}>Rerun</button>
+                        </div>
+                      )}
+                      {m.retryOf && messages.find((x) => x.id === m.retryOf) && <button type="button" className="rl-btn" onClick={() => rerunMessage(messages.find((x) => x.id === m.retryOf))} disabled={busy}>Try again</button>}
                       {m.kind === "resume" && <button type="button" className="rl-link" onClick={() => setResumeOpen(true)}>View resume</button>}
                       {m.kind === "choose" && !chat?.mode && (
                         <div className="rl-choose">
