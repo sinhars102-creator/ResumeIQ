@@ -57,14 +57,50 @@ const GENERIC = stems(`led lead managed manage owned own drove drive built build
  * Job-description terms a rewrite introduces that the candidate never claimed (not in the resume, not
  * said in the chat). Writing them in would be inventing experience.
  */
-function unsupportedClaims(text, ctx, { strict = false } = {}) {
+// Words that name a skill, tool, method or domain. A job word the candidate hasn't claimed is only worth stopping a
+// rewrite for when it is one of these (or is written as a name in the job description); ordinary words the job also
+// happens to use ("powered", "optimal", "engineers", "100+") are not claims. Not a full list: it only decides which
+// unclaimed job words count as claims, and the strict check (no job description) never uses it.
+const SKILL_WORDS = stems(`sql python java javascript typescript react angular node golang kotlin swift scala ruby php rust
+  aws azure gcp kubernetes docker terraform jenkins git linux unix spark hadoop kafka airflow dbt snowflake redshift bigquery
+  databricks tableau powerbi looker excel vba sap oracle salesforce hubspot jira confluence figma sketch agile scrum kanban
+  sigma kaizen lean waterfall devops cicd microservices api rest graphql etl elt dashboard dashboards analytics forecasting
+  forecast clustering regression classification segmentation optimization optimisation simulation modeling modelling statistics
+  statistical bayesian econometrics experimentation ab testing automation rpa nlp llm genai ml ai tensorflow pytorch sklearn
+  pandas numpy mlops kpi okr roadmap pnl gtm seo sem crm erp wms tms mrp logistics procurement sourcing inventory warehousing
+  fulfilment fulfillment transportation routing pricing compliance gdpr hipaa sox audit budgeting forecasting accounting ifrs
+  gaap treasury hris recruiting payroll cybersecurity encryption iam sso oauth blockchain iot embedded fpga cad solidworks
+  autocad matlab simulink hvac lims gmp haccp iso itil pmp prince2 cfa cpa mba`);
+const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Is this unclaimed job word a skill-type claim (see SKILL_WORDS)? */
+function skillLike(word, jdText) {
+  const w = String(word || "");
+  if (!w || /^\d+[+%]?$/.test(w)) return false; // figures are checked as numbers, not as skills
+  if (/[0-9+#/.]/.test(w)) return true; // c++, c#, ci/cd, node.js, s3
+  if (SKILL_WORDS.has(stem(w))) return true;
+  // Written as a name in the job description: an acronym (SAP, AWS) or capitalised in the middle of a sentence (Kafka).
+  for (const m of String(jdText || "").matchAll(new RegExp(`\\b${esc(w)}\\b`, "gi"))) {
+    const found = m[0];
+    if (found.length >= 2 && found === found.toUpperCase() && /[A-Z]/.test(found)) return true;
+    const before = String(jdText).slice(0, m.index).trimEnd();
+    const atSentenceStart = !before || /[.!?:\n•·\-–—*]$/.test(before);
+    // Plurals and ordinary word forms ("Engineers", "Leading", "Partners") are capitalised by habit, not names.
+    if (/^[A-Z]/.test(found) && !atSentenceStart && !/(s|ing|ed|ly|tion)$/i.test(w)) return true;
+  }
+  return false;
+}
+
+export function unsupportedClaims(text, ctx, { strict = false } = {}) {
   // strict (a brand-new bullet): every meaningful word must come from the resume or the candidate;
   // otherwise (rewording an existing line): only the job's own terms are checked.
   // The [number] blank is ours, not a claim. Returns the words as written (not their stems), for questions.
   const clean = String(text).replace(/\[number\]/g, " ");
   const bad = new Set([...stems(clean)].filter((w) => (strict || ctx.strict || ctx.jd.has(w)) && !ctx.supported.has(w) && !GENERIC.has(w)));
   const words = tokenizeForMatch(clean).filter((w) => bad.has(stem(w)));
-  return [...new Set(words.map((w) => w.replace(/[^a-z0-9+#/-]/g, "")))].filter(Boolean);
+  const wordsOut = [...new Set(words.map((w) => w.replace(/[^a-z0-9+#/-]/g, "")))].filter(Boolean);
+  // Rewording with a job description: only skill-type job words are claims (strict mode keeps every new word).
+  return strict || ctx.strict ? wordsOut : wordsOut.filter((w) => skillLike(w, ctx.jdText));
 }
 
 /** What the candidate has claimed (resume + their own chat messages) and what the job asks for. */
@@ -73,6 +109,7 @@ export function claimContext(resume, jd, userText = "", { strict = false } = {})
     known: numbersIn(`${resumeLines(resume)}\n${userText}`),
     supported: stems(`${buildResumeCorpus(resume)}\n${resume?.contact || ""}\n${(resume?.education || []).map((e) => [e.degree, e.school].join(" ")).join("\n")}\n${userText}`),
     jd: stems(jd || ""),
+    jdText: jd || "",
     // No job description (improving the resume on its own): every new word must come from the candidate.
     strict,
   };

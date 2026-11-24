@@ -392,6 +392,9 @@ export default function ResumeLLM() {
   // A message gets these buttons when its full text is known (typed in the composer, or a pasted resume or job).
   const hasActions = (m) => m.role === "user" && !m.file && (m.full || m.typed);
 
+  // The workspace conversation (laptop and phone): your messages and the replies, kept with the chat.
+  const addThread = (...msgs) => update((c) => ({ ...c, thread: [...(c.thread || []), ...msgs.map((m) => ({ id: uid(), ...m }))].slice(-60) }));
+
   function startNewChat() {
     const c = newChat(accountResume || chat?.resume || null);
     setStore((s) => ({ chats: [c, ...s.chats.filter((x) => x.messages.length)], activeId: c.id }));
@@ -439,7 +442,7 @@ export default function ResumeLLM() {
   async function readResume(fileOrText, { again = false } = {}) {
     const isText = typeof fileOrText === "string";
     // A new resume starts over: back to the chat, no suggestions for the old one.
-    update((c) => ({ ...c, workspace: false, mode: null, suggestions: {}, queue: [], jd: "", job: null }));
+    update((c) => ({ ...c, workspace: false, mode: null, suggestions: {}, queue: [], jd: "", job: null, thread: [] }));
     if (!again) say({ role: "user", ...(isText ? { text: `${fileOrText.slice(0, 160)}${fileOrText.length > 160 ? "…" : ""}`, full: fileOrText, note: "Pasted resume" } : { file: fileOrText.name }) });
     setBusy(true);
     const started = Date.now();
@@ -780,7 +783,8 @@ export default function ResumeLLM() {
     return { ...c, suggestions: all, pinCount: (c.pinCount || 0) + pinned.length };
   }
   async function chatFor(message, extra = {}) {
-    const history = [];
+    // The conversation so far, so a follow-up ("yes, at Amazon") is understood in context.
+    const history = (chat?.thread || []).slice(-10).map((m) => ({ role: m.role, text: m.text }));
     return post("/api/tailor/chat", { resume, jd, jobTitle: job?.title || "", history, message, ...extra });
   }
   const scoreNow = (r) => (improving ? reviewResume(r, { pages }).overall : matchScore(r, { title: job?.title, jd }));
@@ -860,11 +864,14 @@ export default function ResumeLLM() {
         update((c) => ({ ...c, resume: applyEdit(c.resume, edit), suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], edit, question: null, before: c.resume.contact, status: "applied", undo: captureUndo(c.resume, edit), appliedText: edit.after, note: null } } }));
         flashLine("C");
         setWsStatus(`${s.where} updated`);
+        addThread({ role: "user", text }, { role: "bot", text: `Done: your ${s.field === "linkedin" ? "LinkedIn link" : s.field} is updated on the resume.` });
         return;
       }
+      const sent = chatFor(text, { answerTo: s.question });
+      addThread({ role: "user", text });
       setBusy(true);
       try {
-        const data = await chatFor(text, { answerTo: s.question });
+        const data = await sent;
         const cards = data.suggestions || [];
         update((c) => {
           if (!cards.length) return { ...c, suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], note: data.reply } } };
@@ -873,8 +880,10 @@ export default function ResumeLLM() {
           const turned = { ...c.suggestions[id], edit: first.edit, question: null, before: first.before, note: null, where: whereOf(c.resume, first.edit.target, c.suggestions[id].category) };
           return addCards({ ...c, suggestions: { ...c.suggestions, [id]: turned } }, rest);
         });
-        setWsStatus(cards.length ? "Here's the change – check it and apply" : "");
+        addThread({ role: "bot", text: cards.length ? `Thanks. Here's the change for #${s.pin}: check it and apply.` : data.reply });
+        setWsStatus("");
       } catch (e) {
+        addThread({ role: "bot", text: `Sorry, that didn't work (${e.message}). Please try again.` });
         wsSet(id, { note: `That didn't work (${e.message}). Try again.` });
       } finally {
         setBusy(false);
@@ -912,15 +921,19 @@ export default function ResumeLLM() {
       }
     },
     async ask(text) {
+      // chatFor reads the thread as it was when this message was sent, so the message itself isn't sent twice.
+      const sent = chatFor(text);
+      addThread({ role: "user", text });
       setBusy(true);
       try {
-        const data = await chatFor(text);
+        const data = await sent;
         const cards = data.suggestions || [];
         if (cards.length) update((c) => addCards(c, cards));
-        setWsStatus(cards.length ? `${data.reply} (${cards.length} new suggestion${cards.length > 1 ? "s" : ""})` : data.reply);
+        addThread({ role: "bot", text: `${data.reply}${cards.length ? ` I've added ${cards.length} suggestion${cards.length > 1 ? "s" : ""} to the list: check and apply.` : ""}` });
+        setWsStatus("");
         track("rllm_chat_sent", { mode: "workspace", has_jd: !!jd });
       } catch (e) {
-        setWsStatus(`That didn't work (${e.message}).`);
+        addThread({ role: "bot", text: `Sorry, that didn't work (${e.message}). Please try again.` });
       } finally {
         setBusy(false);
       }
@@ -1230,6 +1243,7 @@ export default function ResumeLLM() {
             score={wsScore}
             busy={busy}
             status={wsStatus}
+            thread={chat?.thread || []}
             blankValues={blankValues}
             setBlankValues={setBlankValues}
             flash={flash}

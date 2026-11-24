@@ -27,7 +27,7 @@ function Diff({ before, after, show = "both" }) {
 }
 
 export default function ResumeWorkspace(props) {
-  const { resume, suggestions, title, subtitle, score, busy, status, blankValues, setBlankValues, flash, deltaOf, keywordsOf, act, extras } = props;
+  const { resume, suggestions, title, subtitle, score, busy, status, blankValues, setBlankValues, flash, deltaOf, keywordsOf, act, extras, thread = [] } = props;
   const [isPhone, setIsPhone] = useState(() => window.matchMedia(PHONE).matches);
   const [filter, setFilter] = useState("all");
   const [active, setActive] = useState(null);
@@ -42,7 +42,37 @@ export default function ResumeWorkspace(props) {
   const scrollRef = useRef(null);
   const sheetRef = useRef(null);
   const cardsRef = useRef(null);
+  const threadRef = useRef(null);
   const timer = useRef(null);
+  // Keep the newest message of the conversation in view.
+  useEffect(() => {
+    const el = threadRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [thread.length, busy, sheet]);
+
+  // The conversation: your messages and the replies, in order, with a typing indicator while a reply is on its way.
+  const threadEl = () =>
+    thread.length || busy ? (
+      <div className="ws-thread" ref={threadRef} role="log" aria-live="polite" aria-label="Conversation">
+        {thread.map((m) => (
+          <div key={m.id} className={`ws-bub ws-bub-${m.role}`}>{m.text}</div>
+        ))}
+        {busy && <div className="ws-bub ws-bub-bot ws-typing" aria-label="Working"><span /><span /><span /></div>}
+      </div>
+    ) : null;
+  const sendAsk = () => {
+    const text = ask.trim();
+    if (!text || busy) return;
+    act.ask(text);
+    setAsk("");
+  };
+  const askKeys = (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      sendAsk();
+    }
+  };
+
 
   useEffect(() => {
     const mq = window.matchMedia(PHONE);
@@ -393,10 +423,10 @@ export default function ResumeWorkspace(props) {
       body = (
         <>
           <button type="button" className="ws-grab" onClick={closeSheet} aria-label="Close" />
-          <form className="ws-sb" onSubmit={(e) => { e.preventDefault(); if (ask.trim()) { act.ask(ask.trim()); setAsk(""); closeSheet(); } }}>
-            <p className="ws-why">Ask for any change – e.g. "make it fit on one page" or "add that I led a team of 6".</p>
-            <textarea className="ws-edit" value={ask} onChange={(e) => setAsk(e.target.value)} placeholder="Ask for a change…" autoFocus />
-            <div className="ws-acts"><button type="submit" className="ws-btn ws-pri ws-grow" disabled={busy || !ask.trim()}>Send</button></div>
+          {threadEl() || <div className="ws-sb"><p className="ws-why">Chat with me about your resume – e.g. "make it fit on one page" or "add that I led a team of 6".</p></div>}
+          <form className="ws-chatform" onSubmit={(e) => { e.preventDefault(); sendAsk(); }}>
+            <textarea className="ws-edit" rows={2} value={ask} onChange={(e) => setAsk(e.target.value)} onKeyDown={askKeys} placeholder="Message…" autoFocus />
+            <button type="submit" className="ws-btn ws-pri" disabled={busy || !ask.trim()}>Send</button>
           </form>
         </>
       );
@@ -515,17 +545,22 @@ export default function ResumeWorkspace(props) {
       </div>
       <div className="ws-main">
         <section className="ws-left" aria-label="Resume">{paper}</section>
-        <aside className="ws-right" aria-label="Recommendations" ref={cardsRef}>
+        <aside className="ws-right" aria-label="Recommendations">
+          <div className="ws-right-scroll" ref={cardsRef}>
           <div className="ws-tabs">
             {[["all", "All"], ["pending", "To review"], ["applied", "Applied"], ["dismissed", "Dismissed"]].map(([k, l]) => (
               <button key={k} type="button" aria-pressed={filter === k} onClick={() => setFilter(k)}>{l} {counts[k] || 0}</button>
             ))}
           </div>
           {shown.length ? shown.map((s) => <div key={s.id}>{cardEl(s)}</div>) : <p className="ws-empty-list">Nothing here yet.</p>}
-          <form className="ws-askbox" onSubmit={(e) => { e.preventDefault(); if (ask.trim()) { act.ask(ask.trim()); setAsk(""); } }}>
-            <input value={ask} onChange={(e) => setAsk(e.target.value)} placeholder='Ask for a change – e.g. "make it fit on one page"' aria-label="Ask for a change" />
-            <button type="submit" className="ws-btn ws-pri" disabled={busy || !ask.trim()}>Send</button>
-          </form>
+          </div>
+          <div className="ws-dock">
+            {threadEl()}
+            <form className="ws-askbox" onSubmit={(e) => { e.preventDefault(); sendAsk(); }}>
+              <textarea rows={1} value={ask} onChange={(e) => setAsk(e.target.value)} onKeyDown={askKeys} placeholder='Message – e.g. "add that I led a team of 6"' aria-label="Message" />
+              <button type="submit" className="ws-btn ws-pri" disabled={busy || !ask.trim()}>Send</button>
+            </form>
+          </div>
         </aside>
       </div>
     </div>
