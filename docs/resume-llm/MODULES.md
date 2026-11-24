@@ -12,7 +12,7 @@ Branch: `resume-llm`. Scope and reasons: see SCALE_PLAN.md. Status: todo / build
 | M5 | Paywall (front end) | Pricing popup at the first download only; pay with Razorpay; then download | `src/ResumeLLM.jsx` download modal, `src/razorpayCheckout.js` | browser test | done (`node scripts/e2e/paywall.mjs`) |
 | M6 | Model layer | Per-task model choice, paid provider config, fallback, spend logging for an alert | `server/llm.js`, `server/tailorChat.js` | `server/llm.test.js` | done |
 | M7 | Analytics events | Events for each step (upload, read, sign-in, goal, edits, approve, paywall, pay, download) | `src/analytics.js`, `src/ResumeLLM.jsx` | PostHog check | done (see FUNNEL.md) |
-| M8 | Abuse guard | Technical limits only (no product cap): sign-in before expensive AI calls, per-IP rate limit | `server/index.js` | `server/rateLimit.test.js` | todo |
+| M8 | Abuse guard | Technical limits only (no product cap): sign-in before expensive AI calls, per-IP rate limit | `server/index.js` | `server/rateLimit.test.js` | done |
 | M9 | Launch switch | Point ad traffic at `/app/editor`; keep the Reactive Resume flow as fallback until tests pass | routing, ads | manual | todo |
 
 Order is by dependency: M1, M2, M3, M4, M5, M6, M7, M8, M9.

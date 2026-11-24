@@ -30,6 +30,7 @@ import { registerPaymentRoutes } from "./payments.js";
 import { searchApiSources, adzunaConfigured, loadCompanies } from "./jobSources.js";
 import { callLLM, llmProvider, llmModel, LLMUserError } from "./llm.js";
 import { spend } from "./modelRouter.js";
+import { aiGuard, cachedUser } from "./rateLimit.js";
 
 /** Provider errors can leak account details (e.g. Groq org ids); only our own messages reach users. */
 function sendLLMError(res, err, tag) {
@@ -192,6 +193,12 @@ async function fetchJobsGuest(keywords, location, limit, experienceLevels = []) 
  */
 const LLM_MAX_PROMPT_CHARS = 60000;
 const LLM_MAX_TOKENS = 4096;
+
+// Technical limits on the routes that spend AI money (module M8, see server/rateLimit.js). The tailor routes need a sign-in
+// whenever accounts are set up; /api/llm stays open to signed-out visitors (resume reading happens before sign-in), per IP.
+const guardUser = cachedUser(optionalUser);
+app.use("/api/llm", aiGuard({ getUser: guardUser }));
+app.use("/api/tailor", aiGuard({ getUser: guardUser, requireSignIn: () => jobStoreConfigured() }));
 
 app.post("/api/llm", async (req, res) => {
   const { system, user, maxTokens, json, task } = req.body || {};
