@@ -17,8 +17,9 @@ import {
   jobStoreConfigured, toRow, inScope, upsertJobs, findStoredJobs, recordDemand, markDemandCollected, linkedInJobsForQuery,
   userFromToken, recordApplication, updateApplication, setApplicationStatus, getJobById,
   getTailorSession, saveTailorSession, saveTailoredResumeFile, getProfile,
-  getEditorAccount, saveEditorAccount, userEmail,
+  getEditorAccount, saveEditorAccount, userEmail, getRllmState, saveRllmState,
 } from "./jobStore.js";
+import { limitState } from "../src/rllmSync.js";
 import { normalizeQuery, FRESH_HOURS } from "./searchDemand.js";
 import { withTiers, byTierThenNewest } from "./companyTiers.js";
 import { fetchEasyApplyForm, easyApplyTarget } from "./easyApply.js";
@@ -239,6 +240,34 @@ app.post("/api/tailor/chat", async (req, res) => {
     res.json(await chatTurn({ resume, jd: typeof jd === "string" ? jd : "", jobTitle: typeof jobTitle === "string" ? jobTitle : "", history: Array.isArray(history) ? history : [], message, answerTo: typeof answerTo === "string" ? answerTo : "" }));
   } catch (err) {
     sendLLMError(res, err, "tailor:chat");
+  }
+});
+
+/** Resume LLM chats kept per signed-in user, so their work follows them across devices (module M3, see src/rllmSync.js). */
+app.get("/api/rllm/state", async (req, res) => {
+  const user = await optionalUser(req);
+  if (!user) return res.status(401).json({ error: "Sign in to load your saved chats" });
+  try {
+    const saved = await getRllmState(user.id);
+    res.set("Cache-Control", "no-store");
+    res.json({ state: saved?.state || { chats: [] }, updatedAt: saved?.updatedAt || null });
+  } catch (err) {
+    console.warn("[rllm] load failed:", err.message);
+    res.status(500).json({ error: "Couldn't load your saved chats" });
+  }
+});
+app.put("/api/rllm/state", async (req, res) => {
+  const user = await optionalUser(req);
+  if (!user) return res.status(401).json({ error: "Sign in to save your chats" });
+  const incoming = req.body?.state;
+  if (!incoming || !Array.isArray(incoming.chats)) return res.status(400).json({ error: "state.chats is required" });
+  try {
+    const state = limitState(incoming);
+    await saveRllmState(user.id, state);
+    res.json({ saved: state.chats.length });
+  } catch (err) {
+    console.warn("[rllm] save failed:", err.message);
+    res.status(500).json({ error: "Couldn't save your chats" });
   }
 });
 

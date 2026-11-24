@@ -21,6 +21,7 @@ import { tokenizeForMatch } from "./matchScore.js";
 import { reviewResume, CATEGORIES, normalizeContactField, setContactField } from "./resumeReview.js";
 import { buildResumePdf, DEFAULT_PDF_FORMAT } from "./resumePdf.js";
 import { checkRead } from "./readCheck.js";
+import { limitState, mergeStores } from "./rllmSync.js";
 import { track } from "./analytics.js";
 import { trackSignUp } from "./googleAds.js";
 import "./ResumeLLM.css";
@@ -304,6 +305,35 @@ export default function ResumeLLM() {
   // ---- chats ----
   const chat = store.chats.find((c) => c.id === store.activeId) || null;
   useEffect(() => saveStore(store), [store]);
+
+  // M3: a signed-in user's chats also live on the server, so their work follows them to another device.
+  // On sign-in the saved chats are merged in (the newer copy of a chat wins); after that changes are saved a moment after they stop.
+  const syncedRef = useRef(false);
+  const accessToken = session?.access_token || "";
+  useEffect(() => {
+    syncedRef.current = false;
+    if (!accessToken) return undefined;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/rllm/state`, { headers: { Authorization: `Bearer ${accessToken}` } });
+        const data = await res.json().catch(() => ({}));
+        if (!cancelled && res.ok && data.state) setStore((local) => mergeStores(local, data.state));
+      } catch {
+        // Offline or the server is down: the chats still work from this browser.
+      } finally {
+        if (!cancelled) syncedRef.current = true;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [accessToken]);
+  useEffect(() => {
+    if (!accessToken || !syncedRef.current) return undefined;
+    const timer = setTimeout(() => {
+      fetch(`${API_BASE}/api/rllm/state`, { method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ state: limitState(store) }) }).catch(() => {});
+    }, 2500);
+    return () => clearTimeout(timer);
+  }, [store, accessToken]);
 
   /** Change the active chat (creating one on first use). */
   function update(fn) {

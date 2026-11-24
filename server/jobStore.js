@@ -525,3 +525,17 @@ export async function getResumeFile(userId, id = null) {
   if (error) throw new Error(`downloading your resume failed: ${error.message}`);
   return { fileName: row.file_name, mimeType: row.mime_type, bytes: Buffer.from(await data.arrayBuffer()) };
 }
+
+/* ---------- Resume LLM: a user's chats and edited resumes (module M3) ---------- */
+
+/** The user's saved Resume LLM state ({ chats: [...] }) with when it was saved, or null if they have none yet. */
+export async function getRllmState(userId) {
+  const { data, error } = await db().from("rllm_state").select("state, updated_at").eq("user_id", userId).maybeSingle();
+  if (error) throw new Error(`reading Resume LLM state failed: ${error.message}`);
+  return data ? { state: data.state, updatedAt: data.updated_at } : null;
+}
+
+export async function saveRllmState(userId, state) {
+  const { error } = await db().from("rllm_state").upsert({ user_id: userId, state, updated_at: new Date().toISOString() }, { onConflict: "user_id" });
+  if (error) throw new Error(`saving Resume LLM state failed: ${error.message}`);
+}
