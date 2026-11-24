@@ -19,9 +19,11 @@ import ResumeWorkspace from "./ResumeWorkspace.jsx";
 import { isReady, finalText as finalTextFor } from "./workspaceText.js";
 import { tokenizeForMatch } from "./matchScore.js";
 import { reviewResume, CATEGORIES, normalizeContactField, setContactField } from "./resumeReview.js";
-import { buildResumePdf, DEFAULT_PDF_FORMAT } from "./resumePdf.js";
+import { buildResumePdf } from "./resumePdf.js";
 import { checkRead } from "./readCheck.js";
 import DownloadPaywall from "./DownloadPaywall.jsx";
+import { templateFormat } from "./resumeTemplates.js";
+import { extraSections, educationLine, educationDetails } from "./resumeSections.js";
 import { limitState, mergeStores } from "./rllmSync.js";
 import { track } from "./analytics.js";
 import { trackSignUp } from "./googleAds.js";
@@ -54,9 +56,8 @@ const Icon = {
   close: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>,
 };
 
-// The editor's PDF: every bullet, and certifications (the job flow's PDF keeps 3 bullets per role).
-// No bullet limit: the PDF flows onto more pages instead of silently dropping approved content.
-const PDF_FORMAT = { ...DEFAULT_PDF_FORMAT, maxBullets: Infinity, sectionOrder: [...DEFAULT_PDF_FORMAT.sectionOrder, "certifications"] };
+// The editor's PDF (page counts for the review): every bullet and every section, as in the templates (src/resumeTemplates.js).
+const PDF_FORMAT = templateFormat("modern");
 const pageCount = (resume) => {
   try {
     return buildResumePdf(finalResume(resume), null, PDF_FORMAT)?.getNumberOfPages() ?? null;
@@ -253,7 +254,12 @@ function ResumePaper({ resume, markers, flash, onMarker, active }) {
       {(r.education || []).length > 0 && (
         <section>
           <h2>Education</h2>
-          {r.education.map((ed, i) => <p key={i}>{[ed.degree, ed.school, ed.year].filter(Boolean).join(" · ")}</p>)}
+          {r.education.map((ed, i) => (
+            <div key={i}>
+              <p>{educationLine(ed)}</p>
+              {educationDetails(ed).map((d, k) => <p key={k} className="rl-p-sub">{d}</p>)}
+            </div>
+          ))}
         </section>
       )}
       {((r.skills || []).length > 0 || at === "K") && (
@@ -271,6 +277,20 @@ function ResumePaper({ resume, markers, flash, onMarker, active }) {
           {marks("Z")}
         </p>
       </section>
+      {/* The rest of what was read from the file: shown so nothing is hidden, and printed in the PDF. */}
+      {extraSections(r).map((sec) => (
+        <section key={sec.key}>
+          <h2>{sec.title}</h2>
+          {sec.kind === "inline" && <p>{sec.items.join(" · ")}</p>}
+          {sec.kind === "bullets" && <ul>{sec.items.map((it, i) => <li key={i}>{it}</li>)}</ul>}
+          {sec.kind === "entries" && sec.items.map((it, i) => (
+            <div key={i} className="rl-p-role">
+              <div className="rl-p-role-head"><span><b>{it.heading}</b></span><span className="rl-p-period">{it.meta}</span></div>
+              {it.bullets.length > 0 && <ul>{it.bullets.map((b, j) => <li key={j}>{b}</li>)}</ul>}
+            </div>
+          ))}
+        </section>
+      ))}
     </article>
   );
 }
@@ -1380,13 +1400,14 @@ export default function ResumeLLM() {
 
       {download && resume && (
         <DownloadPaywall
+          resume={finalResume(resume)}
           session={session}
           paymentsRequired={!!supabase}
           notice={Object.values(suggestions).some((s) => s.status === "pending" || s.status === "queued") ? "Some suggestions are still open." : ""}
-          buildAndSave={() => {
+          buildAndSave={(templateId) => {
             const out = finalResume(resume);
-            downloadResumePdf(out, typeof out.photoUrl === "string" && out.photoUrl.startsWith("data:") ? out.photoUrl : null, PDF_FORMAT);
-            track("rllm_downloaded", { applied, score });
+            downloadResumePdf(out, typeof out.photoUrl === "string" && out.photoUrl.startsWith("data:") ? out.photoUrl : null, templateFormat(templateId));
+            track("rllm_downloaded", { applied, score, template: templateId });
           }}
           onClose={() => setDownload(false)}
           onSignIn={() => { setDownload(false); askSignIn(); }}

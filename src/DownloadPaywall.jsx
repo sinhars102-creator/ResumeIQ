@@ -9,11 +9,17 @@
  * download counted (POST /api/downloads/complete), so a failed PDF never uses up a download.
  * The paywall appears only here, at the first download; everything before it is free.
  *
- * Props: session (Supabase session or null), paymentsRequired (false when there's no account system, e.g. a bare
- * local setup), buildAndSave() -> void (throws if the PDF fails), onClose, onSignIn, track, notice (optional text).
+ * The first step is choosing a template (module M10): the candidate sees their own resume in each look before anything
+ * is paid for. Choosing only changes the layout; the text is never rewritten or cut.
+ *
+ * Props: resume (the final resume, for the previews), session (Supabase session or null), paymentsRequired (false when
+ * there's no account system, e.g. a bare local setup), buildAndSave(templateId) -> void (throws if the PDF fails),
+ * onClose, onSignIn, track, notice (optional text).
  */
 import { useEffect, useRef, useState } from "react";
 import { payForPlan } from "./razorpayCheckout.js";
+import TemplatePicker from "./TemplatePicker.jsx";
+import { DEFAULT_TEMPLATE, templateById } from "./resumeTemplates.js";
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://localhost:3001" : "")).replace(/\/$/, "");
 
@@ -33,7 +39,7 @@ async function api(path, token, options = {}) {
 
 const leftText = (s) => (s?.free ? "" : s?.unlimited ? `Unlimited downloads${s.expiresAt ? ` until ${new Date(s.expiresAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : ""}.` : s?.remaining != null ? `${s.remaining} download${s.remaining === 1 ? "" : "s"} left.` : "");
 
-export default function DownloadPaywall({ session, paymentsRequired, buildAndSave, onClose, onSignIn, track, notice }) {
+export default function DownloadPaywall({ resume, session, paymentsRequired, buildAndSave, onClose, onSignIn, track, notice }) {
   const token = session?.access_token || "";
   const email = session?.user?.email || "";
   // loading | signin | paywall | ready | done
@@ -42,6 +48,14 @@ export default function DownloadPaywall({ session, paymentsRequired, buildAndSav
   const [plan, setPlan] = useState("dl1");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [step, setStep] = useState("template"); // template -> pay
+  const [templateId, setTemplateId] = useState(() => {
+    try {
+      return templateById(localStorage.getItem("riq_template") || DEFAULT_TEMPLATE).id;
+    } catch {
+      return DEFAULT_TEMPLATE;
+    }
+  });
   const trackRef = useRef(track);
   trackRef.current = track;
   // One id for this dialog: tapping Download again (say, the phone blocked the first save) isn't counted twice.
@@ -66,6 +80,16 @@ export default function DownloadPaywall({ session, paymentsRequired, buildAndSav
     })();
     return () => { cancelled = true; };
   }, [paymentsRequired, token]);
+
+  function chooseTemplate() {
+    try {
+      localStorage.setItem("riq_template", templateId);
+    } catch {
+      // Storage blocked: the choice just isn't remembered for next time.
+    }
+    trackRef.current?.("rllm_template_chosen", { template: templateId });
+    setStep("pay");
+  }
 
   async function pay() {
     setError("");
@@ -92,7 +116,7 @@ export default function DownloadPaywall({ session, paymentsRequired, buildAndSav
     setError("");
     setBusy(true);
     try {
-      buildAndSave(); // throws if the PDF can't be made; nothing is counted then
+      buildAndSave(templateId); // throws if the PDF can't be made; nothing is counted then
     } catch (e) {
       setError(`The PDF couldn't be made (${e.message}). Nothing was used from your downloads.`);
       setBusy(false);
@@ -121,7 +145,18 @@ export default function DownloadPaywall({ session, paymentsRequired, buildAndSav
 
   return (
     <div className="rl-modal-scrim" role="dialog" aria-modal="true" aria-label="Download your resume" onClick={onClose}>
-      <div className="rl-modal" onClick={(e) => e.stopPropagation()}>
+      <div className={`rl-modal${step === "template" ? " rl-modal-wide" : ""}`} onClick={(e) => e.stopPropagation()}>
+        {step === "template" ? (
+          <>
+            <h2>Choose a template</h2>
+            <p className="rl-modal-sub">Your text stays exactly as you approved it. A template only changes the look and how it is laid out across pages.</p>
+            {notice && <p className="rl-warn">{notice}</p>}
+            <TemplatePicker resume={resume} selected={templateId} onSelect={setTemplateId} />
+            <button type="button" className="rl-btn rl-btn-primary rl-wide" onClick={chooseTemplate}>Continue with {templateById(templateId).name}</button>
+            <button type="button" className="rl-btn rl-btn-quiet rl-wide" onClick={onClose}>Keep editing</button>
+          </>
+        ) : (
+          <>
         <h2>{stage === "done" ? "Downloaded" : "Download your resume"}</h2>
         {notice && stage !== "done" && <p className="rl-warn">{notice}</p>}
 
@@ -167,7 +202,10 @@ export default function DownloadPaywall({ session, paymentsRequired, buildAndSav
         {stage === "error" && <p className="rl-warn">{error}</p>}
         {error && stage !== "error" && <p className="rl-warn" role="alert">{error}</p>}
 
+        {stage !== "done" && <button type="button" className="rl-btn rl-btn-quiet rl-wide" onClick={() => setStep("template")}>← Change template ({templateById(templateId).name})</button>}
         <button type="button" className="rl-btn rl-btn-quiet rl-wide" onClick={onClose}>{stage === "done" ? "Close" : "Keep editing"}</button>
+          </>
+        )}
       </div>
     </div>
   );

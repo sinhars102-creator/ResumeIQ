@@ -193,6 +193,19 @@
 .rl-modal h2 { margin: 0 0 8px; font-size: 19px; }
 .rl-warn { color: var(--rl-must); font-size: 14px; margin: 0 0 6px; }
 .rl-pay { color: var(--rl-text-2); font-size: 14px; margin: 0 0 6px; padding: 10px 12px; border: 1px dashed var(--rl-border); border-radius: 12px; }
+.rl-modal { max-height: 94vh; overflow-y: auto; }
+.rl-modal-wide { width: min(720px, 100%); }
+.rl-modal-sub { margin: 0 0 10px; font-size: 14px; color: var(--rl-text-2); }
+.rl-tpl-chips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 10px; }
+.rl-tpl-chip { font: inherit; display: grid; gap: 2px; text-align: left; padding: 10px 12px; border-radius: 14px; border: 1px solid var(--rl-border); background: var(--rl-surface); color: var(--rl-text); cursor: pointer; min-height: 56px; }
+.rl-tpl-chip b { font-size: 14.5px; }
+.rl-tpl-chip small { font-size: 12px; color: var(--rl-text-2); }
+.rl-tpl-chip.is-on { border-color: var(--rl-accent); background: var(--rl-accent-soft); box-shadow: inset 0 0 0 1px var(--rl-accent); }
+.rl-tpl-ok { margin: 0 0 8px; font-size: 13px; color: var(--rl-accent); }
+.rl-tpl-wait { margin-bottom: 8px; }
+.rl-tpl-preview { max-height: 50vh; overflow-y: auto; background: #E4E7EB; border-radius: 12px; padding: 10px; display: grid; gap: 10px; justify-items: center; margin-bottom: 12px; }
+.rl-tpl-preview img { width: 100%; max-width: 560px; height: auto; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.18); }
+@media (max-width: 899px) { .rl-tpl-chip { padding: 8px 9px; } .rl-tpl-chip b { font-size: 13.5px; } .rl-tpl-preview { max-height: 46vh; } }
 .rl-pay-lead { margin: 0 0 10px; font-size: 14px; color: var(--rl-text-2); }
 .rl-pay-fine { margin: 8px 0 12px; font-size: 12.5px; color: var(--rl-text-2); }
 .rl-plans { display: grid; gap: 8px; }
@@ -456,3 +469,6 @@ li.ws-ln .ws-pins { left: -66px; }
   .ws-sheet, .ws-bar i, .ws-pbar i { transition: none; }
   .ws-pscroll { scroll-behavior: auto; }
 }
+
+.ws-ln-sub { color: var(--rl-text-2); font-size: .92em; margin-top: -2px; padding-left: 10px; }
+.rl-p-sub { color: var(--rl-text-2); font-size: .92em; margin-top: -4px; padding-left: 10px; }

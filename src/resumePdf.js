@@ -4,6 +4,7 @@
  * name/title/contact to the right, then Summary, Experience, Education, Skills.
  */
 import { jsPDF } from "jspdf";
+import { extraSections, educationDetails } from "./resumeSections.js";
 
 export const MAX_BULLETS_PER_EXPERIENCE = 3;
 
@@ -35,6 +36,11 @@ export const DEFAULT_PDF_FORMAT = {
   singlePage: false,
   fontColor: "#000000",
   backgroundColor: "#ffffff",
+  // Template options (src/resumeTemplates.js). The defaults give the look the PDF always had.
+  accentColor: "#5a6b8a", // section headings
+  headerAlign: "left", // "left" | "center" (centred only when there is no photo)
+  headingUnderline: false, // a thin rule under each section heading
+  fullContent: false, // also print every other part of the resume (projects, achievements, languages...) and education details
 };
 
 export function parseColor(hexOrRgb, fallbackR, fallbackG, fallbackB) {
@@ -109,12 +115,15 @@ export function buildResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FO
   const scale = singlePage ? 0.78 : 1;
   let margin = (format.marginMm ?? 14) * scale;
   const hasPhoto = typeof photoDataUrl === "string" && photoDataUrl.length > 0;
+  const centered = format.headerAlign === "center" && !hasPhoto;
   const photoGap = hasPhoto ? (format.photoGapMm ?? 10) * scale : 0;
   const photoW = hasPhoto ? (format.photoWidthMm ?? PHOTO_WIDTH_MM) * scale : 0;
   const photoH = Math.round(photoW * (4 / 3) * 10) / 10;
   const headerTextX = margin + photoW + photoGap;
+  const headX = () => (centered ? pageW / 2 : headerTextX);
+  const headOpts = () => (centered ? { align: "center" } : undefined);
   const contentW = pageW - margin * 2;
-  const headerTextW = pageW - headerTextX - margin;
+  const headerTextW = centered ? contentW : pageW - headerTextX - margin;
   let lineH = (format.lineH ?? 4.2) * scale;
   let lineHSmall = (format.lineHSmall ?? 3.8) * scale;
   let sectionGap = (format.sectionGap ?? 5) * scale;
@@ -128,6 +137,7 @@ export function buildResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FO
   doc.setFont("helvetica", "normal");
 
   const fc = parseColor(format.fontColor, 0, 0, 0);
+  const ac = parseColor(format.accentColor, 90, 107, 138);
   const fs = (v, d) => Math.max(1, ((v ?? d) * scale));
   const checkPage = (yVal) => {
     if (singlePage) return yVal;
@@ -173,7 +183,7 @@ export function buildResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FO
   doc.setFontSize(fs(format.fontSizeName, 16));
   doc.setCharSpace(0);
   doc.setTextColor(fc.r, fc.g, fc.b);
-  doc.text(resumeData.name || "Resume", headerTextX, yHeader);
+  doc.text(resumeData.name || "Resume", headX(), yHeader, headOpts());
   yHeader += 6;
 
   doc.setFont(fontB, "normal");
@@ -181,7 +191,7 @@ export function buildResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FO
   doc.setCharSpace(0);
   const titleLines = doc.splitTextToSize(resumeData.title || "", headerTextW);
   titleLines.forEach((line) => {
-    doc.text(line, headerTextX, yHeader);
+    doc.text(line, headX(), yHeader, headOpts());
     yHeader += lineHSmall;
   });
   yHeader += 3;
@@ -190,7 +200,7 @@ export function buildResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FO
   doc.setCharSpace(0);
   const contactLines = doc.splitTextToSize(resumeData.contact || "", headerTextW);
   contactLines.forEach((line) => {
-    doc.text(line, headerTextX, yHeader);
+    doc.text(line, headX(), yHeader, headOpts());
     yHeader += lineHSmall;
   });
 
@@ -217,19 +227,52 @@ export function buildResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FO
   }
   y += 3;
 
+  const orderedKeys = [...sectionOrder];
+  if (format.fullContent) {
+    if ((resumeData.certifications || []).length && !orderedKeys.includes("certifications")) orderedKeys.push("certifications");
+    extraSections(resumeData).forEach((x) => !orderedKeys.includes(x.key) && orderedKeys.push(x.key));
+  }
   const bodySectionOrder = format.skillsInHeader
-    ? sectionOrder.filter((k) => k !== "skills")
-    : sectionOrder;
+    ? orderedKeys.filter((k) => k !== "skills")
+    : orderedKeys;
+
+  // A section heading in the accent colour, with an optional rule under it.
+  const drawHeading = (label) => {
+    doc.setFont(fontH, "bold");
+    doc.setFontSize(fs(format.fontSizeLabel, 9));
+    doc.setCharSpace(0);
+    doc.setTextColor(ac.r, ac.g, ac.b);
+    doc.text(label, margin, y);
+    doc.setTextColor(fc.r, fc.g, fc.b);
+    if (format.headingUnderline) {
+      const dc = parseDividerColor(format.dividerColor);
+      doc.setDrawColor(dc.r, dc.g, dc.b);
+      doc.setLineWidth(0.25);
+      doc.line(margin, y + 1.2, pageW - margin, y + 1.2);
+    }
+    y += lineH;
+  };
+  // One bullet, wrapped, continuing onto the next page when needed.
+  const drawBullet = (b) => {
+    y = checkPage(y);
+    const textW = contentW - bulletIndentMm - 2;
+    const lines = doc.splitTextToSize(String(b), textW);
+    doc.text("• ", margin, y);
+    const textX = margin + bulletIndentMm;
+    if (lines.length) {
+      doc.text(lines[0], textX, y);
+      y += lineHSmall;
+      for (let i = 1; i < lines.length; i++) {
+        y = checkPage(y);
+        doc.text(lines[i], textX, y);
+        y += lineHSmall;
+      }
+    }
+  };
 
   const renderSection = (key) => {
     if (key === "summary") {
-      doc.setFont(fontH, "bold");
-      doc.setFontSize(fs(format.fontSizeLabel, 9));
-      doc.setCharSpace(0);
-      doc.setTextColor(90, 107, 138);
-      doc.text("SUMMARY", margin, y);
-      doc.setTextColor(fc.r, fc.g, fc.b);
-      y += lineH;
+      drawHeading("SUMMARY");
       doc.setFont(fontB, "normal");
       doc.setFontSize(fs(format.fontSizeBody, 10));
       if (resumeData.summary) {
@@ -239,13 +282,7 @@ export function buildResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FO
     }
     if (key === "experience") {
       y = checkPage(y);
-      doc.setFont(fontH, "bold");
-      doc.setFontSize(fs(format.fontSizeLabel, 9));
-      doc.setCharSpace(0);
-      doc.setTextColor(90, 107, 138);
-      doc.text("EXPERIENCE", margin, y);
-      doc.setTextColor(fc.r, fc.g, fc.b);
-      y += lineH;
+      drawHeading("EXPERIENCE");
       (resumeData.experience || []).forEach((exp) => {
         y = checkPage(y);
         doc.setFont(fontB, "bold");
@@ -261,54 +298,32 @@ export function buildResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FO
           y += lineHSmall;
         }
         // format.maxBullets: the editor prints every bullet; elsewhere the first few per role.
-        (exp.bullets || []).slice(0, format.maxBullets ?? MAX_BULLETS_PER_EXPERIENCE).forEach((b) => {
-          y = checkPage(y);
-          const textW = contentW - bulletIndentMm - 2;
-          const lines = doc.splitTextToSize(String(b), textW);
-          const bulletPrefix = "• ";
-          doc.text(bulletPrefix, margin, y);
-          const textX = margin + bulletIndentMm;
-          if (lines.length) {
-            doc.text(lines[0], textX, y);
-            y += lineHSmall;
-            for (let i = 1; i < lines.length; i++) {
-              y = checkPage(y);
-              doc.text(lines[i], textX, y);
-              y += lineHSmall;
-            }
-          }
-        });
+        (exp.bullets || []).slice(0, format.maxBullets ?? MAX_BULLETS_PER_EXPERIENCE).forEach((b) => b != null && drawBullet(b));
         y += lineHSmall;
       });
       return;
     }
     if (key === "education") {
       y = checkPage(y);
-      doc.setFont(fontH, "bold");
-      doc.setFontSize(fs(format.fontSizeLabel, 9));
-      doc.setCharSpace(0);
-      doc.setTextColor(90, 107, 138);
-      doc.text("EDUCATION", margin, y);
-      doc.setTextColor(fc.r, fc.g, fc.b);
-      y += lineH;
+      drawHeading("EDUCATION");
       doc.setFont(fontB, "normal");
       doc.setFontSize(fs(format.fontSizeBody, 10));
       (resumeData.education || []).forEach((ed) => {
         y = checkPage(y);
         doc.text(`${ed.degree || ""} · ${ed.school || ""} · ${ed.year || ""}`, margin, y);
         y += lineHSmall + 1;
+        if (format.fullContent) {
+          educationDetails(ed).forEach((line) => {
+            y = checkPage(y);
+            drawWrappedText(line, margin + bulletIndentMm, contentW - bulletIndentMm, lineHSmall);
+          });
+        }
       });
       return;
     }
     if (key === "skills") {
       y = checkPage(y);
-      doc.setFont(fontH, "bold");
-      doc.setFontSize(fs(format.fontSizeLabel, 9));
-      doc.setCharSpace(0);
-      doc.setTextColor(90, 107, 138);
-      doc.text("SKILLS", margin, y);
-      doc.setTextColor(fc.r, fc.g, fc.b);
-      y += lineH;
+      drawHeading("SKILLS");
       doc.setFont(fontB, "normal");
       doc.setFontSize(fs(format.fontSizeBody, 10));
       const skills = resumeData.skills || [];
@@ -316,16 +331,38 @@ export function buildResumePdf(resumeData, photoDataUrl, format = DEFAULT_PDF_FO
         drawWrappedText(skills.join(" · "), margin, contentW, lineHSmall);
       }
     }
+    const extra = extraSections(resumeData).find((x) => x.key === key);
+    if (extra) {
+      y = checkPage(y);
+      drawHeading(extra.title.toUpperCase());
+      doc.setFont(fontB, "normal");
+      doc.setFontSize(fs(format.fontSizeBody, 10));
+      if (extra.kind === "inline") {
+        drawWrappedText(extra.items.join(" · "), margin, contentW, lineHSmall);
+      } else if (extra.kind === "bullets") {
+        doc.setFont(fontBul, "normal");
+        doc.setFontSize(fs(format.fontSizeBullet, 9));
+        extra.items.forEach(drawBullet);
+      } else {
+        extra.items.forEach((it) => {
+          y = checkPage(y);
+          doc.setFont(fontB, "bold");
+          doc.setFontSize(fs(format.fontSizeBody, 10));
+          doc.text(it.heading || "", margin, y);
+          if (it.meta) doc.text(it.meta, pageW - margin, y, { align: "right" });
+          y += lineHSmall;
+          doc.setFont(fontBul, "normal");
+          doc.setFontSize(fs(format.fontSizeBullet, 9));
+          it.bullets.forEach(drawBullet);
+          y += lineHSmall / 2;
+        });
+      }
+      return;
+    }
     // Opt-in (add "certifications" to format.sectionOrder): one certification per line.
     if (key === "certifications" && (resumeData.certifications || []).length) {
       y = checkPage(y);
-      doc.setFont(fontH, "bold");
-      doc.setFontSize(fs(format.fontSizeLabel, 9));
-      doc.setCharSpace(0);
-      doc.setTextColor(90, 107, 138);
-      doc.text("CERTIFICATIONS", margin, y);
-      doc.setTextColor(fc.r, fc.g, fc.b);
-      y += lineH;
+      drawHeading("CERTIFICATIONS");
       doc.setFont(fontB, "normal");
       doc.setFontSize(fs(format.fontSizeBody, 10));
       resumeData.certifications.forEach((c) => {

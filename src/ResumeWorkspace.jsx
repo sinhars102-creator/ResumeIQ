@@ -9,6 +9,7 @@
  * renders it and reports what the person does.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { extraSections, educationLine, educationDetails } from "./resumeSections.js";
 import { textAt } from "./tailorEdits.js";
 import { wordDiff } from "./wordDiff.js";
 import { finalText, isReady, blanksIn } from "./workspaceText.js";
@@ -240,7 +241,12 @@ export default function ResumeWorkspace(props) {
       {(r.education || []).length > 0 && (
         <section>
           <h3>Education</h3>
-          {r.education.map((ed, i) => <p key={i} className="ws-ln">{[ed.degree, ed.school, ed.year].filter(Boolean).join(" · ")}</p>)}
+          {r.education.map((ed, i) => (
+            <div key={i}>
+              <p className="ws-ln">{educationLine(ed)}</p>
+              {educationDetails(ed).map((d, k) => <p key={k} className="ws-ln ws-ln-sub">{d}</p>)}
+            </div>
+          ))}
         </section>
       )}
       <section>
@@ -253,6 +259,20 @@ export default function ResumeWorkspace(props) {
           {lineEl("Z", (r.certifications || []).join(" · ") || <span className="ws-empty">None added yet</span>)}
         </section>
       )}
+      {/* The rest of what was read from the file (projects, achievements, languages...): shown so nothing is hidden, and printed in the PDF. */}
+      {extraSections(r).map((sec) => (
+        <section key={sec.key}>
+          <h3>{sec.title}</h3>
+          {sec.kind === "inline" && <p className="ws-ln">{sec.items.join(" · ")}</p>}
+          {sec.kind === "bullets" && <ul>{sec.items.map((it, i) => <li key={i}>{it}</li>)}</ul>}
+          {sec.kind === "entries" && sec.items.map((it, i) => (
+            <div key={i} className="ws-job">
+              <div className="ws-job-hd"><strong>{it.heading}</strong><span>{it.meta}</span></div>
+              {it.bullets.length > 0 && <ul>{it.bullets.map((b, j) => <li key={j}>{b}</li>)}</ul>}
+            </div>
+          ))}
+        </section>
+      ))}
     </article>
   );
 

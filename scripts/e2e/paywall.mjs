@@ -42,6 +42,7 @@ const chip = page.getByRole("button", { name: "Download PDF" }).first();
 console.log("download chip visible:", await chip.isVisible().catch(() => false));
 if (!(await chip.isVisible().catch(() => false))) { console.log(await page.locator("body").innerText().then((t) => t.slice(0, 400))); }
 await chip.click();
+await page.getByRole("button", { name: /Continue with/ }).click();
 await page.getByText("Choose how many PDFs you need").waitFor({ timeout: 5000 });
 console.log("paywall shown: true; plans:", await page.locator(".rl-plan").count());
 await page.screenshot({ path: `${process.env.OUT ?? "."}/m5-paywall.png` });

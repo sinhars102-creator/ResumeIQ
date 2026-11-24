@@ -45,6 +45,18 @@ Use Razorpay test keys for these. To bypass the paywall for other testing, start
 | A resume with 15+ bullets in one role | All bullets in the PDF; extra pages as needed |
 | Check the table `download_entitlements` in Supabase | One row per purchase with downloads_used counting up |
 
+## 4b. Templates (M10)
+| Try | Expect |
+|---|---|
+| Tap Download PDF | The first step is "Choose a template": Modern, Classic, Compact, each with its page count |
+| Switch between the three | The preview shows your own resume in that look, all pages, scrollable |
+| Read the line above the preview | "Everything on your resume is in this PDF (N items checked)" |
+| Use a resume with Projects, Achievements, Languages or other sections | They appear on the on-screen resume and in every template's PDF |
+| Continue, pay (or already paid), download | The PDF uses the template you chose; open it and compare with the preview |
+| Tap "Change template" after choosing | Back to the gallery without losing your place |
+| Download again later | Your last template is selected by default |
+| A very long resume (15+ bullets) | Extra pages in every template; nothing cut |
+
 ## 5. Limits (M8)
 | Try | Expect |
 |---|---|

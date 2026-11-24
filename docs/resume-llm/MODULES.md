@@ -14,6 +14,7 @@ Branch: `resume-llm`. Scope and reasons: see SCALE_PLAN.md. Status: todo / build
 | M7 | Analytics events | Events for each step (upload, read, sign-in, goal, edits, approve, paywall, pay, download) | `src/analytics.js`, `src/ResumeLLM.jsx` | PostHog check | done (see FUNNEL.md) |
 | M8 | Abuse guard | Technical limits only (no product cap): sign-in before expensive AI calls, per-IP rate limit | `server/index.js` | `server/rateLimit.test.js` | done |
 | M9 | Launch switch | Point ad traffic at `/app/editor`; keep the Reactive Resume flow as fallback until tests pass | routing, ads | manual | done (flag VITE_RESUME_LLM; see LAUNCH.md, not switched on) |
+| M10 | Approve, templates and content check | The download dialog starts with choosing a template (Modern, Classic, Compact) with a live preview of your own resume, page count and a check that every line is in the PDF. The PDF and the on-screen resume now show every section the reader extracts (projects, achievements, languages, interests, volunteering, publications, references, other sections) and education details | `src/resumeTemplates.js`, `src/resumeSections.js`, `src/preservation.js`, `src/TemplatePicker.jsx`, `src/pdfPreview.js`, `src/resumePdf.js`, `src/DownloadPaywall.jsx` | `server/templates.test.js`, `node scripts/e2e/templates.mjs` | done |
 
 Order is by dependency: M1, M2, M3, M4, M5, M6, M7, M8, M9.
 Rules for every module: one small change set, a test or check, a commit message naming the module, and a line here updating the status.
