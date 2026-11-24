@@ -95,7 +95,9 @@ const firstName = (r) => String(r?.name || "").trim().split(/\s+/)[0] || "";
 const emailIn = (text) => (String(text || "").match(/[^\s@·|,;<>()]+@[^\s@·|,;<>()]+\.[a-z]{2,}/i) || [""])[0];
 
 async function post(path, body) {
-  const res = await fetch(`${API_BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  // The server's tailor routes need the signed-in user's token (module M8); getSession also refreshes an expired one.
+  const token = (await supabase?.auth.getSession().catch(() => null))?.data?.session?.access_token;
+  const res = await fetch(`${API_BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
   return data;
