@@ -1310,6 +1310,12 @@ export default function ResumeLLM() {
                           <button type="button" onClick={() => rerunMessage(m)} disabled={busy}>Rerun</button>
                         </div>
                       )}
+                      {m.role === "user" && m.note === "Job description" && !m.full && (
+                        <div className="rl-msg-actions">
+                          <button type="button" onClick={() => { setInput(""); setTimeout(() => inputRef.current?.focus(), 30); }}>Paste it again</button>
+                        </div>
+                      )}
+                      {m.role === "bot" && !m.retryOf && /^I couldn't read that job/.test(m.text || "") && <button type="button" className="rl-btn" onClick={() => { setInput(""); setTimeout(() => inputRef.current?.focus(), 30); }}>Paste the job again</button>}
                       {m.retryOf && messages.find((x) => x.id === m.retryOf) && <button type="button" className="rl-btn" onClick={() => rerunMessage(messages.find((x) => x.id === m.retryOf))} disabled={busy}>Try again</button>}
                       {m.kind === "resume" && <button type="button" className="rl-link" onClick={() => setResumeOpen(true)}>View resume</button>}
                       {m.kind === "choose" && !chat?.mode && (
