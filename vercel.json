@@ -17,9 +17,24 @@
     {
       "source": "/app",
       "destination": "/index.html"
+    },
+    {
+      "source": "/privacy",
+      "destination": "/privacy.html"
+    },
+    {
+      "source": "/terms",
+      "destination": "/terms.html"
+    },
+    {
+      "source": "/refund",
+      "destination": "/refund.html"
+    },
+    {
+      "source": "/contact",
+      "destination": "/contact.html"
     }
   ],
-  "cleanUrls": true,
   "headers": [
     {
       "source": "/(.*)",
