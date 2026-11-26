@@ -51,7 +51,9 @@ const GENERIC = stems(`led lead managed manage owned own drove drive built build
   higher lower more less over under team teams people member members part whole across time times week weeks month months
   contributed contribute contributing co-wrote cowrote co-authored drafted authored lifted lift boosted boost cut saved save
   partnered partner collaborated collaborate facilitated led spearheaded accelerated expanded grew growing increasing reducing
-  per quarter quarterly year yearly percent average total overall from into while resulting result results`);
+  per quarter quarterly year yearly percent average total overall from into while resulting result results
+  implemented implement implementing implementation score scores scored project projects initiative initiatives
+  work working effort efforts approach solution solutions improvement improvements change changes`);
 
 /**
  * Job-description terms a rewrite introduces that the candidate never claimed (not in the resume, not
@@ -180,15 +182,34 @@ export function cleanEdit(edit, resume, ctx) {
 }
 
 /** "The job mentions merchant onboarding and UPI – have you done this?" for an edit that would invent it. */
-function askAbout(terms, jd) {
-  // Show the job's own wording: the first phrase in the job description containing each term.
-  const phrases = terms.map((t) => {
-    const m = new RegExp(`\\b[\\w/-]*${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\w/-]*\\b`, "i").exec(jd || "");
-    return m ? m[0] : t;
+/** Terms joined for a sentence: "a", "a and b", "a, b and c" (each in quotes). */
+const listOf = (items) => {
+  const q = items.map((x) => `"${x}"`);
+  return q.length > 1 ? `${q.slice(0, -1).join(", ")} and ${q[q.length - 1]}` : q[0] || "";
+};
+
+/**
+ * The question asked when a draft would have claimed something the candidate never said. Only terms the job
+ * description really uses are called the job's; any other word is named as one the draft added, so the
+ * candidate sees exactly what is missing (never "The job mentions score, implementing").
+ */
+export function askAbout(terms, jd) {
+  const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const fromJob = [];
+  const other = [];
+  [...new Set(terms.map((t) => String(t).trim()).filter((t) => t.length >= 3))].forEach((t) => {
+    // The job's own wording: the first phrase in the job description containing the term.
+    const m = jd ? new RegExp(`\\b[\\w/-]*${esc(t)}[\\w/-]*\\b`, "i").exec(jd) : null;
+    (m ? fromJob : other).push(m ? m[0] : t);
   });
-  const list = [...new Set(phrases)].slice(0, 3).join(", ");
-  if (!jd) return `I'd need to mention ${list}, which isn't on your resume yet. Have you worked with ${phrases.length > 1 ? "these" : "it"}? Tell me where, and I'll add it.`;
-  return `The job mentions ${list}. Have you worked with ${phrases.length > 1 ? "any of these" : "this"}? Tell me where, and I'll add it.`;
+  const job = [...new Set(fromJob)].slice(0, 3);
+  const extra = [...new Set(other)].slice(0, 3);
+  if (job.length) {
+    const tail = extra.length ? ` (I also held back ${listOf(extra)}, which you haven't mentioned.)` : "";
+    return `The job asks for ${listOf(job)}, and your resume doesn't show ${job.length > 1 ? "them" : "it"} yet. Have you done ${job.length > 1 ? "any of these" : "this"}? Tell me where, and I'll add it.${tail}`;
+  }
+  if (extra.length) return `I held back ${listOf(extra)} because you haven't told me about ${extra.length > 1 ? "them" : "it"}. Is that accurate? Tell me what you did, and I'll write it.`;
+  return "I need a bit more detail before I can write that. What exactly did you do, and what changed as a result?";
 }
 
 function parseJson(text) {
@@ -469,7 +490,7 @@ Return an empty "edits" list when no change to the resume is needed.`;
     .slice(0, 8);
   let reply = String(data.reply || "").slice(0, 800) || (edits.length ? "Here's the change – tap Apply to use it." : "");
   // The model's reply describes its own edits; when every one was blocked, it would claim a change that didn't happen.
-  if (asks.length && !edits.length) reply = "I couldn't make that change without adding things you haven't told me.";
+  if (asks.length && !edits.length) reply = "I didn't change your resume yet.";
   if (asks.length) reply = `${reply}${reply ? " " : ""}${askAbout([...new Set(asks)], jd)}`.trim();
   return { reply: reply || "Got it.", suggestions: edits };
 }

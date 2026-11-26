@@ -685,6 +685,8 @@ export default function ResumeLLM() {
   const [wsStatus, setWsStatus] = useState("");
   const finalTextOf = (x) => finalTextFor(x, blankValues[x.id]);
   const wsSet = (id, patch) => update((c) => ({ ...c, suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], ...patch } } }));
+  /** A suggestion's own conversation (shown in the chat panel while that suggestion is open). */
+  const talk = (x, ...msgs) => [...(x.thread || []), ...msgs.filter((m) => m && m.text).map((m) => ({ id: uid(), ...m }))];
   const flashLine = (line) => {
     setFlash(line);
     setTimeout(() => setFlash(null), 1300);
@@ -772,27 +774,41 @@ export default function ResumeLLM() {
       if (s.field) {
         // Contact details: cleaned up in code (city spelling, phone format), applied straight away.
         const value = normalizeContactField(s.field, text);
-        if (!value) return wsSet(id, { note: `That doesn't look like a ${s.field === "linkedin" ? "LinkedIn link" : s.field}. Try again.` });
+        if (!value) {
+          const note = `That doesn't look like a ${s.field === "linkedin" ? "LinkedIn link" : s.field}. Try again.`;
+          return update((c) => ({ ...c, suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], note, thread: talk(c.suggestions[id], { role: "user", text }, { role: "bot", text: note }) } } }));
+        }
         const edit = { target: "C", op: "replace", after: setContactField(resume.contact, s.field, value) };
-        update((c) => ({ ...c, resume: applyEdit(c.resume, edit), suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], edit, question: null, before: c.resume.contact, status: "applied", undo: captureUndo(c.resume, edit), appliedText: edit.after, note: null } } }));
+        update((c) => ({ ...c, resume: applyEdit(c.resume, edit), suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], edit, question: null, before: c.resume.contact, status: "applied", undo: captureUndo(c.resume, edit), appliedText: edit.after, note: null, thread: talk(c.suggestions[id], { role: "bot", text: c.suggestions[id].thread?.length ? null : s.question }, { role: "user", text }) } } }));
         flashLine("C");
         setWsStatus(`${s.where} updated`);
         return;
       }
+      // The question (or, for a drafted change, what's on the table) goes along, so a reply like "make it
+      // shorter" is about this suggestion and nothing else.
+      const line = s.edit?.target || s.target;
+      const context = s.question || `The suggestion for line ${line} ("${textAt(resume, line) ?? ""}"): ${s.why || s.title}.${s.edit?.after ? ` Proposed so far: "${s.custom ?? s.edit.after}".` : ""} Only change that line.`;
+      // Their message shows in the thread straight away; the coach's reply follows.
+      update((c) => ({ ...c, suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], thread: talk(c.suggestions[id], { role: "bot", text: c.suggestions[id].thread?.length ? null : s.question }, { role: "user", text }) } } }));
       setBusy(true);
       try {
-        const data = await chatFor(text, { answerTo: s.question });
+        // Earlier replies in this suggestion's thread count as things the candidate said.
+        const data = await chatFor(text, { answerTo: context, history: (s.thread || []).filter((m) => !m.error).map((m) => ({ role: m.role, text: m.text })) });
         const cards = data.suggestions || [];
         update((c) => {
-          if (!cards.length) return { ...c, suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], note: data.reply } } };
+          const cur = c.suggestions[id];
+          if (!cards.length) return { ...c, suggestions: { ...c.suggestions, [id]: { ...cur, note: null, thread: talk(cur, { role: "bot", text: data.reply }) } } };
           // The first edit takes the question's place (same pin); any others are added after.
           const [first, ...rest] = cards;
-          const turned = { ...c.suggestions[id], edit: first.edit, question: null, before: first.before, note: null, where: whereOf(c.resume, first.edit.target, c.suggestions[id].category) };
+          const reply = data.reply || "Here's the change – check it and apply.";
+          const turned = { ...cur, edit: first.edit, custom: null, question: null, before: first.before, note: null, status: cur.status === "dismissed" ? "pending" : cur.status, where: whereOf(c.resume, first.edit.target, cur.category), thread: talk(cur, { role: "bot", text: rest.length ? `${reply} (${rest.length} more suggestion${rest.length > 1 ? "s" : ""} added to the list.)` : reply }) };
           return addCards({ ...c, suggestions: { ...c.suggestions, [id]: turned } }, rest);
         });
+        if (cards.length) setBlankValues((v) => ({ ...v, [id]: [] }));
         setWsStatus(cards.length ? "Here's the change – check it and apply" : "");
+        track("rllm_suggestion_reply", { suggestion_id: id, had_question: !!s.question, new_edit: cards.length > 0 });
       } catch (e) {
-        wsSet(id, { note: `That didn't work (${e.message}). Try again.` });
+        update((c) => ({ ...c, suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], thread: talk(c.suggestions[id], { role: "bot", text: `That didn't work (${e.message}). Try again.`, error: true }) } } }));
       } finally {
         setBusy(false);
       }
@@ -828,16 +844,24 @@ export default function ResumeLLM() {
         setBusy(false);
       }
     },
+    /** A request about the whole resume ("make it fit on one page"): its own thread, new suggestions pinned. */
     async ask(text) {
+      const say = (...msgs) => update((c) => ({ ...c, wsThread: [...(c.wsThread || []), ...msgs.map((m) => ({ id: uid(), ...m }))] }));
+      const history = (chat?.wsThread || []).filter((m) => !m.error).map((m) => ({ role: m.role, text: m.text }));
+      say({ role: "user", text });
       setBusy(true);
       try {
-        const data = await chatFor(text);
+        const data = await chatFor(text, { history });
         const cards = data.suggestions || [];
-        if (cards.length) update((c) => addCards(c, cards));
-        setWsStatus(cards.length ? `${data.reply} (${cards.length} new suggestion${cards.length > 1 ? "s" : ""})` : data.reply);
-        track("rllm_chat_sent", { mode: "workspace", has_jd: !!jd });
+        update((c) => {
+          const next = cards.length ? addCards(c, cards) : c;
+          const added = Object.values(next.suggestions).filter((x) => !c.suggestions[x.id]).map((x) => x.id);
+          return { ...next, wsThread: [...(next.wsThread || []), { id: uid(), role: "bot", text: data.reply, added }] };
+        });
+        setWsStatus(cards.length ? `${cards.length} new suggestion${cards.length > 1 ? "s" : ""} to review` : "");
+        track("rllm_chat_sent", { mode: "workspace", has_jd: !!jd, new_suggestions: cards.length });
       } catch (e) {
-        setWsStatus(`That didn't work (${e.message}).`);
+        say({ role: "bot", text: `That didn't work (${e.message}). Try again.`, error: true });
       } finally {
         setBusy(false);
       }
@@ -1152,6 +1176,8 @@ export default function ResumeLLM() {
             flash={flash}
             deltaOf={wsDelta}
             keywordsOf={wsKeywords}
+            pages={pages}
+            generalThread={chat.wsThread || []}
             act={act}
             extras={[
               improving
