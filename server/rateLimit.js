@@ -58,9 +58,13 @@ export function cachedUser(lookup, { ttlMs = 60_000, now = () => Date.now() } = 
  * Express middleware. `getUser(req)` -> the signed-in user or null. `requireSignIn` may be a boolean or a function
  * (checked per request, so it can follow whether accounts are configured).
  */
-export function aiGuard({ getUser, anon = { windowMs: 600_000, max: 30 }, signedIn = { windowMs: 600_000, max: 120 }, requireSignIn = false, now }) {
+export function aiGuard({ getUser, anon = { windowMs: 600_000, max: 30 }, signedIn = { windowMs: 600_000, max: 120 }, requireSignIn = false, anonDailyCap = 0, now = () => Date.now() }) {
   const anonLimiter = createLimiter({ ...anon, now });
   const userLimiter = createLimiter({ ...signedIn, now });
+  // A circuit breaker for signed-out visitors: when this server has handled `anonDailyCap` signed-out calls today, further
+  // signed-out calls are asked to sign in (signed-in users are never affected). Kept in memory, so it counts per server instance.
+  const day = { key: "", n: 0 };
+  const today = () => new Date(now()).toISOString().slice(0, 10);
   return async (req, res, next) => {
     if (req.method === "OPTIONS") return next();
     let user = null;
@@ -70,11 +74,17 @@ export function aiGuard({ getUser, anon = { windowMs: 600_000, max: 30 }, signed
       user = null;
     }
     const need = typeof requireSignIn === "function" ? requireSignIn() : requireSignIn;
-    if (!user && need) return res.status(401).json({ error: "Sign in to continue" });
+    if (!user && need) return res.status(401).json({ error: "Sign in to continue", code: "sign_in_required" });
     const result = user ? userLimiter.hit(`u:${user.id}`) : anonLimiter.hit(`ip:${clientIp(req)}`);
     if (!result.ok) {
       res.set("Retry-After", String(result.retryAfterSec));
-      return res.status(429).json({ error: `You're going a little fast. Please try again in ${result.retryAfterSec} seconds.` });
+      // Signed-in accounts get a higher allowance, so a signed-out visitor who hits the limit is invited to sign in.
+      return res.status(429).json({ error: `You're going a little fast. Please try again in ${result.retryAfterSec} seconds.`, code: "rate_limited", signIn: !user });
+    }
+    if (!user && anonDailyCap > 0) {
+      if (day.key !== today()) Object.assign(day, { key: today(), n: 0 });
+      if (day.n >= anonDailyCap) return res.status(429).json({ error: "We're very busy right now. Please sign in to keep going.", code: "sign_in_required", signIn: true });
+      day.n += 1;
     }
     return next();
   };

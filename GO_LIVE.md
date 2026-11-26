@@ -20,6 +20,8 @@ Database, sign-in and files are **Supabase**. AI is **Groq** and **Anthropic**. 
 | `VITE_POSTHOG_KEY`, `VITE_POSTHOG_HOST` | analytics |
 | `LLM_DAILY_ALERT_USD`, `LLM_ALERT_WEBHOOK` | a Slack or Discord alert when a day's AI spend passes the limit |
 | `DOWNLOADS_FREE` | **must be unset**: setting it makes downloads free |
+| `ANON_AI_DAILY_CAP` | optional. Signed-out visitors can use the AI before signing up at the download step; after this many signed-out AI calls per server per day (default 2000) they are asked to sign in. Signed-in users are never affected |
+| `TAILOR_REQUIRE_SIGNIN` | **kill switch.** Set to `1` and redeploy to bring back sign-in-first for the AI at once (use it if signed-out use is ever abused) |
 | `VITE_API_URL` | leave empty (same origin) |
 
 ## 3. Supabase
@@ -41,6 +43,7 @@ The account that takes the money is the one whose **live** keys you put in Verce
 - ResumeIQ is an individual business and is not GST-registered (the Terms say so). Keep track of yearly turnover: GST registration becomes compulsory once it passes the threshold (₹20 lakh for most states), and from that point the prices and the Terms need to change. Confirm the exact threshold and any other rules with your CA.
 
 ## 5. AI cost protection
+Sign-up now happens at the download step, so **signed-out visitors can run the AI** (about 30 calls a session; limited to 80 per 10 minutes per address). This makes the provider spend caps below mandatory before ads start, not optional.
 - [ ] Set a **hard monthly spend limit** in the Groq and Anthropic consoles (the in-app limiter only slows abuse and counts per server instance).
 - [ ] Set `LLM_ALERT_WEBHOOK` and check an alert arrives.
 

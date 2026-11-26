@@ -120,9 +120,15 @@ async function post(path, body) {
   const token = (await supabase?.auth.getSession().catch(() => null))?.data?.session?.access_token;
   const res = await fetch(`${API_BASE}${path}`, { method: "POST", headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) {
+    // The server asks signed-out visitors to sign in when demand is high or a limit is reached: open the sign-in prompt.
+    if (data.code === "sign_in_required" || (res.status === 429 && data.signIn)) promptSignIn(data.error);
+    throw new Error(data.error || `Request failed (${res.status})`);
+  }
   return data;
 }
+// Set by the page: shows the sign-in prompt over whatever the visitor is looking at.
+let promptSignIn = () => {};
 
 /** Drop pending suggestions whose resume line no longer exists (a changed resume or a cross-device sync), so one bad entry cannot blank the page. */
 function withoutStaleSuggestions(store) {
@@ -347,6 +353,7 @@ export default function ResumeLLM() {
   const [resumeOpen, setResumeOpen] = useState(false); // the resume full screen (the pane beside the chat is always there)
   const [flash, setFlash] = useState(null);
   const [download, setDownload] = useState(false);
+  const [signInPrompt, setSignInPrompt] = useState(null); // text shown when the server asks a signed-out visitor to sign in
   const [accountMenu, setAccountMenu] = useState(false);
   const [listening, setListening] = useState(false);
   const fileRef = useRef(null);
@@ -354,7 +361,11 @@ export default function ResumeLLM() {
   const listRef = useRef(null);
   const resumeRef = useRef(null);
   const heldQuestion = useRef(""); // what the person asked before their resume was in
-  const pendingResumeRef = useRef(null); // a resume read before signing in
+  const pendingResumeRef = useRef(null); // a resume read before signing in (older flows)
+  useEffect(() => {
+    promptSignIn = (reason) => { setSignInPrompt(reason || "Sign in to keep going."); track("signin_wall_shown", { at: "limit" }); };
+    return () => { promptSignIn = () => {}; };
+  }, []);
 
   // ---- account ----
   useEffect(() => {
@@ -525,13 +536,8 @@ export default function ResumeLLM() {
         track("rllm_read_check_flagged", { emails: check.missing.emails.length, links: check.missing.links.length, phones: check.missing.phones.length, years: check.missing.years.length, numbers: check.missing.numbers.length, lines: check.missing.lines.length });
         say({ role: "bot", text: `Heads-up: I may have missed some of what's in your file – ${check.summary}. Check your resume on the left. You can tell me anything that's missing here in the chat, or paste the text of the resume instead.` });
       }
-      if (supabase && !session) {
-        pendingResumeRef.current = parsed;
-        say({ role: "bot", kind: "signin", text: `I've read your resume${firstName(parsed) ? `, ${firstName(parsed)}` : ""}. Sign in so it's saved – you won't have to upload it again for the next job.`, email: emailIn(parsed.contact) });
-        track("signin_wall_shown", { at: "resume_llm" });
-      } else {
-        resumeLoaded(parsed);
-      }
+      // No sign-in wall here: the visitor sees the value first and signs up at the download step.
+      resumeLoaded(parsed);
     } catch (e) {
       track("rllm_resume_read_failed", { pasted: isText });
       say({ role: "bot", text: `I couldn't read that resume (${e.message}). Try another file, or paste the text.` });
@@ -548,6 +554,8 @@ export default function ResumeLLM() {
     update((c) => ({ ...c, messages: c.messages.map((m) => (m.kind === "signin" ? { ...m, done: true } : m)) }));
     say({ role: "user", text: `Signed in as ${s.user.email}` });
     if (parsed) resumeLoaded(parsed, s);
+    else if (resume) saveToAccount(resume, s); // signed in at the download step: keep the resume they have been working on
+    setSignInPrompt(null);
   }
 
   // ---- job description -> suggestions, one at a time ----
@@ -828,12 +836,7 @@ export default function ResumeLLM() {
   function trySampleResume() {
     say({ role: "user", text: "Use a sample resume" });
     track("rllm_sample_resume");
-    if (supabase && !session) {
-      pendingResumeRef.current = SAMPLE_RESUME;
-      say({ role: "bot", kind: "signin", text: "Here's a sample resume to try. Sign in to continue – it's the same step that saves your own resume.", email: "" });
-    } else {
-      resumeLoaded(SAMPLE_RESUME);
-    }
+    resumeLoaded(SAMPLE_RESUME);
   }
 
   // ---- review workspace (after suggestions are ready) ----
@@ -1533,6 +1536,16 @@ export default function ResumeLLM() {
         </aside>
       )}
 
+      {signInPrompt !== null && supabase && !session && (
+        <div className="rl-modal-scrim" role="dialog" aria-modal="true" aria-label="Sign in" onClick={() => setSignInPrompt(null)}>
+          <div className="rl-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>Sign in to keep going</h2>
+            <p className="rl-modal-sub">{signInPrompt} Your resume and edits stay exactly as they are.</p>
+            <SignInCard initialEmail={emailIn(resume?.contact)} onSignedIn={onSignedIn} />
+            <button type="button" className="rl-btn rl-btn-quiet rl-wide" onClick={() => setSignInPrompt(null)}>Not now</button>
+          </div>
+        </div>
+      )}
       {download && resume && (
         <DownloadPaywall
           resume={finalResume(resume)}
@@ -1545,7 +1558,7 @@ export default function ResumeLLM() {
             track("rllm_downloaded", { applied, score, template: templateId });
           }}
           onClose={() => setDownload(false)}
-          onSignIn={() => { setDownload(false); askSignIn(); }}
+          signInSlot={supabase ? <SignInCard initialEmail={emailIn(resume?.contact)} onSignedIn={onSignedIn} /> : null}
           track={track}
         />
       )}

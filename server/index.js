@@ -195,11 +195,20 @@ async function fetchJobsGuest(keywords, location, limit, experienceLevels = []) 
 const LLM_MAX_PROMPT_CHARS = 60000;
 const LLM_MAX_TOKENS = 4096;
 
-// Technical limits on the routes that spend AI money (module M8, see server/rateLimit.js). The tailor routes need a sign-in
-// whenever accounts are set up; /api/llm stays open to signed-out visitors (resume reading happens before sign-in), per IP.
+// Technical limits on the routes that spend AI money (module M8, see server/rateLimit.js). /api/llm (resume reading) and the tailor routes
+// are both open to signed-out visitors, per IP address; see the tailor note below.
 const guardUser = cachedUser(optionalUser);
 app.use("/api/llm", aiGuard({ getUser: guardUser }));
-app.use("/api/tailor", aiGuard({ getUser: guardUser, requireSignIn: () => jobStoreConfigured() }));
+// Suggestions and chat are open to visitors who haven't signed in yet: they sign up at the download step, after they have seen the value.
+// A whole session is about 30 calls, so signed-out visitors get 80 per 10 minutes per address, and a daily breaker (ANON_AI_DAILY_CAP, default
+// 2000 per server instance) asks signed-out visitors to sign in when demand spikes. TAILOR_REQUIRE_SIGNIN=1 is the kill switch that
+// brings back the sign-in-first rule at once (set it in Vercel and redeploy if signed-out use is ever abused).
+app.use("/api/tailor", aiGuard({
+  getUser: guardUser,
+  requireSignIn: () => process.env.TAILOR_REQUIRE_SIGNIN === "1",
+  anon: { windowMs: 600_000, max: 80 },
+  anonDailyCap: Number(process.env.ANON_AI_DAILY_CAP) || 2000,
+}));
 
 app.post("/api/llm", async (req, res) => {
   const { system, user, maxTokens, json, task } = req.body || {};

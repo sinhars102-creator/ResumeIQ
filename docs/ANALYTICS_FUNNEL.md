@@ -16,7 +16,7 @@ When a person signs in, events are linked to their account ID, so one journey ca
 | 2 | Cookie choice | `cookie_choice` | `accepted` |
 | 3 | Starts adding a resume | `rllm_upload_started` | `pasted`, `type`; `sample_resume_used` for the sample |
 | 4 | Resume read | `rllm_resume_read` / `rllm_resume_read_failed` | `seconds`; `rllm_read_check_flagged` if something looked lost |
-| 5 | Sign-in wall | `signin_wall_shown` → `signin_email_submitted` → `signin_code_sent` → `signin_code_entered` → `signin_completed` | Google Ads "Sign up" conversion fires on a new account |
+| 5 | Sign-up at the download step (after the visitor has seen the value) | `signin_wall_shown` (`at: download`) → `signin_email_submitted` → `signin_code_sent` → `signin_code_entered` → `signin_completed` | Google Ads "Sign up" conversion fires on a new account. Sits between *template chosen* and *paywall shown*. A signed-out visitor who hits a free limit sees the same sign-in (`at: limit`) |
 | 6 | Chooses tailor or improve | `rllm_tailor_chosen`, `rllm_review` | |
 | 7 | Job description in, suggestions ready | `rllm_suggestions` | `count`, `must`, `questions`, `seconds`, `score` |
 | 8 | Review screen shown | `tailor_viewed` | `layout` (mobile or desktop) |
@@ -41,4 +41,5 @@ When a person signs in, events are linked to their account ID, so one journey ca
 ## Funnel to build in PostHog
 Insight type "Funnel", filter `is_internal = false`, break down by `utm_source` / channel:
 `rllm_opened` → `rllm_upload_started` → `rllm_resume_read` → `signin_completed` → `rllm_suggestions` → `suggestion_applied` → `rllm_download_clicked` → `rllm_paywall_shown` → `rllm_pay_clicked` → `rllm_paid` → `rllm_downloaded_counted`.
+Note: sign-up now happens at the download step, so the funnel above has no sign-in step; add `signin_completed` between `rllm_template_chosen` and `rllm_paywall_shown` if you want to see sign-up drop-off.
 Add a second insight: count of `rllm_download_failed` per day (should be near zero) and `rllm_paid` minus `rllm_downloaded_counted` (paid but not yet downloaded).

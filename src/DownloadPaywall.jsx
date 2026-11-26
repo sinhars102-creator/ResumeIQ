@@ -14,7 +14,7 @@
  *
  * Props: resume (the final resume, for the previews), session (Supabase session or null), paymentsRequired (false when
  * there's no account system, e.g. a bare local setup), buildAndSave(templateId) -> void (throws if the PDF fails),
- * onClose, onSignIn, track, notice (optional text).
+ * onClose, signInSlot (the email-code sign-in, shown inside this dialog for a visitor with no account yet), track, notice (optional text).
  */
 import { useEffect, useRef, useState } from "react";
 import { payForPlan } from "./razorpayCheckout.js";
@@ -36,7 +36,7 @@ async function api(path, token, options = {}) {
 
 const leftText = (s) => (s?.free ? "" : s?.unlimited ? `Unlimited downloads${s.expiresAt ? ` until ${new Date(s.expiresAt).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : ""}.` : s?.remaining != null ? `${s.remaining} download${s.remaining === 1 ? "" : "s"} left.` : "");
 
-export default function DownloadPaywall({ resume, session, paymentsRequired, buildAndSave, onClose, onSignIn, track, notice }) {
+export default function DownloadPaywall({ resume, session, paymentsRequired, buildAndSave, onClose, signInSlot, track, notice }) {
   const token = session?.access_token || "";
   const email = session?.user?.email || "";
   // loading | signin | paywall | ready | done
@@ -74,6 +74,14 @@ export default function DownloadPaywall({ resume, session, paymentsRequired, bui
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("keydown", onKey); if (prev && prev.focus) prev.focus(); };
   }, []);
+
+  // Signed in from inside this dialog: carry on to the plans (or straight to the download for someone who already has one).
+  useEffect(() => {
+    if (paymentsRequired && stage === "signin" && session) setStage("loading");
+  }, [session, stage, paymentsRequired]);
+  useEffect(() => {
+    if (step === "pay" && stage === "signin") trackRef.current?.("signin_wall_shown", { at: "download" });
+  }, [step, stage]);
 
   useEffect(() => {
     if (!paymentsRequired || !token) return undefined;
@@ -182,8 +190,8 @@ export default function DownloadPaywall({ resume, session, paymentsRequired, bui
 
         {stage === "signin" && (
           <>
-            <p className="rl-pay">Sign in so your resume and downloads are saved to your account.</p>
-            <button type="button" className="rl-btn rl-btn-primary rl-wide" onClick={onSignIn}>Sign in</button>
+            <p className="rl-pay-lead">Your resume is ready. Create your free account to download it: we'll email you a 6-digit code, with no password. Your resume and edits stay exactly as they are.</p>
+            {signInSlot}
           </>
         )}
 
