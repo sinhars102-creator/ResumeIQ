@@ -1,0 +1,11 @@
+import { start, shot } from "./lib.mjs";
+import fs from "node:fs";
+const app = await start(); const page=app.page;
+await page.waitForTimeout(3000);
+await page.getByRole("button",{name:"Apply all ready"}).click();
+await page.waitForTimeout(2500);
+await shot(page,"ananya","19-applied");
+const t=await page.locator("body").innerText(); fs.writeFileSync("t19.txt",t);
+console.log(t.slice(0,t.indexOf("All ")));
+console.log(t.slice(t.indexOf("All ")));
+await app.close();

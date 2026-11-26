@@ -1,0 +1,16 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name: "sana", web: 5805 });
+const p = app.page;
+await p.getByRole("button",{name:/Design & download/}).click();
+await p.waitForTimeout(1500);
+await p.getByText("Section headings in a left column").first().click();
+await p.waitForTimeout(1000);
+await p.getByText("Serif",{exact:true}).first().click();
+await p.waitForTimeout(800);
+const c = p.locator('input[type=color]');
+console.log(await c.count());
+await c.first().fill("#6b1f35");
+await p.waitForTimeout(1200);
+await p.mouse.move(720,500); await p.mouse.wheel(0,3000); await p.waitForTimeout(800);
+await shot(p,"sana","17-grid-burgundy");
+await app.close();

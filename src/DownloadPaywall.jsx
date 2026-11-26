@@ -18,16 +18,13 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { payForPlan } from "./razorpayCheckout.js";
+import { PLANS } from "./pricing.js";
+import { trackPurchase } from "./googleAds.js";
 import TemplatePicker from "./TemplatePicker.jsx";
-import { DEFAULT_TEMPLATE, templateById } from "./resumeTemplates.js";
+import { DEFAULT_TEMPLATE, templateById, loadDesign, saveDesign } from "./resumeTemplates.js";
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? (import.meta.env.DEV ? "http://localhost:3001" : "")).replace(/\/$/, "");
 
-const PLANS = [
-  { id: "dl1", title: "1 download", price: 79, note: "This resume, one PDF" },
-  { id: "dl10", title: "10 downloads", price: 399, note: "30 days · about ₹40 each" },
-  { id: "dlunlimited", title: "Unlimited", price: 799, note: "30 days · as many as you need" },
-];
 
 const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 
@@ -56,10 +53,27 @@ export default function DownloadPaywall({ resume, session, paymentsRequired, bui
       return DEFAULT_TEMPLATE;
     }
   });
+  const [design, setDesign] = useState(loadDesign);
   const trackRef = useRef(track);
   trackRef.current = track;
   // One id for this dialog: tapping Download again (say, the phone blocked the first save) isn't counted twice.
   const downloadIdRef = useRef(uid());
+
+  // Escape closes the dialog, and focus moves into it when it opens.
+  const dialogRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  // While a payment or PDF is in progress the dialog stays open: closing it would hide a purchase still being recorded.
+  const busyRef = useRef(false);
+  busyRef.current = busy;
+  const closeUnlessBusy = () => { if (!busyRef.current) onCloseRef.current?.(); };
+  useEffect(() => {
+    const prev = document.activeElement;
+    dialogRef.current?.focus();
+    const onKey = (e) => { if (e.key === "Escape") closeUnlessBusy(); };
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("keydown", onKey); if (prev && prev.focus) prev.focus(); };
+  }, []);
 
   useEffect(() => {
     if (!paymentsRequired || !token) return undefined;
@@ -84,17 +98,18 @@ export default function DownloadPaywall({ resume, session, paymentsRequired, bui
   function chooseTemplate() {
     try {
       localStorage.setItem("riq_template", templateId);
+      saveDesign(design);
     } catch {
       // Storage blocked: the choice just isn't remembered for next time.
     }
-    trackRef.current?.("rllm_template_chosen", { template: templateId });
+    trackRef.current?.("rllm_template_chosen", { template: templateId, customised: JSON.stringify(design) !== JSON.stringify(loadDesign()) || undefined });
     setStep("pay");
   }
 
   async function pay() {
     setError("");
     setBusy(true);
-    trackRef.current?.("rllm_pay_clicked", { plan });
+    trackRef.current?.("rllm_pay_clicked", { plan, price: PLANS.find((p) => p.id === plan)?.price });
     try {
       const r = await payForPlan(plan, { email, token });
       if (r.status === "cancelled") {
@@ -103,7 +118,9 @@ export default function DownloadPaywall({ resume, session, paymentsRequired, bui
       }
       setStatus(r.purchase);
       setStage("ready");
-      trackRef.current?.("rllm_paid", { plan });
+      const paid = PLANS.find((p) => p.id === plan);
+      trackRef.current?.("rllm_paid", { plan, price: paid?.price, value: paid?.price, currency: "INR" });
+      trackPurchase({ plan, value: paid?.price, transactionId: r.purchase?.paymentId || r.paymentId || null });
     } catch (e) {
       setError(e.message);
       trackRef.current?.("rllm_pay_failed", { plan });
@@ -116,9 +133,10 @@ export default function DownloadPaywall({ resume, session, paymentsRequired, bui
     setError("");
     setBusy(true);
     try {
-      buildAndSave(templateId); // throws if the PDF can't be made; nothing is counted then
+      buildAndSave(templateId, design); // throws if the PDF can't be made; nothing is counted then
     } catch (e) {
-      setError(`The PDF couldn't be made (${e.message}). Nothing was used from your downloads.`);
+      trackRef.current?.("rllm_download_failed", { plan: status?.plan || null, stage: "build" });
+      setError(`The PDF couldn't be made (${e.message}). Nothing was used from your downloads. If this keeps happening, email rahul@myresumeiq.io and we'll refund you.`);
       setBusy(false);
       return;
     }
@@ -144,14 +162,14 @@ export default function DownloadPaywall({ resume, session, paymentsRequired, bui
   const selected = PLANS.find((p) => p.id === plan);
 
   return (
-    <div className="rl-modal-scrim" role="dialog" aria-modal="true" aria-label="Download your resume" onClick={onClose}>
-      <div className={`rl-modal${step === "template" ? " rl-modal-wide" : ""}`} onClick={(e) => e.stopPropagation()}>
+    <div className="rl-modal-scrim" role="dialog" aria-modal="true" aria-label="Download your resume" onClick={closeUnlessBusy}>
+      <div className={`rl-modal${step === "template" ? " rl-modal-wide" : ""}`} ref={dialogRef} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
         {step === "template" ? (
           <>
-            <h2>Choose a template</h2>
-            <p className="rl-modal-sub">Your text stays exactly as you approved it. A template only changes the look and how it is laid out across pages.</p>
+            <h2>Design your resume</h2>
+            <p className="rl-modal-sub">Pick a template, then adjust the font, size, spacing, margins and colour. Your text stays exactly as you approved it; this only changes the look.</p>
             {notice && <p className="rl-warn">{notice}</p>}
-            <TemplatePicker resume={resume} selected={templateId} onSelect={setTemplateId} />
+            <TemplatePicker resume={resume} selected={templateId} onSelect={setTemplateId} design={design} onDesign={setDesign} />
             <button type="button" className="rl-btn rl-btn-primary rl-wide" onClick={chooseTemplate}>Continue with {templateById(templateId).name}</button>
             <button type="button" className="rl-btn rl-btn-quiet rl-wide" onClick={onClose}>Keep editing</button>
           </>
@@ -174,13 +192,13 @@ export default function DownloadPaywall({ resume, session, paymentsRequired, bui
             <p className="rl-pay-lead">Your resume is ready. Choose how many PDFs you need.</p>
             <div className="rl-plans" role="radiogroup" aria-label="Plans">
               {PLANS.map((p) => (
-                <button key={p.id} type="button" role="radio" aria-checked={plan === p.id} className={`rl-plan${plan === p.id ? " is-on" : ""}`} onClick={() => setPlan(p.id)}>
+                <button key={p.id} type="button" role="radio" aria-checked={plan === p.id} className={`rl-plan${plan === p.id ? " is-on" : ""}`} onClick={() => { setPlan(p.id); trackRef.current?.("rllm_plan_selected", { plan: p.id, price: p.price }); }}>
                   <span className="rl-plan-main"><b>{p.title}</b><small>{p.note}</small></span>
                   <span className="rl-plan-price">₹{p.price}</span>
                 </button>
               ))}
             </div>
-            <p className="rl-pay-fine">One-time payment by UPI, card or netbanking. No subscription.</p>
+            <p className="rl-pay-fine">One-time payment by UPI, card or netbanking. No subscription. If your PDF can't be delivered after you pay, we refund you in full: <a href="/refund.html" target="_blank" rel="noopener">refund policy</a>.</p>
             <button type="button" className="rl-btn rl-btn-primary rl-wide" disabled={busy} onClick={pay}>{busy ? "Opening payment…" : `Pay ₹${selected.price} and continue`}</button>
           </>
         )}
@@ -202,7 +220,7 @@ export default function DownloadPaywall({ resume, session, paymentsRequired, bui
         {stage === "error" && <p className="rl-warn">{error}</p>}
         {error && stage !== "error" && <p className="rl-warn" role="alert">{error}</p>}
 
-        {stage !== "done" && <button type="button" className="rl-btn rl-btn-quiet rl-wide" onClick={() => setStep("template")}>← Change template ({templateById(templateId).name})</button>}
+        {stage !== "done" && <button type="button" className="rl-btn rl-btn-quiet rl-wide" onClick={() => setStep("template")}>← Change design ({templateById(templateId).name})</button>}
         <button type="button" className="rl-btn rl-btn-quiet rl-wide" onClick={onClose}>{stage === "done" ? "Close" : "Keep editing"}</button>
           </>
         )}

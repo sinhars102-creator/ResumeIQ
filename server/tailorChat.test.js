@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { claimContext, unsupportedClaims } from "./tailorChat.js";
+import { claimContext, unsupportedClaims, cleanEdit } from "./tailorChat.js";
 
 const RESUME = {
   name: "Asha Rao",
@@ -39,4 +39,43 @@ test("without a job description every new word still needs to come from the cand
 
 test("a word already on the resume is never flagged", () => {
   assert.deepEqual(unsupportedClaims("Used SQL for roadmapping", ctx()), []);
+});
+
+test("short skills (Go, R, C#, AI, ML, K8s) need evidence like any other skill", () => {
+  const c = claimContext(RESUME, "Need Go, R, C#, AI, ML and K8s experience", "");
+  for (const skill of ["Go", "R", "C#", "AI", "ML", "K8s"]) {
+    const out = cleanEdit({ target: "K", op: "add_skills", skills: [skill] }, RESUME, c);
+    assert.deepEqual(out, { unsupported: [skill] }, skill);
+  }
+});
+
+test("a short skill the resume or the chat shows is accepted", () => {
+  const withGo = { ...RESUME, skills: ["SQL", "Go"] };
+  assert.equal(cleanEdit({ target: "K", op: "add_skills", skills: ["Go", "Tableau"] }, withGo, claimContext(withGo, "", "I use Tableau at work")).skills.join(), "Tableau");
+  const chat = claimContext(RESUME, "", "I wrote services in Go and C# at Acme");
+  assert.deepEqual(cleanEdit({ target: "K", op: "add_skills", skills: ["Go", "C#"] }, RESUME, chat).skills, ["Go", "C#"]);
+});
+
+test("a rewrite that brings in a short job skill is stopped, ordinary wording is not", () => {
+  const c = claimContext(RESUME, "Need C# and Go experience. R&D background a plus.", "");
+  assert.ok(unsupportedClaims("Built services in C# and Go", c).length >= 2);
+  assert.deepEqual(unsupportedClaims("Went to market with a go-to-market plan for R&D tools", c), []);
+});
+
+test("a title or summary may not gain seniority the resume never showed", () => {
+  const c = claimContext(RESUME, "Senior Product Manager wanted", "");
+  assert.deepEqual(cleanEdit({ target: "T", op: "replace", after: "Senior Product Manager" }, RESUME, c), { unsupported: ["senior"] });
+  assert.ok(cleanEdit({ target: "T", op: "replace", after: "Product Manager, Logistics" }, RESUME, c).after);
+  assert.ok(cleanEdit({ target: "T", op: "replace", after: "Senior Product Manager" }, RESUME, claimContext(RESUME, "", "I was promoted to senior PM")).after);
+});
+
+test("seniority and short-skill checks don't block ordinary wording", () => {
+  const c = claimContext(RESUME, "Go beyond the brief. Need Go and 5 ml of ML knowledge. Lead generation a plus.", "");
+  const t = (after) => cleanEdit({ target: "T", op: "replace", after }, RESUME, c);
+  assert.ok(t("Product Manager, Lead Generation").after);
+  assert.deepEqual(t("Lead Product Manager"), { unsupported: ["lead"] });
+  const s = cleanEdit({ target: "S", op: "replace", after: "Product manager who can lead cross-functional teams across logistics." }, RESUME, c);
+  assert.ok(s.after);
+  assert.deepEqual(unsupportedClaims("Go beyond expectations on 5 ml dosing", c), []);
+  assert.ok(unsupportedClaims("Built services in Go", c).includes("go"));
 });

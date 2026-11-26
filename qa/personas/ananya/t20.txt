@@ -1,0 +1,237 @@
+◈ Resume LLM
+✎ New chat
+
+Recent
+
+Group Product Manager, Growth Platform · Orbita Cloud
+A
+ananya@example.com
+Sign out
+Group Product Manager, Growth Platform · Orbita Cloud
+A
+Tailoring for Group Product Manager, Growth Platform
+
+Orbita Cloud · 8 of 11 suggestions applied
+
+Match
+77%
++8 from 69
+Apply all ready
+Undo
+Redo
+Reset
+Highlight changes on resume
+Design & download
+Improve my resume
+Use a different resume
+Ananya Mehta
+✎
+
+Senior Product Manager
+✎
+
+ananya.mehta.pm@example.com | +91 98450 00000 | Bengaluru, Karnataka | linkedin.com/in/ananya-mehta-pm-example
+✎
+
+SUMMARY
+↑
+↓
+Rename
+Remove
+
+✓
+✓
+11
+Product manager with 6 years of experience in B2B SaaS, working across retention, onboarding and pricing. Mentor junior PMs on discovery and prioritisation, and partner closely with engineering, design and sales.
+✎
+
+EXPERIENCE
+↑
+↓
+Rename
+Remove
+Senior Product Manager · Finlytic Systems
+Apr 2022 - Present
+✎
+×
+Own the analytics and reporting product used by 1,200+ business customers
+✎
+×
+✓
+Led retention initiative that raised 90-day customer retention from 61% to 72% (18% lift) over three quarters
+✎
+×
+✓
+Ran pricing experiment on mid-tier plan across 3 customer segments, lifting ARPA 9% with no rise in churn
+✎
+×
+✓
+Redesigned activation funnel from signup to first published dashboard, increasing activation rate from 34% to 47%
+✎
+×
+✓
+Mentored two junior product managers since early 2023, coaching them on product discovery and prioritisation and reviewing their PRDs
+✎
+×
+✓
+Partnered with engineering, design and sales teams to prioritise and deliver the quarterly roadmap
+✎
+×
+Wrote PRDs and managed backlog in Jira; built dashboards in SQL and Metabase
+✎
+×
++ Add bullet
+Product Manager · Cloudnest Technologies
+Jul 2019 - Mar 2022
+✎
+×
+7
+Owned the self-serve onboarding and billing modules for an HR-tech platform, where self-serve sign-ups grew significantly
+✎
+×
+8
+Launched usage-based billing add-on that contributed to 12% of new revenue in first year
+✎
+×
+Ran 20+ customer interviews to shape the integrations roadmap, shipped 4 integrations
+✎
+×
+Reduced support tickets on billing by 27% through in-product invoice clarity changes
+✎
+×
+Coordinated releases with a team of 8 engineers
+✎
+×
++ Add bullet
+Associate Product Manager · Zenvoy Labs
+Aug 2018 - Jun 2019
+✎
+×
+Supported the PM on mobile app features for a logistics startup
+✎
+×
+Analysed usage data and wrote user stories
+✎
+×
+Helped run A/B tests on checkout
+✎
+×
++ Add bullet
+EDUCATION
+↑
+↓
+Rename
+Remove
+
+B.E. Computer Science · Visvesvaraya Technological University · 2018
+✎
+×
+
+Bengaluru
+✎
+×
+
++ Add detail
++ Add education (Degree · School · Year)
+SKILLS
+↑
+↓
+Rename
+Remove
+
+✓
+Product strategy · Roadmapping · Customer discovery · Prioritisation · A/B testing · SQL · Metabase · Mixpanel · Jira · Go-to-market · Agile · Product analytics · Experimentation
+✎
+
++ Add section
+All 11
+To review 2
+Applied 8
+Dismissed 1
+✓
+Summary
+Confirm total years of experience
+Product manager with 6 years in B2B SaaS across onboarding, activation, retention and pricing. Lifted 90-day retention from 61% to 72% and activation from 34% to 47%, and grew ARPA 9% through pricing experiments. Mentor junior PMs on discovery and prioritisation, and partner closely with engineering, design and sales, using SQL and A/B testing to guide decisions.
+Applied to your resume
+Undo
+✓
+Finlytic Systems · bullet 2
+Sharpen the retention result
+Led retention initiative that raised 90-day customer retention from 61% to 72% (18% lift) over three quarters
+Applied to your resume
+Undo
+✓
+Finlytic Systems · bullet 3
+Lead with pricing and monetisation impact
+Ran pricing experiment on mid-tier plan across 3 customer segments, lifting ARPA 9% with no rise in churn
+Applied to your resume
+Undo
+✓
+Finlytic Systems · bullet 4
+Frame the activation win in the job's terms
+Redesigned activation funnel from signup to first published dashboard, increasing activation rate from 34% to 47%
+Applied to your resume
+Undo
+✓
+Finlytic Systems · bullet 5
+Clarify how long you've led PMs
+Mentored two junior product managers since early 2023, coaching them on product discovery and prioritisation and reviewing their PRDs
+Applied to your resume
+Undo
+✓
+Finlytic Systems · bullet 6
+Show you prioritise and deliver across functions
+Partnered with engineering, design and sales teams to prioritise and deliver the quarterly roadmap
+Applied to your resume
+Undo
+7
+Cloudnest Technologies · bullet 1
+Quantify self-serve sign-up growth
+Dismissed, your original line is kept
+Restore
+8
+Cloudnest Technologies · bullet 2
+Surface NRR, expansion and finance work
+
+The job tracks expansion revenue and NRR and expects pricing work with finance, and none of this appears yet.
+
+Did the usage-based billing add-on or the pricing experiment move expansion revenue or NRR? Did you work with finance on those pricing decisions?
+
+Send
+✓
+Skills
+Add growth skills you've already shown
+Applied to your resume
+Undo
+✓
+Summary
+Add mentoring to summary
+Product manager with 6 years of experience in B2B SaaS, working across retention, onboarding and pricing. Mentor junior PMs on discovery and prioritisation, and partner closely with engineering, design and sales.
+Applied to your resume
+Undo
+11
+Summary
+Add top outcomes to summary
+Current
+Product manager with 6 years of experience in B2B SaaS, working across retention, onboarding and pricing. Mentor junior PMs on discovery and prioritisation, and partner closely with engineering, design and sales.
+Suggested
+Product manager with 6 years of experience in B2B SaaS across retention, activation, onboarding and pricing. Raised 90-day customer retention from 61% to 72% and activation from 34% to 47%, and lifted ARPA 9% through a pricing experiment with no rise in churn. Mentor two junior PMs on discovery and prioritisation, and partner closely with engineering, design and sales.
+Adds
+activation
+pricing
+experiment
+Apply to resume
+Edit
+Dismiss
+↻ Another version
+Wait, where do my bullets mention R? I have never used R, please don't add it to my skills. Also, can you just write that I managed a team of 2 PMs? It will look stronger for a GPM role.
+R isn't on your resume: no bullet mentions it and your skills list [K] doesn't include it, so there's nothing to remove and I won't add it. I can't change [E0B4] to say you managed two PMs, because it currently says you mentored them, and calling that management would overstate your role. Did those two PMs report to you directly (hiring, performance reviews, setting their goals)? If so, tell me and I'll reword [E0B4] to show that. Otherwise I can make the mentoring itself stand out more for a GPM role.
+No, they didn't report to me, I only mentored them. Please make the mentoring stand out without implying I managed them. Also for the Cloudnest onboarding bullet, self-serve sign-ups grew significantly but I can't remember the exact number, so don't put a figure in.
+I've reworded [E0B4] to make the mentoring stand out while keeping it clearly mentoring, not management. I've also added the sign-up growth to [E1B0] with no figure, as you asked. If you ever confirm the number, adding it there will make that bullet much stronger. I've added 2 suggestions to the list: check and apply.
+No. I'd rather keep it at 6 years. The APM role was a junior support role, so I count my real PM experience from 2019 onwards. Please don't say 7.
+Thanks. Here's the change for #1: check it and apply.
+About two years, since early 2023. They never reported to me. I didn't do their reviews, goals or hiring, just mentoring on discovery and prioritisation, and I reviewed their PRDs.
+Thanks. Here's the change for #5: check it and apply.
+The summary card showed a version with my 18% retention and activation numbers, but my resume only got a shorter one without them. Please put my strongest outcomes (retention 61% to 72%, activation 34% to 47%, the pricing result) into the summary so they're in the top third of page one. Keep the mentoring as mentoring.
+Here's a new summary [S] with your three strongest outcomes near the top: retention 61% to 72%, activation 34% to 47%, and the 9% ARPA lift from pricing with no rise in churn. It keeps 6 years and describes the mentoring as mentoring only. Check it and apply it so it lands on your resume this time. I've added 1 suggestion to the list: check and apply.
+Send

@@ -1,150 +1,67 @@
-# ResumeIQ – Step-by-step: Make it live
+# ResumeIQ: go-live checklist
 
-You will use **two platforms**: **Render** (for the API) and **Vercel** (for the website). Do them in this order.
+How it runs today: one **Vercel** project serves the website (`dist/`) and the API (`api/index.js` → `server/index.js`, same origin, `/api/*`).
+Database, sign-in and files are **Supabase**. AI is **Groq** and **Anthropic**. Payments are **Razorpay**. Analytics is **PostHog**.
+(The old Render setup in `render.yaml` and `DEPLOYMENT.md` is not how the live site runs; do not follow it.)
 
----
+## 1. Before anything goes to production
+- [ ] Commit the work (nothing is committed yet), review the diff, merge to `main`.
+- [ ] Run `npm test` (all must pass) and `npm run build`.
+- [ ] Confirm no secret is in the repo or in any `VITE_` variable. Only these may be public: `VITE_API_URL`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, `VITE_RAZORPAY_KEY_ID`, `VITE_POSTHOG_KEY`, `VITE_POSTHOG_HOST`. **Never** put an AI key in a `VITE_` variable (it ships to every visitor's browser). If `VITE_OPENAI_API_KEY` or `VITE_ANTHROPIC_API_KEY` exists in Vercel, delete it and rotate that key.
 
-# Part 1: Deploy the API on Render
+## 2. Vercel environment variables (Production)
+| Variable | Needed for |
+|---|---|
+| `GROQ_API_KEY`, `ANTHROPIC_API_KEY` (and `LLM_PROVIDER` / model overrides if used) | the assistant (server only) |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | database and files (server only, never public) |
+| `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` | sign-in in the browser |
+| `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` (**live** keys), `VITE_RAZORPAY_KEY_ID` (live key id) | payments |
+| `RAZORPAY_WEBHOOK_SECRET` | confirms payments even when the customer closes the tab |
+| `VITE_POSTHOG_KEY`, `VITE_POSTHOG_HOST` | analytics |
+| `LLM_DAILY_ALERT_USD`, `LLM_ALERT_WEBHOOK` | a Slack or Discord alert when a day's AI spend passes the limit |
+| `DOWNLOADS_FREE` | **must be unset**: setting it makes downloads free |
+| `VITE_API_URL` | leave empty (same origin) |
 
-The API serves LinkedIn job search. It must be live first so you can paste its URL into Vercel.
+## 3. Supabase
+- [ ] Apply every file in `supabase/migrations/` (14 files; the newest are `rllm_state` and `download_entitlements`).
+- [ ] Authentication → SMTP: set a **custom email sender** on your own domain (the built-in sender allows only a few emails per hour, so ad traffic would be locked out of sign-in). Add SPF, DKIM and DMARC for the sending domain, and test a code arriving in Gmail and Outlook inboxes (not spam).
+- [ ] Authentication → URL configuration: site URL `https://www.myresumeiq.io`.
+- [ ] Row-level security is on for every table that holds user data.
 
-## 1.1 Open Render
+## 4. Razorpay (live payments)
+The account that takes the money is the one whose **live** keys you put in Vercel. It must show "Activated" and let you switch the dashboard from Test to Live.
+1. Razorpay dashboard → switch to **Live** → Account & Settings → API Keys → Generate key. Copy the Key Id (`rzp_live_…`) and the Key Secret (shown once).
+2. In Vercel, set `RAZORPAY_KEY_ID` and `VITE_RAZORPAY_KEY_ID` (the same `rzp_live_…` id) and `RAZORPAY_KEY_SECRET`. Do not paste the secret anywhere else (not in chat, not in the repo).
+3. **Webhook** (so a payment still counts if the customer closes the tab): Dashboard → Settings → Webhooks → Add. URL `https://www.myresumeiq.io/api/razorpay-webhook`, events **payment.captured** and **order.paid**, and a secret you invent (a long random string). Put that same string in Vercel as `RAZORPAY_WEBHOOK_SECRET`. Redeploy after changing variables.
+4. Test the webhook: in the webhook's page use "Send test webhook" (expect HTTP 200), then make the real ₹79 payment below and check the Vercel logs show `[payments] webhook: granted`.
+5. **One real test:** pay ₹79 with your own card or UPI, confirm the download works and the plan shows, then refund it from the dashboard.
+6. After going live, the Test-mode keys must not remain in Vercel Production.
 
-1. Go to **https://render.com**
-2. Sign in (or sign up with **Sign in with GitHub**).
-3. You should see the Render dashboard.
+## 4b. Tax
+- ResumeIQ is an individual business and is not GST-registered (the Terms say so). Keep track of yearly turnover: GST registration becomes compulsory once it passes the threshold (₹20 lakh for most states), and from that point the prices and the Terms need to change. Confirm the exact threshold and any other rules with your CA.
 
-## 1.2 Create a new Web Service
+## 5. AI cost protection
+- [ ] Set a **hard monthly spend limit** in the Groq and Anthropic consoles (the in-app limiter only slows abuse and counts per server instance).
+- [ ] Set `LLM_ALERT_WEBHOOK` and check an alert arrives.
 
-1. Click the blue **New +** button (top right).
-2. Click **Web Service**.
+## 6. Domain and site
+- [ ] `https://www.myresumeiq.io` serves the site over HTTPS, the bare domain redirects to `www`.
+- [ ] Open `/`, `/privacy`, `/terms`, `/refund`, `/contact`, `/robots.txt`, `/sitemap.xml`, `/favicon.svg`, and a made-up address (shows the 404 page).
+- [ ] Share the home link in WhatsApp/LinkedIn and check the preview image and title.
+- [ ] `rahul@myresumeiq.io` receives mail (it is the support, refund and privacy address).
 
-## 1.3 Connect your GitHub repo
+## 7. Google Ads (your account)
+- [ ] Advertiser verification completed (legal name, country, payment profile).
+- [ ] Billing set up.
+- [ ] Create the **Purchase** conversion (value in INR), paste its label into `PURCHASE_LABEL` in `src/googleAds.js`, and redeploy. Until then no purchase conversion is sent.
+- [ ] Check with Google Tag Assistant on the live site: the tag fires, consent mode shows denied until Accept, then granted.
+- [ ] Ad text matches the page: say "free to edit, PDF from ₹79", never "free resume download". Do not promise jobs or interviews.
+- [ ] Final URL is `https://www.myresumeiq.io/` (or `/app/editor`; both open the same editor).
 
-1. If asked “Connect a repository”, find **sinhars102-creator/ResumeIQ** in the list.
-2. If it’s not there, click **Configure account** and allow Render to access your GitHub (or the org that owns the repo).
-3. Click **Connect** next to **ResumeIQ**.
+## 8. After launch (first 48 hours)
+- [ ] Build the PostHog funnel in `docs/ANALYTICS_FUNNEL.md`.
+- [ ] Watch `rllm_download_failed` and `rllm_paid` minus `rllm_downloaded_counted`: each gap is a refund owed. Answer refund emails within 2 working days (the policy promises it).
+- [ ] Check the AI spend alert and the Razorpay dashboard daily.
 
-## 1.4 Fill in the form
-
-Use these values exactly:
-
-| Field | What to enter |
-|--------|----------------|
-| **Name** | `resumeiq-api` (or any name you like) |
-| **Region** | Choose one (e.g. **Oregon (US West)**) |
-| **Branch** | `main` |
-| **Root Directory** | Leave **empty** |
-| **Runtime** | **Node** |
-| **Build Command** | `npm install` |
-| **Start Command** | `yarn start` or `npm start` |
-
-## 1.5 Add the API key (environment variable)
-
-1. Scroll to the **Environment** section.
-2. Click **Add Environment Variable**.
-3. **Key:** `APIFY_TOKEN`
-4. **Value:** Paste your Apify token (from https://console.apify.com/account/integrations).
-5. Leave other env vars empty unless you use RapidAPI; then add `RAPIDAPI_KEY`.
-
-## 1.6 Deploy
-
-1. Scroll down and click **Create Web Service**.
-2. Wait for the first deploy to finish (a few minutes). The log should show “ResumeIQ API server running…”.
-3. At the top of the page you’ll see **Your service is live at** with a URL like:
-   - `https://resumeiq-api.onrender.com`
-4. **Copy this URL** and keep it for Part 2. Do **not** add a slash at the end.
-
----
-
-# Part 2: Deploy the website on Vercel
-
-The website is the React app. It will call the API using the URL you got from Render.
-
-## 2.1 Open Vercel
-
-1. Go to **https://vercel.com**
-2. Sign in (or sign up with **Continue with GitHub**).
-
-## 2.2 Create a new project
-
-1. On the dashboard, click **Add New…**.
-2. Click **Project**.
-
-## 2.3 Import your repo
-
-1. Find **sinhars102-creator/ResumeIQ** in the list (or search for “ResumeIQ”).
-2. Click **Import** next to it.
-
-## 2.4 Configure build (usually auto-filled)
-
-Check these; Vercel often detects them for Vite:
-
-| Field | Value |
-|--------|--------|
-| **Framework Preset** | Vite |
-| **Build Command** | `npm run build` |
-| **Output Directory** | `dist` |
-| **Install Command** | `npm install` (default) |
-
-Leave **Root Directory** empty.
-
-## 2.5 Add environment variables (important)
-
-Before clicking Deploy:
-
-1. Expand **Environment Variables**.
-2. Add **two** variables:
-
-**Variable 1**
-
-- **Name:** `VITE_OPENAI_API_KEY`
-- **Value:** Your OpenAI API key (from https://platform.openai.com/api-keys).
-- **Environment:** leave all checked (Production, Preview, Development).
-
-**Variable 2**
-
-- **Name:** `VITE_API_URL`
-- **Value:** The Render URL you copied in Part 1 (e.g. `https://resumeiq-api.onrender.com`). **No slash at the end.**
-- **Environment:** leave all checked.
-
-3. Click **Add** for each so both appear in the list.
-
-## 2.6 Deploy
-
-1. Click **Deploy**.
-2. Wait for the build to finish (1–2 minutes).
-3. When it’s done you’ll see **Congratulations!** and a link like:
-   - `https://resumeiq-xxxx.vercel.app`
-4. Click **Visit** (or open that URL). That is your **live app**.
-
----
-
-# Part 3: You’re live
-
-- **Your website (share this):** the Vercel URL (e.g. `https://resumeiq-xxxx.vercel.app`).
-- **API (used by the app):** the Render URL; you don’t need to share it.
-
-Users can open the Vercel link, upload a resume, search jobs (India/worldwide), get suggestions, and download PDF.
-
----
-
-# Quick checklist
-
-- [ ] Render: Web Service created, **Build** = `npm install`, **Start** = `yarn start` or `npm start`, **APIFY_TOKEN** set.
-- [ ] Render: Service is live and you copied the URL (no trailing slash).
-- [ ] Vercel: Project imported, **VITE_OPENAI_API_KEY** and **VITE_API_URL** (Render URL) set.
-- [ ] Vercel: Deploy succeeded and you opened the Vercel URL.
-
----
-
-# If something goes wrong
-
-| Problem | What to check |
-|--------|----------------|
-| Render deploy fails | Build command must be `npm install`, start command `yarn start` or `npm start`. Check the **Logs** tab. |
-| “Could not reach the server” when searching jobs | In Vercel, **Settings → Environment Variables**: `VITE_API_URL` must be exactly the Render URL (https, no trailing slash). Then **Redeploy** the project. |
-| Job search returns no jobs / error | In Render, **Environment**: `APIFY_TOKEN` must be set. Redeploy the service after adding it. |
-| OpenAI errors (extract resume, suggestions) | In Vercel, `VITE_OPENAI_API_KEY` must be set. Redeploy after adding it. |
-| **"Resume parsing is temporarily unavailable"** (users see this) | Add **VITE_OPENAI_API_KEY** in Vercel → Settings → Environment Variables, then **Redeploy** (Deployments → ⋮ → Redeploy). Key is baked in at build time. |
-| First job search very slow (30–60 s) | On Render’s free tier the API sleeps after ~15 min idle; the first request wakes it. Later requests are fast. |
+## Known gaps accepted for launch
+Open bugs BUG-013 (download dialog focus trap), BUG-015, BUG-016, BUG-017, BUG-023; non-Latin text is not drawn in the PDF (the app warns); the "ResumeIQ" footer on the PDF; no error-monitoring service yet.

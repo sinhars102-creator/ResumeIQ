@@ -1,0 +1,15 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name: "rohan", web: 5802 });
+const p = app.page;
+await p.getByText("+ Add section").scrollIntoViewIfNeeded();
+await p.getByText("+ Add section").click();
+await p.waitForTimeout(500);
+await p.mouse.click(136,851);
+await p.waitForTimeout(500);
+await p.keyboard.type("MBA Finance - Mumbai School of Management Studies - 2010 - 2012\nB.Com - University of Mumbai - 2007 - 2010");
+await shot(p,"rohan","16a");await p.getByRole("button",{name:"Save"}).click({timeout:3000});
+await p.waitForTimeout(1000);
+const t = await p.evaluate(()=>document.body.innerText);
+const i=t.indexOf("EDUCATION"); console.log(i, t.slice(i,i+300));
+await shot(p,"rohan","16-edu-added");
+await app.close();

@@ -38,3 +38,23 @@ server/data/
 # Chrome extension local config (generated from .env)
 extension/config.js
 dist-extension
+
+# QA
+qa/.env.test
+qa/runs/
+qa/node_modules/
+qa/playwright-report/
+test-results/
+
+# QA bots: each persona run makes a full copy of the app plus a browser profile (hundreds of MB). Keep the scripts and reports only.
+qa/personas/*/app/
+qa/personas/*/profile/
+qa/personas/*/corpus/
+qa/personas/*/downloads/
+qa/personas/*/*.log
+qa/personas/*/*.pid
+qa/personas/smoke/
+qa/personas/check/
+qa/.env.test
+qa/personas/*/screens/
+qa/screens-*/

@@ -1,0 +1,10 @@
+import { start, send, waitIdle, shot } from "./lib.mjs";
+import { textToPdf } from "../harness.mjs";
+import fs from "node:fs";
+await textToPdf(fs.readFileSync("resume.txt","utf8"), "/Users/rahulsinha/ResumeIQ/sidebar-event/qa/personas/ananya/old-resume.pdf");
+const app = await start(); const page=app.page;
+await send(page, "I'm applying for GPM roles but my resume isn't getting shortlisted. Can you tell me what's weak?");
+await waitIdle(page);
+await shot(page,"ananya","02-opening");
+console.log(await page.locator("body").innerText());
+await app.close();

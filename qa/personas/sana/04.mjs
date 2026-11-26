@@ -1,0 +1,13 @@
+import { openApp, shot } from "../harness.mjs";
+import fs from "node:fs";
+const app = await openApp({ name: "sana", web: 5805 });
+const p = app.page;
+const box = p.getByPlaceholder(/job description|message|paste/i).last();
+await box.click();
+await box.fill("Okay. Here is the job I am going for:\n\n"+fs.readFileSync("jd.txt","utf8"));
+await shot(p,"sana","06-jd-typed");
+await p.keyboard.press("Enter");
+await p.waitForTimeout(40000);
+await shot(p,"sana","07-jd-reply");
+console.log((await p.locator("body").innerText()).split("Okay. Here is the job").pop());
+await app.close();

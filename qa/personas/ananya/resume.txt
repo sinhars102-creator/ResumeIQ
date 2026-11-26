@@ -1,0 +1,33 @@
+ANANYA MEHTA
+Bengaluru, Karnataka | ananya.mehta.pm@example.com | +91 98450 00000 | linkedin.com/in/ananya-mehta-pm-example
+
+SUMMARY
+Product manager with 6 years of experience in B2B SaaS. Worked on retention, onboarding and pricing. Good at working with engineering, design and sales.
+
+EXPERIENCE
+Senior Product Manager | Finlytic Systems, Bengaluru | Apr 2022 - Present
+- Responsible for the analytics and reporting product used by 1,200+ business customers
+- Led retention improvement initiative; improved 90-day customer retention by 18% (from 61% to 72%) over three quarters
+- Ran a pricing experiment on the mid-tier plan across 3 customer segments; resulted in 9% increase in ARPA with no rise in churn
+- Redesigned the activation funnel (signup to first dashboard published); activation went from 34% to 47%
+- Mentored two junior product managers on discovery and prioritisation
+- Worked with engineering, design and sales teams on quarterly roadmap
+- Wrote PRDs and managed backlog in Jira; built dashboards in SQL and Metabase
+
+Product Manager | Cloudnest Technologies, Pune | Jul 2019 - Mar 2022
+- Owned the self-serve onboarding and billing modules for an HR-tech platform
+- Launched usage-based billing add-on that contributed to 12% of new revenue in first year
+- Ran 20+ customer interviews to shape the integrations roadmap, shipped 4 integrations
+- Reduced support tickets on billing by 27% through in-product invoice clarity changes
+- Coordinated releases with a team of 8 engineers
+
+Associate Product Manager | Zenvoy Labs, Bengaluru | Aug 2018 - Jun 2019
+- Supported the PM on mobile app features for a logistics startup
+- Analysed usage data and wrote user stories
+- Helped run A/B tests on checkout
+
+EDUCATION
+B.E. Computer Science | Visvesvaraya Technological University, Bengaluru | 2018
+
+SKILLS
+Product strategy, Roadmapping, Customer discovery, Prioritisation, A/B testing, SQL, Metabase, Mixpanel, Jira, Go-to-market, Agile

@@ -1,0 +1,12 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name: "rohan", web: 5802 });
+const p = app.page;
+await p.getByText("+ Add section").scrollIntoViewIfNeeded();
+await p.getByText("+ Add section").click();
+await p.waitForTimeout(500);
+await p.mouse.click(136,851);
+await p.waitForTimeout(1000);
+await shot(p,"rohan","15-edu-section");
+const t = await p.evaluate(()=>document.body.innerText);
+const i=t.indexOf("EDUCATION"); console.log(i, t.slice(i,i+300));
+await app.close();

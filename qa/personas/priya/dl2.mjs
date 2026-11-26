@@ -1,0 +1,11 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name: "priya", web: 5803 });
+const p = app.page;
+await p.getByRole("button",{name:/design & download/i}).click();
+await p.waitForTimeout(1500);
+await p.getByRole("button",{name:/continue with/i}).click();
+await p.waitForTimeout(2500);
+await shot(p,"priya","22-continue");
+console.log((await p.locator("[role=dialog]").allInnerTexts()).join("\n---\n").slice(0,1500));
+console.log(await p.getByRole("button").allInnerTexts().then(a=>a.filter(Boolean).join(" | ")));
+await app.close();

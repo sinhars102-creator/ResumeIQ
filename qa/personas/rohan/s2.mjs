@@ -1,0 +1,11 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name: "rohan", web: 5802 });
+const p = app.page;
+const box = p.getByPlaceholder(/paste your resume/i);
+await box.click();
+await p.keyboard.type("I need an executive-quality resume. I don't want the AI to rewrite everything or make it look flashy. What do you need from me before you edit anything?");
+await p.keyboard.press("Enter");
+await p.waitForTimeout(20000);
+await shot(p,"rohan","02-first-reply");
+console.log(app.calls);
+await app.close();

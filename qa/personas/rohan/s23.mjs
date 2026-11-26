@@ -1,0 +1,12 @@
+import { openApp, shot } from "../harness.mjs";
+const [,, tpl, label, font] = process.argv;
+const app = await openApp({ name: "rohan", web: 5802 });
+const p = app.page;
+await p.getByRole("button",{name:/Design & download/}).click();
+await p.waitForTimeout(1500);
+await p.getByText(tpl,{exact:true}).first().click();
+await p.waitForTimeout(1200);
+if (font) { await p.getByText(font,{exact:true}).first().click(); await p.waitForTimeout(1500); }
+await p.mouse.move(720,500);
+for (let k=0;k<4;k++){ await p.mouse.wheel(0,700); await p.waitForTimeout(900); await shot(p,"rohan",`${label}-${k}`);}
+await app.close();

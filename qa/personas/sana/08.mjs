@@ -1,0 +1,12 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name: "sana", web: 5805 });
+const p = app.page;
+const b = p.getByPlaceholder(/Message/).last();
+await b.click(); await b.fill("Meal O'Clock: the idea was to own the 7pm hunger moment, short films showing the 'what's for dinner' argument at home. Sunday Thali: we handed 40 food creators a Sunday family-lunch theme instead of scripted ad reads, so the content felt homemade. Please rewrite both, metrics untouched.");
+await p.keyboard.press("Enter");
+await p.waitForTimeout(25000);
+await shot(p,"sana","11-ideas");
+const t=(await p.locator("body").innerText());
+console.log(t.slice(t.indexOf("Meal O'Clock: the idea")));
+console.log(t.split("Dismissed")[1].slice(-1800));
+await app.close();

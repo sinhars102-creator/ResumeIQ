@@ -1,0 +1,14 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name:"vikram", web:5804 });
+const p=app.page;
+await p.locator("input[type=file]").first().setInputFiles("resume.pdf");
+await p.waitForTimeout(1500);
+await shot(p,"vikram","02-attached");
+const box=p.getByPlaceholder(/paste your resume/i);
+await box.click();
+await p.keyboard.type("I need to apply by tonight. Can you make my current resume fit a National Sales Manager role? I have 20 minutes, please dont ask me 15 questions.");
+await p.keyboard.press("Enter");
+await p.waitForTimeout(30000);
+await shot(p,"vikram","03-after-send");
+console.log(await p.locator("body").innerText());
+await app.close();

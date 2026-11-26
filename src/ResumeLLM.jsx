@@ -14,16 +14,21 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { supabase, loadProfile, saveProfile } from "./easyApply/supabaseClient.js";
 import { extractResumeFromText, readResumeFileText, downloadResumePdf, SAMPLE_RESUME } from "./ResumeIQ.jsx";
-import { finalResume, textAt, applyEdit, matchScore, scoreImpact, captureUndo, applyUndo, lineOrder } from "./tailorEdits.js";
+import { finalResume, textAt, applyEdit, matchScore, scoreImpact, captureUndo, applyUndo, lineOrder, isExtraTarget, isSectionTarget } from "./tailorEdits.js";
 import ResumeWorkspace from "./ResumeWorkspace.jsx";
-import { isReady, finalText as finalTextFor } from "./workspaceText.js";
+import { isReady, finalText as finalTextFor, ownershipWarning } from "./workspaceText.js";
+import { runManual, recordApplied, undoStep, redoStep, undoCard, canUndoCard } from "./editHistory.js";
+import { syncCards, restoreCard, removalWarning, emptiesSection, openNotice } from "./cardState.js";
+import { isWholeResumeRequest } from "./workspaceNav.js";
+import { PRICE_LINE } from "./pricing.js";
+import { reopenCookieSettings } from "./googleAds.js";
 import { tokenizeForMatch } from "./matchScore.js";
 import { reviewResume, CATEGORIES, normalizeContactField, setContactField } from "./resumeReview.js";
 import { buildResumePdf } from "./resumePdf.js";
 import { checkRead } from "./readCheck.js";
 import DownloadPaywall from "./DownloadPaywall.jsx";
-import { templateFormat } from "./resumeTemplates.js";
-import { extraSections, educationLine, educationDetails } from "./resumeSections.js";
+import { templateFormat, designFormat } from "./resumeTemplates.js";
+import { extraSections, extraLines, educationLine, educationDetails, sectionPlan } from "./resumeSections.js";
 import { limitState, mergeStores } from "./rllmSync.js";
 import { track } from "./analytics.js";
 import { trackSignUp } from "./googleAds.js";
@@ -71,8 +76,23 @@ const tone = (score) => (score >= 75 ? "good" : score >= 50 ? "ok" : "low");
 
 /** "Kartly · bullet 2", "Summary", … – where on the resume a suggestion lands. */
 function whereOf(resume, target, category) {
-  const fixed = { C: "Contact details", T: "Headline", S: "Summary", K: "Skills", Z: "Certifications" }[target];
+  const fixed = { C: "Contact details", T: "Headline", S: "Summary", K: "Skills", Z: "Certifications", D: "Education" }[target];
   if (fixed) return fixed;
+  if (/^D\d+$/.test(target || "")) return "Education";
+  if (isSectionTarget(target)) return sectionPlan(resume, { include: ["summary", "education", "skills", "certifications"] }).find((x) => x.key === target.slice(4))?.title || "Section";
+  if (isExtraTarget(target)) {
+    const [, key, a, b] = target.split(":");
+    const sec = extraLines(resume).find((x) => x.key === key);
+    if (!sec) return "Whole resume";
+    if (sec.kind === "entries") {
+      const entry = sec.items.find((e) => e.id === `X:${key}:${a}`);
+      const at = entry?.heading || sec.title;
+      if (b == null) return `${at} · new bullet`;
+      return `${at} · bullet ${Math.max(1, (entry?.bullets || []).findIndex((x) => x.id === target) + 1)}`;
+    }
+    if (a == null) return sec.title;
+    return `${sec.title} · item ${Math.max(1, sec.items.findIndex((x) => x.id === target) + 1)}`;
+  }
   const m = /^E(\d+)(?:B(\d+))?$/.exec(target || "");
   if (m) {
     const role = resume?.experience?.[+m[1]] || {};
@@ -104,10 +124,30 @@ async function post(path, body) {
   return data;
 }
 
+/** Drop pending suggestions whose resume line no longer exists (a changed resume or a cross-device sync), so one bad entry cannot blank the page. */
+function withoutStaleSuggestions(store) {
+  const chats = store.chats.map((c) => {
+    if (!c || !c.resume || !c.suggestions || typeof c.suggestions !== "object") return c;
+    const kept = Object.fromEntries(
+      Object.entries(c.suggestions).filter(([, x]) => {
+        if (!x || typeof x !== "object") return false; // a null entry would crash the page
+        if (x.status !== "pending" || !x.edit) return true;
+        try {
+          return textAt(c.resume, x.edit.target) != null;
+        } catch {
+          return false;
+        }
+      }),
+    );
+    return Object.keys(kept).length === Object.keys(c.suggestions).length ? c : { ...c, suggestions: kept };
+  });
+  return { ...store, chats };
+}
+
 function loadStore() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY) || "null");
-    if (s && Array.isArray(s.chats)) return s;
+    if (s && Array.isArray(s.chats)) return withoutStaleSuggestions(s);
   } catch {
     // Unreadable or blocked storage: start fresh.
   }
@@ -313,11 +353,12 @@ export default function ResumeLLM() {
   const inputRef = useRef(null);
   const listRef = useRef(null);
   const resumeRef = useRef(null);
+  const heldQuestion = useRef(""); // what the person asked before their resume was in
   const pendingResumeRef = useRef(null); // a resume read before signing in
 
   // ---- account ----
   useEffect(() => {
-    track("rllm_opened");
+    track("rllm_opened", { path: window.location.pathname });
     if (!supabase) return void setSession(null);
     supabase.auth.getSession().then(async ({ data }) => {
       setSession(data.session || null);
@@ -367,7 +408,8 @@ export default function ResumeLLM() {
         current = newChat(accountResume);
         chats = [current, ...chats];
       }
-      const next = { ...fn(current), updatedAt: Date.now() };
+      // Cards written against a line that has since changed are set aside here, whatever changed it.
+      const next = { ...syncCards(fn(current)), updatedAt: Date.now() };
       return { chats: chats.map((c) => (c.id === current.id ? next : c)), activeId: current.id };
     });
   }
@@ -413,7 +455,7 @@ export default function ResumeLLM() {
   const hasActions = (m) => m.role === "user" && !m.file && (m.full || m.typed);
 
   // The workspace conversation (laptop and phone): your messages and the replies, kept with the chat.
-  const addThread = (...msgs) => update((c) => ({ ...c, thread: [...(c.thread || []), ...msgs.map((m) => ({ id: uid(), ...m }))].slice(-60) }));
+  const addThread = (...msgs) => update((c) => ({ ...c, thread: [...(c.thread || []), ...msgs.map((m) => ({ id: uid(), ...m }))].slice(-200) }));
 
   function startNewChat() {
     const c = newChat(accountResume || chat?.resume || null);
@@ -429,7 +471,8 @@ export default function ResumeLLM() {
   const suggestions = useMemo(() => chat?.suggestions || {}, [chat]);
   const messages = useMemo(() => chat?.messages || [], [chat]);
   const score = resume && jd ? matchScore(resume, { title: job?.title, jd }) : null;
-  const improving = chat?.mode === "improve";
+  const editingOnly = chat?.mode === "edit"; // the person edits the resume directly, with or without the AI
+  const improving = chat?.mode === "improve" || editingOnly; // no job to score against: the resume-strength score
   const pages = useMemo(() => (resume ? pageCount(resume) : null), [resume]);
   // Live: recomputed from the resume as fixes are applied.
   const review = useMemo(() => (resume ? reviewResume(resume, { pages }) : null), [resume, pages]);
@@ -457,6 +500,11 @@ export default function ResumeLLM() {
     const roles = (parsed.experience || []).length;
     say({ role: "bot", kind: "resume", text: `Got it${firstName(parsed) ? `, ${firstName(parsed)}` : ""}. ${parsed.title || "Your resume"} · ${roles} role${roles === 1 ? "" : "s"} · ${(parsed.skills || []).length} skills${s && parsed !== SAMPLE_RESUME ? " – saved to your account." : "."}` });
     say({ role: "bot", kind: "choose", text: "What would you like to do?" });
+    // A question asked before the resume was in: put it back in the box, ready to send.
+    if (heldQuestion.current) {
+      setInput(heldQuestion.current);
+      heldQuestion.current = "";
+    }
   }
 
   async function readResume(fileOrText, { again = false } = {}) {
@@ -646,7 +694,8 @@ export default function ResumeLLM() {
     if (!resume) {
       if (text.length >= MIN_RESUME_CHARS) return readResume(text);
       say({ role: "user", text });
-      say({ role: "bot", text: "Let's start with your resume: attach it with + or paste its full text here." });
+      heldQuestion.current = text;
+      say({ role: "bot", text: "Good question. I'll answer it from your actual resume, so attach it with + or paste its full text here. Once it's in, I'll have your question ready to send." });
       return;
     }
     if (!jd && (!m || m.kind === "paste")) {
@@ -791,9 +840,9 @@ export default function ResumeLLM() {
   const [wsStatus, setWsStatus] = useState("");
   const finalTextOf = (x) => finalTextFor(x, blankValues[x.id]);
   const wsSet = (id, patch) => update((c) => ({ ...c, suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], ...patch } } }));
-  const flashLine = (line) => {
+  const flashLine = (line, ms = 1300) => {
     setFlash(line);
-    setTimeout(() => setFlash(null), 1300);
+    setTimeout(() => setFlash(null), ms);
   };
   /** New suggestions from the chat (answers, "do it", ask): pinned after the existing ones. */
   function addCards(c, cards) {
@@ -810,14 +859,17 @@ export default function ResumeLLM() {
   const scoreNow = (r) => (improving ? reviewResume(r, { pages }).overall : matchScore(r, { title: job?.title, jd }));
 
   const act = {
+    /** Funnel events from the review screen. */
+    event: (name, props) => track(name, props),
     opened: (id, from) => track("suggestion_opened", { suggestion_id: id, type: suggestions[id]?.category || suggestions[id]?.source, source: from }),
     apply(id, text) {
       const s = suggestions[id];
       if (!s?.edit) return;
+      if (emptiesSection(resume, s.edit)) return setWsStatus("Not applied: this would leave the section empty. Ask for a replacement first.");
       update((c) => {
         const cur = c.suggestions[id];
         const undo = captureUndo(c.resume, cur.edit);
-        return { ...c, resume: applyEdit(c.resume, cur.edit, text ?? cur.edit.after), suggestions: { ...c.suggestions, [id]: { ...cur, status: "applied", undo, appliedText: text ?? cur.edit.after ?? null } } };
+        return recordApplied({ ...c, resume: applyEdit(c.resume, cur.edit, text ?? cur.edit.after), suggestions: { ...c.suggestions, [id]: { ...cur, status: "applied", undo, appliedText: text ?? cur.edit.after ?? null } } }, [id]);
       });
       flashLine(s.edit.target);
       setWsStatus(`Applied to ${s.where}`);
@@ -825,36 +877,46 @@ export default function ResumeLLM() {
     },
     undo(id) {
       const s = suggestions[id];
-      update((c) => ({ ...c, resume: applyUndo(c.resume, c.suggestions[id].undo), suggestions: { ...c.suggestions, [id]: { ...c.suggestions[id], status: "pending", undo: null } } }));
+      if (!canUndoCard(chat, id)) return setWsStatus("A newer change sits on top of this one. Use Undo in the toolbar to step back in order.");
+      update((c) => undoCard(c, id));
       flashLine(s.edit?.target);
       setWsStatus(`Undid change to ${s.where}`);
       track("suggestion_undone", { suggestion_id: id });
     },
+    canUndoCard: (id) => canUndoCard(chat, id),
     dismiss(id) {
       wsSet(id, { status: "dismissed" });
       setWsStatus(`Dismissed suggestion for ${suggestions[id].where}`);
       track("suggestion_dismissed", { suggestion_id: id, type: suggestions[id].category || suggestions[id].source });
     },
     restore(id) {
-      wsSet(id, { status: "pending" });
+      update((c) => restoreCard(c, id));
     },
     reset() {
       update((c) => ({
         ...c,
         resume: c.original || c.resume,
+        history: [],
+        future: [],
         suggestions: Object.fromEntries(Object.entries(c.suggestions).map(([k, x]) => [k, x.status === "applied" || x.status === "dismissed" ? { ...x, status: "pending", undo: null } : x])),
       }));
       setWsStatus("Reset to your original resume");
       track("tailor_reset");
     },
-    applyAll() {
+    applyAll(only = null) {
       // Decide outside the state update (React may run an update function twice in development).
       const ready = [];
       const waiting = [];
+      const held = [];
       Object.values(suggestions)
-        .filter((x) => x.status === "pending" && x.edit && !x.question && !x.action)
+        .filter((x) => x.status === "pending" && x.edit && !x.question && !x.action && (!only || only.includes(x.id)))
         .sort((a, b) => a.pin - b.pin)
-        .forEach((x) => (isReady(x, blankValues[x.id]) ? ready.push({ id: x.id, text: finalTextOf(x) }) : waiting.push(x.pin)));
+        .forEach((x) => {
+          if (!isReady(x, blankValues[x.id])) return waiting.push(x.pin);
+          // A supporting role rewritten as ownership ("Assisted" -> "Led") is never applied in bulk: the person confirms it.
+          if (ownershipWarning(textAt(resume, x.edit.target), finalTextOf(x)) || removalWarning(resume, x.edit)) return held.push(x.pin);
+          ready.push({ id: x.id, text: finalTextOf(x) });
+        });
       update((c) => {
         let res = c.resume;
         const all = { ...c.suggestions };
@@ -864,10 +926,27 @@ export default function ResumeLLM() {
           res = applyEdit(res, x.edit, text ?? x.edit.after);
           all[id] = { ...x, status: "applied", undo, appliedText: text ?? null };
         });
-        return { ...c, resume: res, suggestions: all };
+        return recordApplied({ ...c, resume: res, suggestions: all }, ready.map((r) => r.id));
       });
-      setWsStatus(`Applied ${ready.length}${waiting.length ? `. #${waiting.join(", #")} need${waiting.length > 1 ? "" : "s"} your input first` : ""}`);
-      track("apply_all_clicked", { applied_count: ready.length, skipped_needing_input: waiting.length });
+      setWsStatus(`Applied ${ready.length}${waiting.length ? `. #${waiting.join(", #")} need${waiting.length > 1 ? "" : "s"} your input first` : ""}${held.length ? `. #${held.join(", #")} left for you to confirm (wording or removals)` : ""}`);
+      track("apply_all_clicked", { applied_count: ready.length, skipped_needing_input: waiting.length, held_for_confirmation: held.length });
+    },
+    /** The person changes the resume themselves (same actions the AI uses). */
+    manual(edit, label = "Updated your resume") {
+      update((c) => runManual(c, edit));
+      if (edit.target) flashLine(edit.target);
+      setWsStatus(label);
+      track("resume_edited_manually", { op: edit.op, target: String(edit.target || "").replace(/\d+/g, "#") });
+    },
+    undoLast() {
+      update((c) => undoStep(c));
+      setWsStatus("Undid your last change");
+      track("resume_undo");
+    },
+    redo() {
+      update((c) => redoStep(c));
+      setWsStatus("Redid the change");
+      track("resume_redo");
     },
     saveEdit(id, text) {
       wsSet(id, { custom: text });
@@ -940,23 +1019,43 @@ export default function ResumeLLM() {
         setBusy(false);
       }
     },
-    async ask(text) {
+    /**
+     * A message from the review screen. With a suggestion open it is about that suggestion (its own conversation);
+     * a request about the whole resume ("make it one page") always goes to the general conversation.
+     */
+    async ask(text, { sid = null } = {}) {
+      const whole = isWholeResumeRequest(text);
+      const about = !whole && sid && suggestions[sid] ? suggestions[sid] : null;
+      const scope = about ? { sid: about.id } : {};
       // chatFor reads the thread as it was when this message was sent, so the message itself isn't sent twice.
-      const sent = chatFor(text);
-      addThread({ role: "user", text });
+      const message = about ? `About suggestion #${about.pin} "${about.title}" (${about.where}${about.edit?.target ? `, line ${about.edit.target}` : ""}). ${text}` : text;
+      const sent = chatFor(message);
+      addThread({ role: "user", text, ...scope });
       setBusy(true);
       try {
         const data = await sent;
-        const cards = data.suggestions || [];
+        const cards = (data.suggestions || []).map((c) => (about ? { ...c, parent: about.id } : c));
         if (cards.length) update((c) => addCards(c, cards));
-        addThread({ role: "bot", text: `${data.reply}${cards.length ? ` I've added ${cards.length} suggestion${cards.length > 1 ? "s" : ""} to the list: check and apply.` : ""}` });
+        addThread({ role: "bot", text: data.reply, ...scope });
+        // The new changes appear in the conversation as proposals; several at once come with one "Apply all" receipt.
+        if (cards.length) addThread({ role: "bot", kind: cards.length > 1 ? "receipt" : "proposal", ids: cards.map((c) => c.id), ...scope });
         setWsStatus("");
-        track("rllm_chat_sent", { mode: "workspace", has_jd: !!jd });
+        track("rllm_chat_sent", { mode: "workspace", has_jd: !!jd, scoped: !!about, whole });
       } catch (e) {
-        addThread({ role: "bot", text: `Sorry, that didn't work (${e.message}). Please try again.` });
+        addThread({ role: "bot", text: `Sorry, that didn't work (${e.message}). Please try again.`, ...scope });
       } finally {
         setBusy(false);
       }
+    },
+    /** Show where a set of changes landed, for a few seconds. */
+    showLines(ids) {
+      const lines = ids.map((id) => suggestions[id]?.edit?.target).filter(Boolean);
+      if (lines.length) flashLine(lines, 3000);
+    },
+    /** Undo several applied cards together (newest first), skipping any a newer change sits on top of. */
+    undoMany(ids) {
+      update((c) => [...ids].reverse().reduce((acc, id) => (canUndoCard(acc, id) ? undoCard(acc, id) : acc), c));
+      setWsStatus("Undid those changes");
     },
     download() {
       const list = Object.values(suggestions);
@@ -1037,6 +1136,24 @@ export default function ResumeLLM() {
     setTimeout(() => inputRef.current?.focus(), 50);
   }
 
+  /** Open the resume editor straight away (no job description needed): edit mode on, the chat still there for the AI. */
+  function openEditor() {
+    update((c) => {
+      const base = c.resume || resume;
+      return {
+        ...c,
+        resume: base,
+        workspace: true,
+        startInEdit: true,
+        mode: Object.keys(c.suggestions || {}).length ? c.mode : "edit",
+        original: c.original || base,
+        baseStrength: c.baseStrength ?? reviewResume(base, { pages }).overall,
+        suggestions: c.suggestions || {},
+      };
+    });
+    track("rllm_edit_opened");
+  }
+
   const starters = !resume
     ? [
         { icon: "📄", label: "Upload my resume", run: () => fileRef.current?.click() },
@@ -1048,9 +1165,10 @@ export default function ResumeLLM() {
           ...(chat?.mode === "tailor"
             ? [{ icon: "🧪", label: "Try a sample job description", run: () => send(SAMPLE_JD) }]
             : improving
-              ? [{ icon: "🎯", label: "Tailor it to a job", run: startTailor }]
+              ? [...(editingOnly ? [] : [{ icon: "✏️", label: "Edit resume", run: openEditor }]), { icon: "🎯", label: "Tailor it to a job", run: startTailor }]
               : [
-                  { icon: "✏️", label: "Improve my resume", run: startImprove },
+                  { icon: "✏️", label: "Edit resume", run: openEditor },
+                  { icon: "✨", label: "Improve my resume", run: startImprove },
                   { icon: "🎯", label: "Tailor it to a job", run: startTailor },
                 ]),
           ...(improving ? [{ icon: "📏", label: "Make it 1 page", run: () => send("Make my resume fit on one page: tighten wording and drop the least important bullets from older roles.") }] : []),
@@ -1189,7 +1307,7 @@ export default function ResumeLLM() {
   const sidebar = (
     <nav className="rl-side" aria-label="Chats">
       <div className="rl-brand">
-        <a href="/" aria-label="ResumeIQ home"><span className="rl-mark">◈</span> Resume LLM</a>
+        <a href="/" aria-label="ResumeIQ home"><span className="rl-mark">◈</span> ResumeIQ</a>
         <button type="button" className="rl-icon rl-close-drawer" onClick={() => setDrawer(false)} aria-label="Close menu">{Icon.close}</button>
       </div>
       <button type="button" className="rl-newchat" onClick={startNewChat}>✎ New chat</button>
@@ -1229,7 +1347,7 @@ export default function ResumeLLM() {
       <main className="rl-main">
         <header className="rl-top">
           <button type="button" className="rl-icon rl-menu" onClick={() => setDrawer(true)} aria-label="Menu">{Icon.menu}</button>
-          <span className="rl-top-title">{chat?.title && chat.title !== "New chat" ? chat.title : "Resume LLM"}</span>
+          <span className="rl-top-title">{chat?.title && chat.title !== "New chat" ? chat.title : "ResumeIQ"}</span>
           <div className="rl-top-right">
             {/* Like ChatGPT: a new-chat button and the profile, nothing else. */}
             <button type="button" className="rl-icon" onClick={startNewChat} aria-label="New chat" title="New chat">{Icon.newChat}</button>
@@ -1258,19 +1376,25 @@ export default function ResumeLLM() {
           <ResumeWorkspace
             resume={resume}
             suggestions={suggestions}
-            title={improving ? "Improving your resume" : `Tailoring for ${job?.title || "this job"}`}
+            title={editingOnly ? "Editing your resume" : improving ? "Improving your resume" : `Tailoring for ${job?.title || "this job"}`}
             subtitle={improving ? "" : job?.company || ""}
             score={wsScore}
             busy={busy}
             status={wsStatus}
             thread={chat?.thread || []}
+            pages={pages}
+            job={job}
             blankValues={blankValues}
             setBlankValues={setBlankValues}
             flash={flash}
             deltaOf={wsDelta}
             keywordsOf={wsKeywords}
             act={act}
+            canUndo={(chat?.history || []).length > 0}
+            canRedo={(chat?.future || []).length > 0}
+            startInEdit={!!chat?.startInEdit}
             extras={[
+              ...(editingOnly ? [{ label: "Improve my resume", run: startImprove }] : []),
               improving
                 ? { label: "Tailor it to a job", run: () => { update((c) => ({ ...c, workspace: false })); startTailor(); } }
                 : { label: "Improve my resume", run: startImprove },
@@ -1287,6 +1411,16 @@ export default function ResumeLLM() {
                 <button key={s.label} type="button" className="rl-starter" onClick={s.run} disabled={busy}><span aria-hidden="true">{s.icon}</span> {s.label}</button>
               ))}
             </div>
+            <section className="rl-about" aria-label="About ResumeIQ">
+              <h2>Tailor your resume to any job, with edits you approve</h2>
+              <ol>
+                <li><b>Add your resume</b> and paste the job description.</li>
+                <li><b>Review each suggested change</b>: accept, edit or skip. Nothing is added that your resume doesn't already support.</li>
+                <li><b>Edit anything yourself</b>, choose a template and download a PDF.</li>
+              </ol>
+              <p className="rl-about-price">{PRICE_LINE} <a href="/refund.html">Refund policy</a></p>
+            </section>
+            <p className="rl-legal">ResumeIQ is operated by Rahul Sinha, India · <a href="/privacy.html">Privacy</a> · <a href="/terms.html">Terms</a> · <a href="/refund.html">Refunds</a> · <a href="/contact.html">Contact</a> · <button type="button" className="rl-linkbtn" onClick={reopenCookieSettings}>Cookie settings</button></p>
           </div>
         ) : (
           <div className={`rl-work${resume ? " rl-split" : ""}`}>
@@ -1295,6 +1429,7 @@ export default function ResumeLLM() {
                 <div className="rl-pane-bar">
                   <b>Your resume</b>
                   {applied > 0 && <span className="rl-resume-count">{applied} change{applied > 1 ? "s" : ""} applied</span>}
+                  <button type="button" className="rl-link" onClick={openEditor}>Edit resume</button>
                   <button type="button" className="rl-link rl-pane-full" onClick={() => setResumeOpen(true)}>Full screen</button>
                 </div>
                 <ResumePaper resume={resume} markers={markers} flash={flash} onMarker={jumpToMessage} active={active} />
@@ -1403,10 +1538,10 @@ export default function ResumeLLM() {
           resume={finalResume(resume)}
           session={session}
           paymentsRequired={!!supabase}
-          notice={Object.values(suggestions).some((s) => s.status === "pending" || s.status === "queued") ? "Some suggestions are still open." : ""}
-          buildAndSave={(templateId) => {
+          notice={openNotice(suggestions)}
+          buildAndSave={(templateId, design) => {
             const out = finalResume(resume);
-            downloadResumePdf(out, typeof out.photoUrl === "string" && out.photoUrl.startsWith("data:") ? out.photoUrl : null, templateFormat(templateId));
+            downloadResumePdf(out, typeof out.photoUrl === "string" && out.photoUrl.startsWith("data:") ? out.photoUrl : null, designFormat(templateId, design));
             track("rllm_downloaded", { applied, score, template: templateId });
           }}
           onClose={() => setDownload(false)}

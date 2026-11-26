@@ -1,0 +1,11 @@
+import { start, waitIdle, shot } from "./lib.mjs";
+const app = await start(); const page=app.page;
+await page.waitForTimeout(2000);
+await shot(page,"ananya","09a-restored");
+console.log((await page.locator("body").innerText()).slice(0,300));
+await page.getByRole("button",{name:"Apply to resume"}).first().click();
+await page.waitForTimeout(1500);
+const card9 = page.locator("text=List the tools you already mention").first();
+await card9.scrollIntoViewIfNeeded();
+await shot(page,"ananya","09b-skillcard");
+await app.close();

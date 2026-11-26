@@ -22,7 +22,8 @@ function callLLM(args) {
   return Promise.race([callLLMRaw(args), timeout]).finally(() => clearTimeout(timer));
 }
 import { tokenizeForMatch, buildResumeCorpus } from "../src/matchScore.js";
-import { textAt, scoreImpact } from "../src/tailorEdits.js";
+import { textAt, scoreImpact, isExtraTarget, isSectionTarget, extraSlot } from "../src/tailorEdits.js";
+import { extraLines, extraSections, educationLine, educationDetails, sectionPlan } from "../src/resumeSections.js";
 import { reviewResume, WEAK_START, contactParts, normalizeContactField, setContactField } from "../src/resumeReview.js";
 
 // A suggestion that lowers the job match by more than this (it drops the job's keywords) is left out.
@@ -71,6 +72,37 @@ const SKILL_WORDS = stems(`sql python java javascript typescript react angular n
   fulfilment fulfillment transportation routing pricing compliance gdpr hipaa sox audit budgeting forecasting accounting ifrs
   gaap treasury hris recruiting payroll cybersecurity encryption iam sso oauth blockchain iot embedded fpga cad solidworks
   autocad matlab simulink hvac lims gmp haccp iso itil pmp prince2 cfa cpa mba`);
+
+// One- and two-letter skills (Go, R, C#, K8s, AI, ML) vanish from stems(), so they are checked as whole tokens.
+// "Go", "R" and "C" are also ordinary letters/words, so only the capitalised form counts as a skill.
+const SHORT_SKILL_SET = new Set(["c#", "c++", "f#", "ai", "ml", "k8s", "s3", "bi"]);
+const CAPS_ONLY = new Set(["ai", "ml", "bi"]); // "ml" is millilitres, "bi" a prefix: only AI, ML, BI count
+const NOT_A_SKILL_AFTER_GO = /^(beyond|to|above|live|further|ahead|back|out|for|the|through|on|with|after|before|and then)\b/i;
+export function shortSkillsIn(text) {
+  const src = String(text || "");
+  const out = new Set();
+  for (const m of src.matchAll(/(?<![A-Za-z0-9+#\/&.-])([A-Za-z][A-Za-z0-9+#]{0,2})(?![A-Za-z0-9+#\/&-])/g)) {
+    const t = m[1];
+    const low = t.toLowerCase();
+    if (t === "Go") {
+      // "Go beyond", "Go to market" are ordinary words; "Go and Python", "Go, SQL" are the language.
+      if (NOT_A_SKILL_AFTER_GO.test(src.slice(m.index + 2).trimStart())) continue;
+      out.add("go");
+    } else if (t === "R" || t === "C") out.add(low);
+    else if (SHORT_SKILL_SET.has(low) && (!CAPS_ONLY.has(low) || t === t.toUpperCase())) out.add(low);
+  }
+  return out;
+}
+// Seniority words a candidate must have earned: a title or summary may not gain one the resume never shows.
+// Only unambiguous words are checked everywhere. "lead", "head" and "staff" are also ordinary words ("lead generation",
+// "staff scheduling", "can lead teams"), so they count only as a title prefix before a role noun ("Lead Product Manager").
+const SENIORITY = /\b(senior|sr|principal|director|vp|vice president|chief)\b/gi;
+const TITLE_PREFIX = /\b(lead|head|staff)\s+(of\s+)?(product|program|project|software|data|ml|design|engineer|engineering|manager|analyst|developer|designer|pm|architect)\b/gi;
+const seniorityIn = (text, { title = false } = {}) => {
+  const found = new Set([...String(text || "").matchAll(SENIORITY)].map((m) => m[1].toLowerCase()));
+  if (title) for (const m of String(text || "").matchAll(TITLE_PREFIX)) found.add(m[1].toLowerCase());
+  return found;
+};
 const esc = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 /** Is this unclaimed job word a skill-type claim (see SKILL_WORDS)? */
@@ -100,16 +132,24 @@ export function unsupportedClaims(text, ctx, { strict = false } = {}) {
   const words = tokenizeForMatch(clean).filter((w) => bad.has(stem(w)));
   const wordsOut = [...new Set(words.map((w) => w.replace(/[^a-z0-9+#/-]/g, "")))].filter(Boolean);
   // Rewording with a job description: only skill-type job words are claims (strict mode keeps every new word).
-  return strict || ctx.strict ? wordsOut : wordsOut.filter((w) => skillLike(w, ctx.jdText));
+  const longOut = strict || ctx.strict ? wordsOut : wordsOut.filter((w) => skillLike(w, ctx.jdText));
+  const shortOut = [...shortSkillsIn(clean)].filter((t) => !ctx.shortHave.has(t) && (strict || ctx.strict || ctx.shortJd.has(t)));
+  return [...new Set([...longOut, ...shortOut])];
 }
 
 /** What the candidate has claimed (resume + their own chat messages) and what the job asks for. */
 export function claimContext(resume, jd, userText = "", { strict = false } = {}) {
+  const extrasText = extraSections(resume).flatMap((x) => x.items.flatMap((i) => (typeof i === "string" ? [i] : [i.heading, ...i.bullets]))).join("\n");
+  const corpus = `${buildResumeCorpus(resume)}\n${extrasText}\n${resume?.contact || ""}\n${(resume?.education || []).map((e) => [e.degree, e.school].join(" ")).join("\n")}\n${userText}`;
   return {
     known: numbersIn(`${resumeLines(resume)}\n${userText}`),
-    supported: stems(`${buildResumeCorpus(resume)}\n${resume?.contact || ""}\n${(resume?.education || []).map((e) => [e.degree, e.school].join(" ")).join("\n")}\n${userText}`),
+    supported: stems(corpus),
     jd: stems(jd || ""),
     jdText: jd || "",
+    shortHave: shortSkillsIn(corpus),
+    shortJd: shortSkillsIn(jd || ""),
+    corpusLower: corpus.toLowerCase(),
+    seniorityHave: seniorityIn(corpus, { title: true }),
     // No job description (improving the resume on its own): every new word must come from the candidate.
     strict,
   };
@@ -132,19 +172,40 @@ function onePerLine(list) {
 }
 
 
-/** The resume as numbered lines, for the prompt. */
+/**
+ * The resume as numbered lines, for the prompt. Built from the same section list as the screen and the PDF
+ * (extraLines), so a section the candidate can see is a section the AI can read and edit. It also names the sections
+ * the resume does NOT have, so the AI can say so truthfully instead of guessing.
+ */
 export function resumeLines(resume) {
   const lines = [];
+  if (resume?.name) lines.push(`(name) ${resume.name}`);
   if (resume?.contact) lines.push(`[C] ${resume.contact}`);
   if (resume?.title) lines.push(`[T] ${resume.title}`);
   if (resume?.summary) lines.push(`[S] ${resume.summary}`);
   (resume?.experience || []).forEach((role, i) => {
+    if (!role || role.removed) return;
     lines.push(`[E${i}] ${[role.role, role.company, role.period].filter(Boolean).join(" · ")}`);
     (role.bullets || []).forEach((b, j) => b != null && lines.push(`  [E${i}B${j}] ${b}`));
   });
-  (resume?.education || []).forEach((e) => lines.push(`(education) ${[e.degree, e.school, e.year].filter(Boolean).join(" · ")}`));
+  lines.push("## Education [D]");
+  (resume?.education || []).forEach((e, i) => !e?.removed && lines.push(`  [D${i}] ${[educationLine(e), ...educationDetails(e)].filter(Boolean).join(" · ")}`));
   if (resume?.skills?.length) lines.push(`[K] Skills: ${resume.skills.join(", ")}`);
   if (resume?.certifications?.length) lines.push(`[Z] Certifications: ${resume.certifications.join(", ")}`);
+  const extras = extraLines(resume);
+  extras.forEach((sec) => {
+    lines.push(`## ${sec.title}${sec.readOnly ? " (read only)" : sec.kind === "entries" ? "" : ` [X:${sec.key}]`}`);
+    if (sec.kind === "entries") {
+      sec.items.forEach((e) => {
+        lines.push(`[${e.id}] ${[e.heading, e.meta].filter(Boolean).join(" · ")}`);
+        e.bullets.forEach((b) => lines.push(`  [${b.id}] ${b.text}`));
+      });
+    } else sec.items.forEach((x) => lines.push(x.id ? `  [${x.id}] ${x.text}` : `  ${x.text}`));
+  });
+  const has = sectionPlan(resume).map((x) => x.title);
+  const missing = ["Summary", "Experience", "Education", "Skills", "Certifications", "Projects", "Volunteering", "Achievements", "Publications", "Languages", "Interests"].filter((n) => !has.includes(n));
+  const plan = sectionPlan(resume);
+  lines.push(`SECTIONS ON THIS RESUME, top to bottom: ${plan.map((x) => `${x.title} [SEC:${x.key}]`).join(", ") || "none"}. NOT ON THIS RESUME: ${missing.join(", ")}.`);
   return lines.join("\n");
 }
 
@@ -166,11 +227,106 @@ function withoutInventedNumbers(after, known) {
  * Keep only well-formed edits on lines that exist; strip invented numbers. An edit that brings in job
  * terms the candidate never claimed comes back as { unsupported: [...] } so the caller asks instead.
  */
+/** Same words once look-alike characters, case and punctuation are ignored (letters of any script count). */
+export const plainText = (t) => String(t || "").normalize("NFKC").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+const samePlain = (a, b) => plainText(a) === plainText(b);
+
+/** Whole-section edits: remove it, move it, rename it. These change layout, not facts, so nothing is claimed. */
+function cleanSectionEdit(edit, resume) {
+  const { target, op } = edit;
+  const key = target.slice(4);
+  const plan = sectionPlan(resume);
+  const at = plan.findIndex((x) => x.key === key);
+  if (at < 0 || plan[at].readOnly) return null;
+  if (op === "remove_section") return { target, op };
+  if (op === "move_section") {
+    const to = Number.isFinite(+edit.to) ? Math.max(0, Math.min(plan.length - 1, Math.round(+edit.to))) : null;
+    return to == null || to === at ? null : { target, op, to };
+  }
+  if (op === "rename_section") {
+    const after = String(edit.after || "").trim().slice(0, 60);
+    return after && plainText(after) !== plainText(plan[at].title) ? { target, op, after } : null;
+  }
+  return null;
+}
+
+const EDU_FIELDS = ["degree", "school", "year", "grade", "location"];
+/**
+ * Education: add_education {target:"D", entry:{degree, school, year?, grade?, location?}} or update_education
+ * {target:"D0", entry:{...fields to change}}. Education is a fact only the candidate can state, so every word must come
+ * from the resume or from what the candidate said in this chat; nothing is invented, and optional details can be left out.
+ */
+function cleanEducationEdit(edit, resume, ctx) {
+  const { target, op } = edit;
+  if ((op === "add_education") !== (target === "D")) return null;
+  const raw = edit.entry && typeof edit.entry === "object" ? edit.entry : {};
+  const entry = {};
+  for (const f of EDU_FIELDS) if (raw[f] != null && String(raw[f]).trim()) entry[f] = String(raw[f]).trim().slice(0, 120);
+  if (op === "add_education" && !entry.degree && !entry.school) return null;
+  if (!Object.keys(entry).length) return null;
+  const current = op === "update_education" ? resume.education?.[+target.slice(1)] : null;
+  if (op === "update_education" && !current) return null;
+  // Nothing new: every field already says this.
+  if (current && Object.entries(entry).every(([f, v]) => plainText(current[f]) === plainText(v))) return null;
+  if (op === "add_education" && (resume.education || []).some((e) => plainText(e.degree) === plainText(entry.degree) && plainText(e.school) === plainText(entry.school))) return null;
+  const text = Object.values(entry).join(" ");
+  const unsupported = unsupportedClaims(text, ctx, { strict: true });
+  if (unsupported.length) return { unsupported };
+  // A year or grade the candidate never gave is invented, so it's treated like any other unclaimed fact.
+  if (withoutInventedNumbers(text, ctx.known).text !== text) return { unsupported: [entry.year || entry.grade || "that number"] };
+  return { target, op, entry, after: [entry.degree, entry.school, entry.year].filter(Boolean).join(" · ") };
+}
+
+/** Edits on the extra sections (see extraLines): replace / remove an item, add_item to a list, set_items (remove or reorder only). */
+function cleanExtraEdit(edit, resume, ctx) {
+  const { target, op } = edit;
+  const slot = extraSlot(resume, target);
+  if (!slot) return null;
+  const isItem = slot.index != null;
+  if (op === "remove_section") {
+    const key = target.split(":")[1];
+    const sec = extraLines(resume).find((x) => x.key === key);
+    return !isItem && sec && !sec.readOnly ? { target, op } : null; // references are read only
+  }
+  if (slot.whole) return null; // the entry list itself only takes remove_section
+  if (op === "remove") return isItem ? { target, op } : null;
+  if (op === "set_items") {
+    if (isItem) return null;
+    const have = new Set(slot.list.filter((x) => x != null).map((x) => plainText(x)));
+    const items = (Array.isArray(edit.items) ? edit.items : []).map((x) => String(x).trim()).filter(Boolean);
+    // Only removes or reorders: every item must already be in the list, and nothing may be repeated.
+    const seen = new Set(items.map(plainText));
+    return items.length && seen.size === items.length && items.every((x) => have.has(plainText(x))) ? { target, op, items } : null;
+  }
+  if ((op === "replace" && !isItem) || (op === "add_item" && isItem)) return null;
+  if (op !== "replace" && op !== "add_item") return null;
+  const after = String(edit.after || "").trim().slice(0, 600);
+  if (!after || (op === "replace" && samePlain(after, textAt(resume, target)))) return null;
+  const unsupported = unsupportedClaims(after, ctx, { strict: op === "add_item" });
+  if (unsupported.length) return { unsupported };
+  const { text } = withoutInventedNumbers(after, ctx.known);
+  return { target, op, after: text, blanks: (text.match(/\[number\]/g) || []).length };
+}
+
 export function cleanEdit(edit, resume, ctx) {
   if (!edit || typeof edit !== "object") return null;
   const { target, op } = edit;
-  if (!["replace", "add_bullet", "remove", "add_skills", "set_skills", "add_certifications"].includes(op)) return null;
+  if (!["replace", "add_bullet", "remove", "add_skills", "set_skills", "add_certifications", "add_item", "set_items", "add_education", "update_education", "remove_section", "move_section", "rename_section", "set_certifications"].includes(op)) return null;
   if (textAt(resume, target) == null) return null;
+  if (isSectionTarget(target)) return cleanSectionEdit(edit, resume);
+  if (isExtraTarget(target)) return cleanExtraEdit(edit, resume, ctx);
+  if (op === "add_education" || op === "update_education") return cleanEducationEdit(edit, resume, ctx);
+  if (["add_item", "set_items", "remove_section", "move_section", "rename_section"].includes(op)) return null;
+  // A whole role or education entry can be dropped; education is otherwise changed only by add_education / update_education.
+  if (op === "remove" && /^(E\d+|D\d+)$/.test(target)) return { target, op };
+  if (target === "D" || /^D\d+$/.test(target)) return null;
+  if (op === "set_certifications") {
+    // Remove or reorder only: every certification must already be on the list.
+    const have = new Set((resume.certifications || []).map((x) => plainText(x)));
+    const items = (Array.isArray(edit.items) ? edit.items : []).map((x) => String(x).trim()).filter(Boolean);
+    const seen = new Set(items.map(plainText));
+    return target === "Z" && items.length && seen.size === items.length && items.every((x) => have.has(plainText(x))) ? { target, op, items } : null;
+  }
   if (op === "set_skills") {
     // Remove or reorder only: every skill must already be on the list.
     const have = new Set((resume.skills || []).map((x) => String(x).toLowerCase()));
@@ -190,7 +346,13 @@ export function cleanEdit(edit, resume, ctx) {
     const have = new Set((resume.skills || []).map((s) => s.toLowerCase()));
     const wanted = (Array.isArray(edit.skills) ? edit.skills : []).map((s) => String(s).trim()).filter((s) => s && s.length <= 40 && !have.has(s.toLowerCase()));
     // A skill goes in only when the resume or the chat already shows it.
-    const shown = wanted.filter((s) => [...stems(s)].every((w) => ctx.supported.has(w)));
+    // Whole-token check: a skill with no stems (Go, R, C#, K8s) is never "shown" just because nothing was compared.
+    const shown = wanted.filter((s) => {
+      const st = [...stems(s)];
+      const sh = [...shortSkillsIn(s)];
+      if (!st.length && !sh.length) return new RegExp(`(?<![a-z0-9+#])${esc(s.toLowerCase())}(?![a-z0-9+#])`).test(ctx.corpusLower);
+      return st.every((w) => ctx.supported.has(w)) && sh.every((t) => ctx.shortHave.has(t));
+    });
     const unshown = wanted.filter((s) => !shown.includes(s));
     if (shown.length) return { target, op, skills: shown.slice(0, 8) };
     return unshown.length ? { unsupported: unshown.slice(0, 4) } : null;
@@ -200,11 +362,15 @@ export function cleanEdit(edit, resume, ctx) {
   if (op === "replace" && !/^(C|T|S|E\d+B\d+)$/.test(target)) return null;
   const after = String(edit.after || "").trim().slice(0, 600);
   // Same words, at most a full stop or capital letter different: not worth a suggestion.
-  const plain = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-  if (!after || plain(after) === plain(textAt(resume, target))) return null;
+  if (!after || samePlain(after, textAt(resume, target))) return null;
   // The contact line only holds the candidate's own details (city, links), so it isn't checked for invented
   // claims – numbers still are (a phone number must come from them).
   const unsupported = target === "C" ? [] : unsupportedClaims(after, ctx, { strict: op === "add_bullet" });
+  // A new title or summary may not claim seniority ("Senior", "Lead", "Head") the resume or the candidate never showed.
+  if (target === "T" || target === "S") {
+    const inflated = [...seniorityIn(after, { title: target === "T" })].filter((w) => !ctx.seniorityHave.has(w));
+    if (inflated.length) unsupported.push(...inflated);
+  }
   if (unsupported.length) return { unsupported };
   let { text } = withoutInventedNumbers(after, ctx.known);
   if (target === "C") {
@@ -216,16 +382,40 @@ export function cleanEdit(edit, resume, ctx) {
   return { target, op, after: text, blanks: (text.match(/\[number\]/g) || []).length };
 }
 
-/** "The job mentions merchant onboarding and UPI – have you done this?" for an edit that would invent it. */
-function askAbout(terms, jd) {
-  // Show the job's own wording: the first phrase in the job description containing each term.
-  const phrases = terms.map((t) => {
+/** Words that show up as "unclaimed" in a new line but aren't anything the candidate could have done or not done. */
+const NOT_A_CLAIM = /^(?:score|scores|scoring|using|used|use|based|including|ensure\w*|provid\w*|support\w*|strong|ability|ideal|experience|experienced|work|working|worked|help\w*|implement\w*|build\w*|improv\w*|driv\w*|deliver\w*|manag\w*|lead\w*|develop\w*|creat\w*|design\w*|team|teams|role|roles|responsib\w*|key|new|high|large|scale|across|within|ownership|own|owned)$/i;
+
+/** The job's own wording for each term (its first phrase in the job description containing it). */
+function jobWording(terms, jd) {
+  return terms.map((t) => {
     const m = new RegExp(`\\b[\\w/-]*${t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[\\w/-]*\\b`, "i").exec(jd || "");
     return m ? m[0] : t;
   });
-  const list = [...new Set(phrases)].slice(0, 3).join(", ");
-  if (!jd) return `I'd need to mention ${list}, which isn't on your resume yet. Have you worked with ${phrases.length > 1 ? "these" : "it"}? Tell me where, and I'll add it.`;
-  return `The job mentions ${list}. Have you worked with ${phrases.length > 1 ? "any of these" : "this"}? Tell me where, and I'll add it.`;
+}
+
+/** The terms worth asking about: real skills or tools, not filler words from the new line. */
+export function askableTerms(terms, jd) {
+  const kept = [...new Set(terms)].filter((t) => skillLike(t, jd) || !NOT_A_CLAIM.test(t));
+  const skills = kept.filter((t) => skillLike(t, jd));
+  return (skills.length ? skills : kept.filter((t) => !NOT_A_CLAIM.test(t) && !/^(?:\w+ing|\w+ed)$/i.test(t))).slice(0, 3);
+}
+
+const listOf = (items) => (items.length > 1 ? `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}` : items[0] || "");
+
+/** One line that says what was left out and why, in the candidate's terms. */
+export function heldBackLine(terms, jd) {
+  const shown = jobWording(askableTerms(terms, jd), jd);
+  if (!shown.length) return "I left that out: it adds something you haven't told me.";
+  return `I didn't add ${listOf(shown.map((t) => `"${t}"`))}: you haven't said you've done ${shown.length > 1 ? "those" : "that"}.`;
+}
+
+/** "The job asks for merchant onboarding and UPI. Have you done either? Tell me where." for an edit that would invent it. */
+export function askAbout(terms, jd) {
+  const shown = jobWording(askableTerms(terms, jd), jd);
+  if (!shown.length) return "That line needs something you haven't told me yet. What did you actually do there? Tell me, and I'll write it.";
+  const both = shown.length > 1;
+  if (!jd) return `I'd need to mention ${listOf(shown)}, which isn't on your resume yet. Have you done ${both ? "either" : "this"}? Tell me where, and I'll add it.`;
+  return `The job asks for ${listOf(shown)}. Have you done ${both ? "either" : "this"}? Tell me where, and I'll add it.`;
 }
 
 function parseJson(text) {
@@ -243,7 +433,11 @@ const RULES = `Rules:
 - Never change job titles or seniority (no "Senior", "Lead" or "Head" the resume doesn't already use for that person).
 - Keep the candidate's level of ownership: "helped", "assisted" or "supported" may become "contributed to" or "partnered on", never "led", "owned" or "launched".
 - Bullets: one line, start with a strong verb, at most about 25 words.
-- Refer to resume lines only by their ids in square brackets (T, S, E0, E0B1, K).`;
+- Refer to resume lines only by their ids in square brackets (T, S, E0, E0B1, K, X:other0:2).
+- Every section listed under SECTIONS ON THIS RESUME is real and editable (except those marked read only): Core Competencies, projects, achievements, languages and so on. Never say a listed section is missing, and never edit a different section to stand in for the one the candidate named. If they ask about a section under NOT ON THIS RESUME, say so plainly. If they ask for something no edit can do, say that instead of doing something else.
+- Never say you removed, added, changed or trimmed something unless that exact change is in your edits. If you can't do it, say so.
+- When the candidate tells you a fact (a degree, a school, a tool), write it in now with what they gave you. Don't ask for optional details such as the year or grade; add them later if they offer.
+- When the candidate corrects you ("no, I meant ..."), the section they name wins: change that section, or say you can't.`;
 
 const EDIT_SHAPE = `An edit is one of:
 {"target":"S","op":"replace","after":"new text"}            (T, S or a bullet id like E0B1)
@@ -252,7 +446,18 @@ const EDIT_SHAPE = `An edit is one of:
 {"target":"K","op":"add_skills","skills":["SQL","Tableau"]} (only skills the resume already shows evidence of)
 {"target":"K","op":"set_skills","skills":["SQL","Jira"]}     (the whole skills list, only removing or reordering)
 {"target":"C","op":"replace","after":"email · phone · city · linkedin.com/in/…"} (the contact line)
-{"target":"Z","op":"add_certifications","items":["PMP (2023)"]} (only certifications the candidate has stated)`;
+{"target":"Z","op":"add_certifications","items":["PMP (2023)"]} (only certifications the candidate has stated)
+{"target":"D","op":"add_education","entry":{"degree":"MBA","school":"IIM Ahmedabad","year":"2021"}} (adds an education entry: only what the candidate has stated; year, grade and location are optional)
+{"target":"D0","op":"update_education","entry":{"year":"2016"}}  (changes fields of education entry D0)
+{"target":"X:other0:2","op":"replace","after":"new text"}     (an item in an extra section: Core Competencies, achievements, languages, a project bullet like X:projects:0:1)
+{"target":"X:other0:4","op":"remove"}                        (drops an item from an extra section)
+{"target":"X:other0","op":"set_items","items":["Item A","Item B"]} (the whole list of an extra section, only removing or reordering: use it to trim or shorten a list)
+{"target":"SEC:other0","op":"remove_section"}                (deletes a whole section of any kind: SEC:summary, SEC:experience, SEC:education, SEC:skills, SEC:certifications, SEC:projects, SEC:other0 ...)
+{"target":"SEC:skills","op":"move_section","to":0}           (moves a section; "to" is its new position, 0 = top, counted over the sections in SECTIONS ON THIS RESUME)
+{"target":"SEC:other0","op":"rename_section","after":"Strengths"} (renames a section heading)
+{"target":"E2","op":"remove"}                                (drops a whole role with its bullets) · {"target":"D0","op":"remove"} (drops an education entry)
+{"target":"Z","op":"set_certifications","items":["PMP"]}     (the whole certifications list, only removing or reordering)
+{"target":"X:achievements","op":"add_item","after":"new item"} (adds an item to a list section; for a project use X:projects:0)`;
 
 /** Suggestions for the resume against a job description. */
 export async function suggestForJob({ resume, jd }) {
@@ -294,7 +499,7 @@ Give 4 to ${MAX_SUGGESTIONS} suggestions, most important first, "must" for gaps 
     .map((s, i) => {
       const cleaned = cleanedEdits[i];
       const edit = cleaned && !cleaned.unsupported ? cleaned : null;
-      let question = typeof s?.question === "string" && s.question.trim() ? s.question.trim().slice(0, 300) : null;
+      let question = typeof s?.question === "string" && s.question.trim() ? humanizeIds(s.question.trim().slice(0, 300), resume) : null;
       if (cleaned?.unsupported) question = askAbout(cleaned.unsupported, jd);
       if (!edit && !question) return null;
       const impact = edit ? scoreImpact(resume, edit, job) : 0;
@@ -305,8 +510,8 @@ Give 4 to ${MAX_SUGGESTIONS} suggestions, most important first, "must" for gaps 
         id: `s${i + 1}`,
         priority: s.priority === "must" ? "must" : "nice",
         // A rewritten edit dropped terms the model's own title and reason may still mention.
-        title: edit?.rewritten ? neutralTitle(edit) : String(s.title || "Suggestion").slice(0, 90),
-        why: edit?.rewritten ? "Reworded towards this job, without claiming anything you haven't said." : String(s.why || "").slice(0, 300),
+        title: edit?.rewritten ? neutralTitle(edit) : humanizeIds(String(s.title || "Suggestion").slice(0, 90), resume),
+        why: edit?.rewritten ? "Reworded towards this job, without claiming anything you haven't said." : humanizeIds(String(s.why || "").slice(0, 300), resume),
         edit,
         question: edit ? null : question,
         target,
@@ -354,8 +559,11 @@ Return JSON: {"edits": ["rewritten text" or null, ...]} – one entry per edit, 
   }
 }
 
+/** Wording that says a change was made (used to catch a reply that claims one when no change was produced). */
+export const CLAIMS_A_CHANGE = /\b(removed|deleted|dropped|trimmed|shortened|added|updated|changed|rewrote|rewritten|reworded|restored|replaced|reordered|cut)\b/i;
+
 const neutralTitle = (edit) =>
-  ({ C: "Tidy your contact line", T: "Sharpen your headline", S: "Sharpen your summary", K: "Add skills", Z: "Add certifications" })[edit.target] || (edit.op === "add_bullet" ? "Add a bullet" : "Sharpen this bullet");
+  ({ C: "Tidy your contact line", T: "Sharpen your headline", S: "Sharpen your summary", K: "Add skills", Z: "Add certifications" })[edit.target] || (edit.op === "add_bullet" ? "Add a bullet" : edit.op === "add_education" ? "Add to your education" : edit.op === "update_education" ? "Update your education" : edit.op === "move_section" ? "Move this section" : edit.op === "rename_section" ? "Rename this section" : edit.op === "set_certifications" ? "Trim your certifications" : edit.op === "remove_section" ? "Remove this section" : edit.op === "set_items" ? "Trim or reorder this list" : edit.op === "add_item" ? "Add an item" : edit.op === "remove" ? "Remove an item" : "Sharpen this bullet");
 
 /** First pass over the model's edits; edits with unclaimed terms get one rewrite before giving up. */
 async function cleanAll(rawEdits, resume, ctx) {
@@ -454,6 +662,45 @@ Return JSON: {"rewrites": [{"target": "E0B1", "after": "the improved line"}, ...
   };
 }
 
+/**
+ * The model refers to resume lines by id ([E0B4], [S]) because the prompt does. People shouldn't see ids: swap each
+ * for a plain description of the line it points at.
+ */
+export function humanizeIds(text, resume) {
+  const words = (t, n = 6) => {
+    const w = String(t || "").trim().split(/\s+/).filter(Boolean);
+    return w.length > n ? `${w.slice(0, n).join(" ")}…` : w.join(" ");
+  };
+  const describe = (id) => {
+    if (id === "S") return "your summary";
+    if (id === "T") return "your title";
+    if (id === "C") return "your contact line";
+    if (id === "K") return "your skills";
+    if (id === "Z") return "your certifications";
+    if (id === "N") return "your name";
+    const bullet = /^E(\d+)B(\d+)$/.exec(id);
+    if (bullet) {
+      const t = textAt(resume, id);
+      return t ? `the bullet “${words(t)}”` : "one of your bullets";
+    }
+    const role = /^E(\d+)$/.exec(id);
+    if (role) {
+      const e = resume?.experience?.[+role[1]];
+      return e ? `your ${[e.role, e.company].filter(Boolean).join(" at ")} role` : "one of your roles";
+    }
+    const edu = /^D(\d+)/.exec(id);
+    if (edu) {
+      const e = resume?.education?.[+edu[1]];
+      return e ? `your ${[e.degree, e.school].filter(Boolean).join(", ")} education entry` : "your education";
+    }
+    return "that line";
+  };
+  return String(text ?? "")
+    .replace(/\[((?:C|T|S|K|Z|N|D\d+(?::\w+)*|D|E\d+(?:B\d+)?|X:[\w:]+))\]/g, (_, id) => describe(id))
+    .replace(/\bE\d+B\d+\b/g, (id) => describe(id))
+    .replace(/\s{2,}/g, " ");
+}
+
 /** One chat turn: a reply, plus edits the candidate can apply. */
 export async function chatTurn({ resume, jd, jobTitle = "", history = [], message, answerTo = "" }) {
   // What the candidate has said: their own messages, never the job description they pasted.
@@ -506,7 +753,16 @@ Return an empty "edits" list when no change to the resume is needed.`;
     .slice(0, 8);
   let reply = String(data.reply || "").slice(0, 800) || (edits.length ? "Here's the change – tap Apply to use it." : "");
   // The model's reply describes its own edits; when every one was blocked, it would claim a change that didn't happen.
-  if (asks.length && !edits.length) reply = "I couldn't make that change without adding things you haven't told me.";
-  if (asks.length) reply = `${reply}${reply ? " " : ""}${askAbout([...new Set(asks)], jd)}`.trim();
-  return { reply: reply || "Got it.", suggestions: edits };
+  const heldTerms = [...new Set(asks)];
+  if (asks.length && !edits.length) reply = heldBackLine(heldTerms, jd);
+  if (asks.length) reply = `${reply}${reply ? " " : ""}${askAbout(heldTerms, jd)}`.trim();
+  // A reply may only claim a change that is actually in the list: no change card means nothing was changed.
+  if (!edits.length && !asks.length && CLAIMS_A_CHANGE.test(reply)) {
+    reply = "I couldn't turn that into a change on your resume, so nothing has been changed. Tell me which section and what to do, for example \"remove the core competencies section\", and I'll suggest it.";
+  }
+  edits.forEach((e) => {
+    e.title = humanizeIds(e.title, resume);
+    e.why = humanizeIds(e.why, resume);
+  });
+  return { reply: humanizeIds(reply, resume) || "Got it.", suggestions: edits };
 }

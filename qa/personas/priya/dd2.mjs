@@ -1,0 +1,11 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name: "priya", web: 5803 });
+const p = app.page;
+await p.getByRole("button",{name:/design & download/i}).click();
+await p.waitForTimeout(1500);
+const dlg = p.locator('[role=dialog]').first();
+console.log("dialog", await dlg.count());
+await dlg.evaluate(e=>{e.scrollTop=e.scrollHeight; [...e.querySelectorAll("*")].forEach(x=>{if(x.scrollHeight>x.clientHeight+50) x.scrollTop=x.scrollHeight})});
+await p.waitForTimeout(800);
+await shot(p,"priya","18-design-bottom");
+await app.close();

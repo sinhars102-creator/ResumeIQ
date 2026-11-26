@@ -1,0 +1,20 @@
+import { openApp, shot, savePdfDownload } from "../harness.mjs";
+const app = await openApp({ name: "rohan", web: 5802 });
+const p = app.page;
+await p.getByRole("button",{name:/Design & download/}).click();
+await p.waitForTimeout(1500);
+await p.getByText("Executive",{exact:true}).first().click(); await p.waitForTimeout(800);
+for (const t of ["Serif","Large","Airy"]) { await p.getByText(t,{exact:true}).first().click(); await p.waitForTimeout(900);}
+await p.mouse.move(720,500); await p.mouse.wheel(0,500); await p.waitForTimeout(600);
+await p.locator("button[aria-label*='lack' i], button[title*='lack' i]").first().click({timeout:3000}).catch(()=>console.log("no black label"));
+await p.waitForTimeout(1000);
+await p.mouse.wheel(0,3000); await p.waitForTimeout(800);
+await shot(p,"rohan","25a-final-dialog");
+await p.getByRole("button",{name:/Continue with Executive/}).click();
+await p.waitForTimeout(2500);
+await shot(p,"rohan","25b-after-continue");
+console.log((await p.getByRole("button").allInnerTexts()).filter(s=>/download|pdf|print|edit/i.test(s)));
+const r = await savePdfDownload(p,"rohan",()=>p.getByRole("button",{name:"Download PDF"}).click()).catch(e=>({err:e.message.slice(0,200)}));
+console.log(JSON.stringify(r).slice(0,3500));
+await shot(p,"rohan","25c-after-download");
+await app.close();

@@ -1,0 +1,17 @@
+import { openApp, shot } from "../harness.mjs";
+import fs from "node:fs";
+const app = await openApp({ name: "sana", web: 5805 });
+const p = app.page;
+p.on("download", async d=>{ const f="/Users/rahulsinha/ResumeIQ/sidebar-event/qa/personas/sana/dl-"+Date.now()+"-"+d.suggestedFilename(); await d.saveAs(f); console.log("DL",f); });
+await p.getByRole("button",{name:/Design & download/}).click();
+await p.waitForTimeout(1500);
+await p.getByText("Section headings in a left column").first().click();
+await p.waitForTimeout(1000);
+await p.getByText("Serif",{exact:true}).first().click();
+await p.locator('input[type=color]').first().fill("#6b1f35");
+await p.waitForTimeout(5000);
+await p.getByText("Continue with Grid").click();
+await p.waitForTimeout(6000);
+await shot(p,"sana","20-after-continue");
+console.log((await p.locator("body").innerText()).slice(0,600));
+await app.close();

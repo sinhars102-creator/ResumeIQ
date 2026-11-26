@@ -1,0 +1,15 @@
+import { openApp, shot } from "../harness.mjs";
+import fs from "node:fs";
+const src=fs.readFileSync("s4.mjs","utf8");
+const b=src.match(/const b=`([\s\S]*?)`;/)[1];
+const app = await openApp({ name:"vikram", web:5804 });
+const p=app.page;
+const box=p.getByPlaceholder(/Message/i);
+await box.click();
+await p.keyboard.insertText("Sorry, second half of the JD:\n"+b);
+await p.keyboard.press("Enter");
+await p.waitForTimeout(25000);
+await shot(p,"vikram","08-jd-part2");
+const t=await p.locator("body").innerText();
+console.log(t.slice(0,600)); console.log("....");console.log(t.slice(-1200));
+await app.close();

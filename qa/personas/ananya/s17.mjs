@@ -1,0 +1,12 @@
+import { start, waitCall, waitIdle, shot } from "./lib.mjs";
+import fs from "node:fs";
+const app = await start(); const page=app.page;
+await page.waitForTimeout(2500);
+const p=waitCall(page);
+await page.getByText("Rerun",{exact:true}).click();
+await p;
+await waitIdle(page,60000);
+await shot(page,"ananya","17-tailor");
+const t=await page.locator("body").innerText(); fs.writeFileSync("t17.txt",t); console.log(app.calls);
+console.log(t.slice(0,400));
+await app.close();

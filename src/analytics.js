@@ -12,6 +12,19 @@ import { captureTouch, touchProperties, firstTouchPersonProperties, isInternal }
 const key = import.meta.env.VITE_POSTHOG_KEY;
 let enabled = false;
 
+// Consent (the cookie notice, see googleAds.js). On the live site, until a visitor accepts, steps are still counted
+// (so the whole funnel is visible) but nothing is stored on their device and sessions are not recorded; accepting turns on
+// cookies and masked session recordings, and declining or withdrawing turns them off again. Elsewhere (local, previews) it is always on.
+const LIVE = typeof window !== "undefined" && /(^|\.)myresumeiq\.io$/.test(window.location.hostname);
+function consentGranted() {
+  if (!LIVE) return true;
+  try {
+    return localStorage.getItem("riq_ad_consent") === "granted";
+  } catch {
+    return false;
+  }
+}
+
 /** URL parameter carrying the visitor's anonymous ID from an in-app browser to Chrome/Safari (see UploadStep). */
 export const HANDOFF_ID_PARAM = "ph_did";
 
@@ -40,6 +53,7 @@ export function initAnalytics() {
   posthog.init(key, {
     ...(handoffId && { bootstrap: { distinctID: handoffId } }),
     api_host: import.meta.env.VITE_POSTHOG_HOST || "https://us.i.posthog.com",
+    persistence: consentGranted() ? "localStorage+cookie" : "memory",
     person_profiles: "identified_only",
     autocapture: false,
     // Project-level defaults can switch these on remotely; dead clicks and heatmaps record clicked
@@ -53,7 +67,7 @@ export function initAnalytics() {
     // Session recordings: every form field, plus anything marked data-clarity-mask (resume text, file
     // names), is replaced with asterisks before it leaves the browser. Console logs stay out, as error
     // messages can quote resume text. The resume editor is a separate site in an iframe and isn't recorded.
-    disable_session_recording: false,
+    disable_session_recording: !consentGranted(),
     session_recording: {
       maskAllInputs: true,
       maskTextSelector: "[data-clarity-mask]",
@@ -65,6 +79,26 @@ export function initAnalytics() {
   });
   enabled = true;
   registerVisitProperties();
+}
+
+/** The visitor accepted or declined the cookie notice: switch cookies and session recording on or off to match. */
+export function setAnalyticsConsent(granted) {
+  if (!enabled) return;
+  try {
+    if (granted) {
+      posthog.set_config({ persistence: "localStorage+cookie", disable_session_recording: false });
+      posthog.startSessionRecording?.();
+      registerVisitProperties();
+    } else {
+      posthog.stopSessionRecording?.();
+      posthog.set_config({ disable_session_recording: true, persistence: "memory" });
+      posthog.reset();
+      identifiedAs = null;
+      registerVisitProperties();
+    }
+  } catch {
+    // Analytics must never break the app.
+  }
 }
 
 /** Channel, campaign and internal flag on every event from this browser. */

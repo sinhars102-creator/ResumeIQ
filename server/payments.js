@@ -64,7 +64,61 @@ export function validSignature({ orderId, paymentId, signature }, secret = proce
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/** Razorpay's webhook signature: HMAC-SHA256 of the raw request body with the webhook secret (a different secret from the key secret). */
+export function validWebhookSignature(rawBody, signature, secret = process.env.RAZORPAY_WEBHOOK_SECRET) {
+  if (!rawBody || !signature || !secret) return false;
+  const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
+  const a = Buffer.from(expected);
+  const b = Buffer.from(String(signature));
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
+/**
+ * A payment Razorpay says went through (webhook "payment.captured" / "order.paid"): add the plan to the account the order
+ * was made for. This is the safety net for a customer who paid and closed the tab before the page confirmed. Safe to run
+ * twice (a payment is stored once). `gateway.order(id)` reads the order from Razorpay; `store.insert(row)` saves the purchase.
+ * Returns { result: "granted" | "ignored", reason? }; throws when saving fails so Razorpay retries later.
+ */
+export async function applyPaymentEvent({ event, gateway, store, now = new Date() }) {
+  const name = event?.event;
+  if (!["payment.captured", "order.paid"].includes(name)) return { result: "ignored", reason: `event ${name || "unknown"}` };
+  const payment = event?.payload?.payment?.entity;
+  const paymentId = payment?.id;
+  const orderId = payment?.order_id || event?.payload?.order?.entity?.id;
+  if (!paymentId || !orderId) return { result: "ignored", reason: "no payment or order id" };
+  if (payment.status !== "captured") return { result: "ignored", reason: `payment is ${payment.status}` };
+  const order = await gateway.order(orderId);
+  const plan = order?.notes?.plan;
+  const userId = order?.notes?.user_id;
+  if (!isDownloadPlan(plan) || !userId) return { result: "ignored", reason: "not a download plan bought by a signed-in user" };
+  if (Number(order.amount) !== DOWNLOAD_PLANS[plan].amount || Number(payment.amount) !== DOWNLOAD_PLANS[plan].amount) {
+    console.warn(`[payments] captured payment ${paymentId} does not match plan ${plan}: needs a manual look`);
+    return { result: "ignored", reason: "amount does not match the plan" };
+  }
+  await store.insert(entitlementRow({ userId, plan, paymentId, orderId, now }));
+  return { result: "granted", plan, paymentId };
+}
+
 export function registerPaymentRoutes(app) {
+  // Razorpay calls this by itself after a payment is captured (Dashboard → Settings → Webhooks). It needs the raw request body
+  // (server/index.js keeps it for this path) and RAZORPAY_WEBHOOK_SECRET.
+  app.post("/api/razorpay-webhook", async (req, res) => {
+    if (!process.env.RAZORPAY_WEBHOOK_SECRET || !configured()) return res.status(503).json({ error: "Webhook isn't set up" });
+    if (!validWebhookSignature(req.rawBody, req.headers["x-razorpay-signature"])) return res.status(400).json({ error: "Bad signature" });
+    try {
+      const out = await applyPaymentEvent({
+        event: JSON.parse(req.rawBody.toString("utf8")),
+        gateway: { order: (id) => razorpay().orders.fetch(id) },
+        store: { insert: insertEntitlement },
+      });
+      console.log(`[payments] webhook: ${out.result}${out.reason ? ` (${out.reason})` : ""}${out.paymentId ? ` ${out.paymentId}` : ""}`);
+      return res.json({ ok: true, ...out });
+    } catch (err) {
+      console.warn("[payments] webhook failed:", err?.error?.description || err.message);
+      return res.status(500).json({ error: "Couldn't record the payment yet" }); // Razorpay tries again later
+    }
+  });
+
   app.post("/api/create-order", async (req, res) => {
     if (!configured()) return res.status(503).json({ error: "Payments aren't set up yet" });
     const plan = PLANS[req.body?.plan];

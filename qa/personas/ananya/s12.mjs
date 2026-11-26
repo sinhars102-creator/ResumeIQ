@@ -1,0 +1,11 @@
+import { start, waitIdle, shot } from "./lib.mjs";
+const app = await start(); const page=app.page;
+await page.waitForTimeout(2000);
+const box=page.getByPlaceholder(/^Message/);
+await box.click(); await box.fill("No, they didn't report to me, I only mentored them. Please make the mentoring stand out without implying I managed them. Also for the Cloudnest onboarding bullet, self-serve sign-ups grew significantly but I can't remember the exact number, so don't put a figure in.");
+await page.keyboard.press("Enter");
+await waitIdle(page,120000);
+await shot(page,"ananya","12-mentor");
+const t=await page.locator("body").innerText(); console.log(app.calls); 
+const i=t.indexOf("No, they didn't"); console.log(t.slice(i));
+await app.close();

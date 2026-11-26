@@ -1,0 +1,15 @@
+import { start, shot } from "./lib.mjs";
+import fs from "node:fs";
+const app = await start(); const page=app.page;
+await page.waitForTimeout(3000);
+const c=page.locator("text=Add mentoring to summary").first().locator("xpath=ancestor::div[.//button[normalize-space()='Apply to resume']][1]");
+console.log((await c.innerText()).slice(0,900));
+await c.getByRole("button",{name:"Apply to resume"}).click();
+await page.waitForTimeout(1500);
+await page.evaluate(()=>window.scrollTo(0,0));
+await shot(page,"ananya","21-summary-applied");
+await page.getByRole("button",{name:"Design & download"}).click();
+await page.waitForTimeout(3000);
+await shot(page,"ananya","21b-design");
+console.log((await page.locator("body").innerText()).slice(-1500));
+await app.close();

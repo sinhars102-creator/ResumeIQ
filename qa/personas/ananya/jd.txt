@@ -1,0 +1,21 @@
+Group Product Manager, Growth Platform - Orbita Cloud (Series D, Bengaluru / hybrid)
+
+About the role
+Orbita Cloud is a fast-growing B2B SaaS company building a revenue operations platform used by 4,000+ companies. We are looking for a Group Product Manager to own our Growth Platform area (onboarding, activation, pricing and packaging, and lifecycle) and lead a team of product managers.
+
+What you will do
+- Set the product strategy and multi-quarter roadmap for the Growth Platform area and tie it to company revenue and retention goals
+- Lead, coach and grow a team of 3-4 product managers; set the bar for product quality and discovery
+- Partner with engineering, design, data science, sales and marketing leaders to prioritise and deliver
+- Run a rigorous experimentation program across activation, conversion and monetisation
+- Own pricing and packaging decisions end to end, working with finance and sales
+- Define and track success metrics (activation, retention, expansion revenue, NRR) and be accountable for business outcomes
+- Communicate strategy and trade-offs to executives and stakeholders
+
+What you bring
+- 7+ years in product management, with at least 2 years leading or mentoring product managers
+- Strong track record of shipping B2B SaaS products with measurable impact on retention, activation or revenue
+- Deep comfort with data: SQL, product analytics, experiment design
+- Experience with pricing, packaging and monetisation
+- Excellent stakeholder management and communication
+- Nice to have: experience with PLG motions, machine learning products, or international expansion

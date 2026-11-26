@@ -1,0 +1,10 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name:"vikram", web:5804 });
+const p=app.page;
+await p.getByRole("button",{name:/Apply all ready/i}).click();
+await p.waitForTimeout(2500);
+await shot(p,"vikram","12-apply-all");
+const t=await p.locator("body").innerText();
+const i=t.indexOf("Vikram Singh"); console.log(t.slice(i,i+2300));
+const j=t.indexOf("All 16"); console.log(t.slice(j,j+300));
+await app.close();

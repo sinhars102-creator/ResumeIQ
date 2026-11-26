@@ -1,0 +1,12 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name: "sana", web: 5805 });
+const p = app.page;
+const box = p.getByPlaceholder(/job description|message|paste/i).last();
+await box.click();
+await box.fill("I want my resume to look as good as the work I do. Before we start, how do I show my creative judgement and the commercial impact together, without it reading like a list of tasks?");
+await shot(p,"sana","04-typed");
+await p.keyboard.press("Enter");
+await p.waitForTimeout(25000);
+await shot(p,"sana","05-reply");
+console.log((await p.locator("body").innerText()).split("resume.pdf").pop());
+await app.close();

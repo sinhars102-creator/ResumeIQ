@@ -1,9 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { needsAdConsent, setAdConsent } from "./googleAds.js";
 
 /** A small bar asking to use cookies for measuring ads and site usage (live site only, until the visitor chooses). */
 export default function CookieNotice() {
   const [open, setOpen] = useState(needsAdConsent);
+  useEffect(() => {
+    const reopen = () => setOpen(true);
+    window.addEventListener("riq:cookie-settings", reopen);
+    return () => window.removeEventListener("riq:cookie-settings", reopen);
+  }, []);
   if (!open) return null;
   const choose = (accepted) => {
     setAdConsent(accepted);
@@ -14,7 +19,7 @@ export default function CookieNotice() {
     <div role="region" aria-label="Cookie notice"
       style={{ position: "fixed", left: 16, right: 16, bottom: 16, zIndex: 70, maxWidth: 640, margin: "0 auto", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "12px 16px", borderRadius: 12, background: "#15171a", color: "#f6f5f1", fontSize: 13, lineHeight: 1.45, boxShadow: "0 10px 30px rgba(0,0,0,0.25)" }}>
       <span style={{ flex: "1 1 260px" }}>
-        We use cookies to measure our ads and see how people use ResumeIQ, so we can improve it.{" "}
+        We count visits and steps without cookies. If you accept, we also use cookies to recognise returning visits, record masked sessions and measure our ads.{" "}
         <a href="/privacy.html" style={{ color: "#9fd3b8" }}>Privacy policy</a>
       </span>
       <span style={{ display: "flex", gap: 8 }}>

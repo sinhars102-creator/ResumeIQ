@@ -1,0 +1,10 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name: "rohan", web: 5802 });
+const p = app.page;
+await p.getByRole("button",{name:"Undo",exact:true}).first().click(); await p.waitForTimeout(500);
+await p.getByRole("button",{name:"Undo",exact:true}).first().click(); await p.waitForTimeout(800);
+const t = await p.evaluate(()=>document.body.innerText);
+const i=t.indexOf("EDUCATION"); console.log(i, t.slice(i,i+300));
+await p.getByText("Applied to your resume").first().waitFor({timeout:1000}).catch(()=>{});
+await shot(p,"rohan","13-undo", {full:false});
+await app.close();

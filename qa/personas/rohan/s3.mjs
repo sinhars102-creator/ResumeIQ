@@ -1,0 +1,11 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name: "rohan", web: 5802 });
+const p = app.page;
+const fi = p.locator('input[type=file]').first();
+await fi.setInputFiles("/Users/rahulsinha/ResumeIQ/sidebar-event/qa/personas/rohan/old.pdf");
+await p.waitForTimeout(8000);
+await shot(p,"rohan","03a-after-upload");
+await p.waitForTimeout(25000);
+await shot(p,"rohan","03b-after-wait");
+console.log(app.calls, app.log);
+await app.close();

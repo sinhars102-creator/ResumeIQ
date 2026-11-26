@@ -1,0 +1,13 @@
+import { openApp, shot } from "../harness.mjs";
+const [,, label, wait, ...msg]=process.argv;
+const app = await openApp({ name:"vikram", web:5804 });
+const p=app.page;
+const box=p.getByPlaceholder(/Message/i);
+await box.click();
+await p.keyboard.insertText(msg.join(" "));
+await p.keyboard.press("Enter");
+await p.waitForTimeout(+wait*1000);
+await shot(p,"vikram",label);
+const t=await p.locator("body").innerText();
+console.log(t.slice(-1800));
+await app.close();

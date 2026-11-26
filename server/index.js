@@ -51,7 +51,7 @@ const ENV_KEYS = [
   "RAPIDAPI_KEY", "APIFY_TOKEN", "APIFY_API_TOKEN", "RXRESUME_API_KEY", "RXRESUME_URL", "RXRESUME_SSO_SECRET",
   "GROQ_API_KEY", "GROQ_MODEL", "ANTHROPIC_API_KEY", "VITE_ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "ANTHROPIC_EFFORT", "GROQ_FALLBACK_MODELS", "LLM_PROVIDER",
   "ADZUNA_APP_ID", "ADZUNA_APP_KEY", "SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY",
-  "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET",
+  "RAZORPAY_KEY_ID", "RAZORPAY_KEY_SECRET", "RAZORPAY_WEBHOOK_SECRET",
 ];
 
 function loadEnvFile(filePath) {
@@ -114,7 +114,8 @@ const PORT = process.env.PORT || 3001;
 app.use(cors({ origin: true }));
 // 2 MB: resumes can carry an embedded photo (data URL) when exported to Reactive Resume.
 // Resume uploads (up to 10 MB, sent base64) get a larger body limit than everything else.
-const jsonDefault = express.json({ limit: "2mb" });
+// The Razorpay webhook is signed over the exact bytes it sends, so its raw body is kept for that one path.
+const jsonDefault = express.json({ limit: "2mb", verify: (req, _res, buf) => { if (req.originalUrl === "/api/razorpay-webhook") req.rawBody = buf; } });
 const jsonUpload = express.json({ limit: "15mb" });
 app.use((req, res, next) => (req.method === "POST" && req.path === "/api/ext/resumes" ? jsonUpload : jsonDefault)(req, res, next));
 
@@ -1522,6 +1523,15 @@ app.get("/api/health", (_, res) =>
 );
 
 // On Vercel the app runs as a serverless function (api/index.js); locally it listens on PORT.
+// Bad request bodies (malformed or oversized JSON) get a short JSON error, never a stack trace with file paths.
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  const status = err.status || err.statusCode || 500;
+  const known = { 400: "That request could not be read.", 413: "That request is too large." };
+  if (status >= 500) console.error(err);
+  res.status(status).json({ error: known[status] || (status >= 500 ? "Something went wrong on our side." : "The request was not accepted.") });
+});
+
 if (!process.env.VERCEL) app.listen(PORT, () => {
   const apify = getApifyToken();
   const rapid = getRapidApiKey();

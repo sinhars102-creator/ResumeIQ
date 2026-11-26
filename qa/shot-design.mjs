@@ -1,0 +1,17 @@
+import { createServer } from "vite";
+import React from "react";
+import { renderToString } from "react-dom/server";
+import fs from "node:fs";
+import { chromium } from "playwright-core";
+const server = await createServer({ root: process.cwd(), server: { middlewareMode: true }, appType: "custom", logLevel: "silent", resolve: { alias: [{ find: /^\.\/pdfPreview\.js$/, replacement: process.cwd() + "/qa/pdfPreview-stub.js" }] } });
+const { default: P } = await server.ssrLoadModule("/src/TemplatePicker.jsx");
+const resume = { name: "A", title: "PM", contact: "a@b.c", summary: "x", experience: [{ role: "PM", company: "Co", bullets: ["did"] }], skills: ["SQL"] };
+const body = renderToString(React.createElement(P, { resume, selected: "sidebar-light", onSelect() {}, design: { font: "times", size: 1.08, spacing: 1, margins: 0, accent: "#b4326e", underline: null }, onDesign() {} }));
+const css = fs.readFileSync("src/index.css", "utf8") + fs.readFileSync("src/ResumeLLM.css", "utf8");
+fs.writeFileSync("qa/shot-design.html", `<!doctype html><meta charset=utf-8><style>${css}</style><body style="padding:24px;max-width:760px"><div class="rl-modal rl-modal-wide" style="position:static">${body}</div></body>`);
+await server.close();
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 900, height: 1000 } });
+await page.goto("file://" + process.cwd() + "/qa/shot-design.html");
+await page.screenshot({ path: "qa/shot-design.png", fullPage: true });
+await browser.close();

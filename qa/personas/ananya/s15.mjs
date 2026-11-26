@@ -1,0 +1,14 @@
+import { start, waitIdle, shot } from "./lib.mjs";
+import fs from "node:fs";
+const app = await start(); const page=app.page;
+await page.waitForTimeout(2500);
+const box=page.getByPlaceholder(/job description/i);
+await box.click(); await box.fill(fs.readFileSync("jd.txt","utf8"));
+await page.keyboard.press("Enter");
+await waitIdle(page,180000);
+await shot(page,"ananya","15-tailor");
+console.log(app.calls);
+const t=await page.locator("body").innerText(); const i=t.indexOf("Tailoring"); console.log(t.slice(i, i+1200));
+console.log(t.slice(t.indexOf("Strength")-200).slice(0,200));
+fs.writeFileSync("t15.txt",t);
+await app.close();

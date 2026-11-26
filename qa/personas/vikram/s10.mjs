@@ -1,0 +1,14 @@
+import { openApp, shot, savePdfDownload } from "../harness.mjs";
+const app = await openApp({ name:"vikram", web:5804 });
+const p=app.page;
+await p.getByRole("button",{name:/Design & download/i}).click();
+await p.waitForTimeout(1500);
+await p.getByText("Executive",{exact:true}).first().click();
+await p.waitForTimeout(1500);
+await shot(p,"vikram","17-executive");
+const d=p.getByRole("dialog");
+await (await d.count()?d:p.locator("body")).evaluate(el=>{});
+await p.mouse.move(720,600); await p.mouse.wheel(0,1500); await p.waitForTimeout(800);
+await shot(p,"vikram","18-dialog-scrolled");
+console.log((await p.getByRole("button").allInnerTexts()).join(" | "));
+await app.close();

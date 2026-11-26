@@ -1,0 +1,264 @@
+◈ Resume LLM
+✎ New chat
+
+Recent
+
+Group Product Manager, Growth Platform · Orbita Cloud
+A
+ananya@example.com
+Sign out
+Group Product Manager, Growth Platform · Orbita Cloud
+A
+Tailoring for Group Product Manager, Growth Platform
+
+Orbita Cloud · 0 of 9 suggestions applied
+
+Match
+up to 76% if all applied
+69%
+Apply all ready
+Undo
+Redo
+Reset
+Highlight changes on resume
+Design & download
+Improve my resume
+Use a different resume
+Ananya Mehta
+✎
+
+Senior Product Manager
+✎
+
+ananya.mehta.pm@example.com | +91 98450 00000 | Bengaluru, Karnataka | linkedin.com/in/ananya-mehta-pm-example
+✎
+
+SUMMARY
+↑
+↓
+Rename
+Remove
+
+1
+Product manager with 6 years of experience in B2B SaaS. Worked on retention, onboarding and pricing. Good at working with engineering, design and sales.
+✎
+
+EXPERIENCE
+↑
+↓
+Rename
+Remove
+Senior Product Manager · Finlytic Systems
+Apr 2022 - Present
+✎
+×
+Own the analytics and reporting product used by 1,200+ business customers
+✎
+×
+2
+Led retention improvement initiative; improved 90-day customer retention by 18% (from 61% to 72%) over three quarters
+✎
+×
+3
+Ran a pricing experiment on the mid-tier plan across 3 customer segments; resulted in 9% increase in ARPA with no rise in churn
+✎
+×
+4
+Redesigned the activation funnel (signup to first dashboard published); activation went from 34% to 47%
+✎
+×
+5
+Mentored and coached two junior product managers on product discovery and prioritisation
+✎
+×
+6
+Worked with engineering, design and sales teams on quarterly roadmap
+✎
+×
+Wrote PRDs and managed backlog in Jira; built dashboards in SQL and Metabase
+✎
+×
++ Add bullet
+Product Manager · Cloudnest Technologies
+Jul 2019 - Mar 2022
+✎
+×
+7
+Owned the self-serve onboarding and billing modules for an HR-tech platform, where self-serve sign-ups grew significantly
+✎
+×
+8
+Launched usage-based billing add-on that contributed to 12% of new revenue in first year
+✎
+×
+Ran 20+ customer interviews to shape the integrations roadmap, shipped 4 integrations
+✎
+×
+Reduced support tickets on billing by 27% through in-product invoice clarity changes
+✎
+×
+Coordinated releases with a team of 8 engineers
+✎
+×
++ Add bullet
+Associate Product Manager · Zenvoy Labs
+Aug 2018 - Jun 2019
+✎
+×
+Supported the PM on mobile app features for a logistics startup
+✎
+×
+Analysed usage data and wrote user stories
+✎
+×
+Helped run A/B tests on checkout
+✎
+×
++ Add bullet
+EDUCATION
+↑
+↓
+Rename
+Remove
+
+B.E. Computer Science · Visvesvaraya Technological University · 2018
+✎
+×
+
+Bengaluru
+✎
+×
+
++ Add detail
++ Add education (Degree · School · Year)
+SKILLS
+↑
+↓
+Rename
+Remove
+
+9
+Product strategy · Roadmapping · Customer discovery · Prioritisation · A/B testing · SQL · Metabase · Mixpanel · Jira · Go-to-market · Agile
+✎
+
++ Add section
+All 9
+To review 9
+Applied 0
+Dismissed 0
+1
+Summary
+Confirm total years of experience
+
+The job asks for 7+ years in product management, but your summary says 6, even though your roles run from Aug 2018 to now.
+
+Counting your APM role from Aug 2018, do you have 7 years in product? If so, can I update the summary to say 7 years?
+
+Send
+2
+Finlytic Systems · bullet 2
+Sharpen the retention result
+
+The job holds you accountable for retention outcomes, so show the before and after first.
+
+Current
+Led retention improvement initiative; improved 90-day customer retention by 18% (from 61% to 72%) over three quarters
+Suggested
+Led retention initiative that raised 90-day customer retention from 61% to 72% (18% lift) over three quarters
+Apply to resume
+Edit
+Dismiss
+↻ Another version
+3
+Finlytic Systems · bullet 3
+Lead with pricing and monetisation impact
+
+The role owns pricing and packaging end to end and runs experiments on monetisation.
+
+Current
+Ran a pricing experiment on the mid-tier plan across 3 customer segments; resulted in 9% increase in ARPA with no rise in churn
+Suggested
+Ran pricing experiment on mid-tier plan across 3 customer segments, lifting ARPA 9% with no rise in churn
+Apply to resume
+Edit
+Dismiss
+↻ Another version
+4
+Finlytic Systems · bullet 4
+Frame the activation win in the job's terms
+
+Activation is a named success metric and a core part of the Growth Platform area.
+
+Current
+Redesigned the activation funnel (signup to first dashboard published); activation went from 34% to 47%
+Suggested
+Redesigned activation funnel from signup to first published dashboard, increasing activation rate from 34% to 47%
+Apply to resume
+Edit
+Dismiss
+↻ Another version
+5
+Finlytic Systems · bullet 5
+Clarify how long you've led PMs
+
+The job requires at least 2 years leading or mentoring product managers, and E0B4 gives no duration or scope.
+
+Since when have you mentored the two junior PMs at Finlytic? Did they formally report to you, and did you run their goals, reviews or hiring?
+
+Send
+6
+Finlytic Systems · bullet 6
+Show you prioritise and deliver across functions
+
+The job asks you to partner with engineering, design and sales to prioritise and deliver.
+
+Current
+Worked with engineering, design and sales teams on quarterly roadmap
+Suggested
+Partnered with engineering, design and sales teams to prioritise and deliver the quarterly roadmap
+Adds
+prioritise
+deliver
+Apply to resume
+Edit
+Dismiss
+↻ Another version
+7
+Cloudnest Technologies · bullet 1
+Quantify self-serve sign-up growth
+
+Self-serve onboarding growth speaks to onboarding and the PLG motions the job lists as a plus, but "significantly" is vague.
+
+Current
+Owned the self-serve onboarding and billing modules for an HR-tech platform, where self-serve sign-ups grew significantly
+Suggested
+Owned self-serve onboarding and billing modules for an HR-tech platform, growing self-serve sign-ups by [number]%
+The number for this result
+Apply to resume
+Edit
+Dismiss
+↻ Another version
+8
+Cloudnest Technologies · bullet 2
+Surface NRR, expansion and finance work
+
+The job tracks expansion revenue and NRR and expects pricing work with finance, and none of this appears yet.
+
+Did the usage-based billing add-on or the pricing experiment move expansion revenue or NRR? Did you work with finance on those pricing decisions?
+
+Send
+9
+Skills
+Add growth skills you've already shown
++7
+
+The job asks for pricing and packaging, product analytics and experiment design, and your bullets already show each of these.
+
+Product strategy · Roadmapping · Customer discovery · Prioritisation · A/B testing · SQL · Metabase · Mixpanel · Jira · Go-to-market · Agile · Product analytics · Experimentation
+Apply to resume
+Dismiss
+Wait, where do my bullets mention R? I have never used R, please don't add it to my skills. Also, can you just write that I managed a team of 2 PMs? It will look stronger for a GPM role.
+R isn't on your resume: no bullet mentions it and your skills list [K] doesn't include it, so there's nothing to remove and I won't add it. I can't change [E0B4] to say you managed two PMs, because it currently says you mentored them, and calling that management would overstate your role. Did those two PMs report to you directly (hiring, performance reviews, setting their goals)? If so, tell me and I'll reword [E0B4] to show that. Otherwise I can make the mentoring itself stand out more for a GPM role.
+No, they didn't report to me, I only mentored them. Please make the mentoring stand out without implying I managed them. Also for the Cloudnest onboarding bullet, self-serve sign-ups grew significantly but I can't remember the exact number, so don't put a figure in.
+I've reworded [E0B4] to make the mentoring stand out while keeping it clearly mentoring, not management. I've also added the sign-up growth to [E1B0] with no figure, as you asked. If you ever confirm the number, adding it there will make that bullet much stronger. I've added 2 suggestions to the list: check and apply.
+Send

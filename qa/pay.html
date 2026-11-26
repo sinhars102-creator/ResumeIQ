@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Razorpay test checkout</title></head>
+<body style="font-family:system-ui;padding:24px">
+<button id="pay" style="padding:12px 20px;font-size:16px">Pay (test mode)</button>
+<pre id="result">idle</pre>
+<script type="module">
+  import { payForPlan } from "/src/razorpayCheckout.js";
+  document.getElementById("pay").onclick = async () => {
+    document.getElementById("result").textContent = "opening…";
+    try { const r = await payForPlan("pack", { email: "qa@example.com", contact: "9999999999" }); document.getElementById("result").textContent = JSON.stringify(r); }
+    catch (e) { document.getElementById("result").textContent = "ERROR: " + e.message; }
+  };
+</script></body></html>

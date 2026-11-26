@@ -1,0 +1,15 @@
+import { start, send, waitIdle, shot } from "./lib.mjs";
+import fs from "node:fs";
+const app = await start(); const page=app.page;
+await page.waitForTimeout(2500);
+const card=(txt)=>page.locator(`text=${txt}`).first().locator("xpath=ancestor::div[.//button[normalize-space()='Dismiss']][1]");
+await card("Mentored and coached two").getByRole("button",{name:"Apply to resume"}).click();
+await card("where self-serve sign-ups grew significantly").getByRole("button",{name:"Apply to resume"}).click();
+await card("growing self-serve sign-ups by [number]%").getByRole("button",{name:"Dismiss"}).click();
+await page.waitForTimeout(1000);
+await shot(page,"ananya","14-applied");
+await page.getByRole("link",{name:/Tailor it to a job/}).or(page.getByRole("button",{name:/Tailor it to a job/})).first().click();
+await page.waitForTimeout(3000);
+await shot(page,"ananya","14b-tailor");
+console.log((await page.locator("body").innerText()).slice(-700));
+await app.close();

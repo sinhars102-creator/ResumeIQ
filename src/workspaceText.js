@@ -13,3 +13,22 @@ export const isReady = (s, values = []) => {
   return !n || values.slice(0, n).filter((v) => /^\d+(\.\d+)?$/.test(String(v || "").trim())).length === n;
 };
 
+
+const UPGRADE_FROM = /^(helped|assisted|supported|contributed|worked|participated|involved)/i;
+const UPGRADE_TO = /^(led|owned|spearheaded|headed|drove|launched|directed|managed)/i;
+/** A rewrite that turns a supporting role into an ownership claim ("Assisted" -> "Led"); the person must confirm it. */
+export function ownershipWarning(before, after) {
+  const verb = (String(after || "").match(UPGRADE_TO) || [])[0];
+  return verb && UPGRADE_FROM.test(String(before || "").trim()) ? `Use "${verb}" only if you led this. Otherwise, dismiss.` : null;
+}
+
+/** The suggestion with its "[number]" blanks taken out ("cut delays by [number]%" -> "cut delays"), for when the person has no figure to give. */
+export function withoutNumbers(text) {
+  return String(text ?? "")
+    .replace(/\s*(?:\b(?:by|of|to|from|about|around|approximately|roughly|up to|nearly|over)\s+|~\s*)?\[number\]\s*(?:%|percent\b|x\b)?/gi, "")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s+([,.;:])/g, "$1")
+    .replace(/,\s*,/g, ",")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}

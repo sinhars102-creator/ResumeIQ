@@ -1,0 +1,16 @@
+import { openApp, shot, textToPdf } from "../harness.mjs";
+import fs from "node:fs";
+await textToPdf(fs.readFileSync("resume.txt","utf8"), "/Users/rahulsinha/ResumeIQ/sidebar-event/qa/personas/sana/resume.pdf");
+const app = await openApp({ name: "sana", web: 5805 });
+const p = app.page;
+const [fc] = await Promise.all([p.waitForEvent("filechooser"), p.getByText("Upload my resume").click()]);
+await fc.setFiles("/Users/rahulsinha/ResumeIQ/sidebar-event/qa/personas/sana/resume.pdf");
+await p.waitForTimeout(2500);
+await shot(p,"sana","02-attached");
+await p.keyboard.type("I want my resume to look as good as the work I do. Can you help me make it more distinctive without making it look unprofessional?");
+await shot(p,"sana","02b-typed");
+await p.keyboard.press("Enter");
+await p.waitForTimeout(30000);
+await shot(p,"sana","03-after");
+console.log(await p.locator("body").innerText());
+await app.close();

@@ -1,0 +1,13 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name:"vikram", web:5804 });
+const p=app.page;
+const card=(n)=>p.locator("div,li,section").filter({has:p.getByText("Correct team size to 42",{exact:true})}).last();
+await p.getByText("Correct team size to 42",{exact:true}).scrollIntoViewIfNeeded();
+await shot(p,"vikram","10-card16");
+await p.getByRole("button",{name:/Apply to resume/i}).last().click();
+await p.waitForTimeout(1500);
+await shot(p,"vikram","11-after-apply16");
+const t=await p.locator("body").innerText();
+console.log(t.slice(0,300));
+const i=t.indexOf("All 16"); console.log(t.slice(i-200,i+200));
+await app.close();

@@ -1,0 +1,10 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name: "priya", web: 5803 });
+const p = app.page;
+await p.getByRole("button",{name:/apply to resume/i}).last().click();
+await p.waitForTimeout(1000);
+await p.locator("body").evaluate(()=>window.scrollTo(0,0));
+await shot(p,"priya","12-summary-applied");
+const t = await p.locator("body").innerText();
+console.log(t.slice(t.indexOf("SUMMARY"), t.indexOf("EXPERIENCE")));
+await app.close();

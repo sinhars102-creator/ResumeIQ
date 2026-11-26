@@ -1,0 +1,11 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name: "rohan", web: 5802 });
+const p = app.page;
+const card = p.locator("div").filter({hasText: /^18Education/}).filter({has: p.getByRole("button",{name:"Apply to resume"})}).last();
+console.log((await card.innerText()).slice(0,400));
+await card.getByRole("button",{name:"Apply to resume"}).first().click();
+await p.waitForTimeout(1000);
+await shot(p,"rohan","11-edu2");
+const t = await p.evaluate(()=>document.body.innerText);
+console.log(t.split("EDUCATION")[1]?.slice(0,300));
+await app.close();

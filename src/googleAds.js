@@ -10,6 +10,12 @@ const SIGNUP_LABEL = "COGBCNT6lrgdEOeMh5lF";
 // conversion_id in `window.lintrk('track', { conversion_id: … })`. Until it's set, no LinkedIn conversion is sent.
 const LINKEDIN_SIGNUP_CONVERSION_ID = 30150740;
 
+// Purchase conversion: Google Ads → Goals → Conversions → New → Website → "Purchase" → Tag setup → event snippet; paste the part
+// after the slash in send_to ("AW-18574591591/<label>") here. Until it's set, no purchase conversion is sent.
+const PURCHASE_LABEL = "";
+
+import { setAnalyticsConsent, track } from "./analytics.js";
+
 const CONSENT_KEY = "riq_ad_consent"; // "granted" | "denied"
 const LIVE = typeof window !== "undefined" && /(^|\.)myresumeiq\.io$/.test(window.location.hostname);
 
@@ -35,7 +41,9 @@ export function setAdConsent(accepted) {
   } catch {
     // private mode: the choice lasts for this page only
   }
-  if (accepted && window.gtag) window.gtag("consent", "update", granted);
+  if (window.gtag) window.gtag("consent", "update", accepted ? granted : { ad_storage: "denied", ad_user_data: "denied", ad_personalization: "denied" });
+  setAnalyticsConsent(accepted);
+  track("cookie_choice", { accepted });
   // LinkedIn Insight Tag (index.html) loads only after consent.
   if (accepted && window.riqLoadLinkedIn) window.riqLoadLinkedIn();
   // Microsoft Clarity (index.html) follows the same choice.
@@ -60,4 +68,27 @@ export function trackSignUp(user) {
   if (SIGNUP_LABEL && window.gtag) window.gtag("event", "conversion", { send_to: `${ADS_ID}/${SIGNUP_LABEL}`, value: 1.0, currency: "INR" });
   // LinkedIn only has its tag when the visitor accepted cookies.
   if (LINKEDIN_SIGNUP_CONVERSION_ID && window.lintrk) window.lintrk("track", { conversion_id: LINKEDIN_SIGNUP_CONVERSION_ID });
+}
+
+/** The "Purchase" conversion, once per payment, with its value in rupees. Needs PURCHASE_LABEL (see above). */
+export function trackPurchase({ plan, value, transactionId } = {}) {
+  if (!LIVE || !PURCHASE_LABEL || !window.gtag || !value) return;
+  const key = `riq_purchase_sent_${transactionId || `${plan}_${Date.now()}`}`;
+  try {
+    if (localStorage.getItem(key)) return;
+    localStorage.setItem(key, "1");
+  } catch {
+    // fine – at worst a duplicate on a browser without storage
+  }
+  window.gtag("event", "conversion", { send_to: `${ADS_ID}/${PURCHASE_LABEL}`, value, currency: "INR", transaction_id: transactionId || undefined });
+}
+
+/** "Cookie settings" link: forget the choice and ask again (anyone can change their mind at any time). */
+export function reopenCookieSettings() {
+  try {
+    localStorage.removeItem(CONSENT_KEY);
+  } catch {
+    // private mode: the notice still opens
+  }
+  window.dispatchEvent(new Event("riq:cookie-settings"));
 }

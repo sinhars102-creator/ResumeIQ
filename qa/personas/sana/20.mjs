@@ -1,0 +1,12 @@
+import { openApp, shot, savePdfDownload } from "../harness.mjs";
+const app = await openApp({ name: "sana", web: 5805 });
+const p = app.page;
+await p.getByRole("button",{name:/Design & download/}).click();
+await p.waitForTimeout(1500);
+await p.getByText("Traditional serif, centred header").first().click();
+await p.waitForTimeout(4000);
+await p.getByText(/Continue with Classic/).click();
+await p.waitForTimeout(1500);
+const r = await savePdfDownload(p,"sana",()=>p.getByRole("button",{name:"Download PDF"}).click());
+console.log(r.file, r.pages, r.text.join("\n---\n").length);
+await app.close();

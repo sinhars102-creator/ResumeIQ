@@ -1,0 +1,16 @@
+import { start, waitCall, waitIdle, shot } from "./lib.mjs";
+import fs from "node:fs";
+const app = await start(); const page=app.page;
+await page.waitForTimeout(3000);
+const c7=page.locator("text=growing self-serve sign-ups by [number]%").first().locator("xpath=ancestor::div[.//button[normalize-space()='Dismiss']][1]");
+await c7.getByRole("button",{name:"Dismiss"}).click();
+await page.waitForTimeout(800);
+const box=page.getByPlaceholder(/^Message/); await box.click();
+await box.fill("The summary card showed a version with my 18% retention and activation numbers, but my resume only got a shorter one without them. Please put my strongest outcomes (retention 61% to 72%, activation 34% to 47%, the pricing result) into the summary so they're in the top third of page one. Keep the mentoring as mentoring.");
+const p=waitCall(page); await page.keyboard.press("Enter"); await p;
+await waitIdle(page,60000);
+await shot(page,"ananya","20-summary");
+const t=await page.locator("body").innerText(); fs.writeFileSync("t20.txt",t);
+console.log(app.calls); console.log(t.slice(t.indexOf("SUMMARY"),t.indexOf("SUMMARY")+700));
+console.log(t.slice(-900));
+await app.close();

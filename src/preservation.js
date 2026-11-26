@@ -14,10 +14,15 @@ import { pdfSafeText } from "./resumePdf.js";
 
 const squash = (s) => pdfSafeText(s).toLowerCase().replace(/[^a-z0-9]+/g, "");
 
+// Letters or digits the PDF fonts cannot draw (Hindi, Arabic, CJK...). They are dropped from the PDF, so squash()
+// above would shrink them to nothing and the check could never fail. Count them as missing instead.
+const losesText = (t) => [...String(t ?? "")].some((ch) => /[\p{L}\p{N}]/u.test(ch) && !pdfSafeText(ch).trim());
+
 export function checkPreserved(resume, pdfText) {
   const haystack = squash(pdfText);
   const wanted = expectedTexts(resume);
   const missing = wanted.filter((t) => {
+    if (losesText(t)) return true;
     const needle = squash(t);
     return needle && !haystack.includes(needle);
   });

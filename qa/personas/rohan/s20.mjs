@@ -1,0 +1,12 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name: "rohan", web: 5802 });
+const p = app.page;
+const d = p.getByText("June 2012 - 2015");
+await d.scrollIntoViewIfNeeded();
+await d.hover();
+const b = await d.boundingBox();
+await p.mouse.click(b.x+b.width+23, b.y+b.height/2);
+await p.waitForTimeout(700);
+await shot(p,"rohan","20-roleedit");
+console.log(await p.evaluate(()=>[...document.querySelectorAll("input")].map(i=>i.value).join(" | ")));
+await app.close();

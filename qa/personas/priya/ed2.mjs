@@ -1,0 +1,14 @@
+import { openApp, shot } from "../harness.mjs";
+const app = await openApp({ name: "priya", web: 5803 });
+const p = app.page;
+await p.getByText(/Skilled in capacity planning/).first().click();
+await p.waitForTimeout(500);
+const ta = p.locator("textarea").first();
+await ta.click(); await p.keyboard.press("Meta+A");
+await p.keyboard.insertText("Operations Manager with 7 years in automotive manufacturing, leading a shift of about 30 and driving Lean/Six Sigma improvements that raised efficiency 14%. Experienced in capacity planning, vendor management and weekly Power BI operational reviews, with basic SQL. Now moving into business operations and programme management in e-commerce and technology.");
+await p.keyboard.press("Tab");
+await p.waitForTimeout(800);
+await shot(p,"priya","14-edited");
+const t = await p.locator("body").innerText();
+console.log(t.slice(t.indexOf("SUMMARY"), t.indexOf("EXPERIENCE")), t.match(/\d+ of \d+ suggestions applied/)?.[0]);
+await app.close();

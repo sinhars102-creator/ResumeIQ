@@ -1,0 +1,109 @@
+◈ Resume LLM
+✎ New chat
+
+Recent
+
+Improve my resume
+A
+ananya@example.com
+Sign out
+Improve my resume
+A
+Your resume
+3 changes applied
+Edit resume
+Ananya Mehta
+
+Senior Product Manager
+
+ananya.mehta.pm@example.com | +91 98450 00000 | Bengaluru, Karnataka | linkedin.com/in/ananya-mehta-pm-example
+
+SUMMARY
+
+Product manager with 6 years of experience in B2B SaaS. Worked on retention, onboarding and pricing. Good at working with engineering, design and sales.
+
+EXPERIENCE
+Senior Product Manager · Finlytic Systems
+Apr 2022 - Present
+Own the analytics and reporting product used by 1,200+ business customers✓
+Led retention improvement initiative; improved 90-day customer retention by 18% (from 61% to 72%) over three quarters
+Ran a pricing experiment on the mid-tier plan across 3 customer segments; resulted in 9% increase in ARPA with no rise in churn
+Redesigned the activation funnel (signup to first dashboard published); activation went from 34% to 47%
+Mentored and coached two junior product managers on product discovery and prioritisation2✓
+Worked with engineering, design and sales teams on quarterly roadmap3
+Wrote PRDs and managed backlog in Jira; built dashboards in SQL and Metabase4
+Product Manager · Cloudnest Technologies
+Jul 2019 - Mar 2022
+Owned the self-serve onboarding and billing modules for an HR-tech platform, where self-serve sign-ups grew significantly✓
+Launched usage-based billing add-on that contributed to 12% of new revenue in first year
+Ran 20+ customer interviews to shape the integrations roadmap, shipped 4 integrations
+Reduced support tickets on billing by 27% through in-product invoice clarity changes
+Coordinated releases with a team of 8 engineers
+Associate Product Manager · Zenvoy Labs
+Aug 2018 - Jun 2019
+Supported the PM on mobile app features for a logistics startup6
+Analysed usage data and wrote user stories7
+Helped run A/B tests on checkout8
+EDUCATION
+
+B.E. Computer Science · Visvesvaraya Technological University · 2018
+
+Bengaluru
+
+SKILLS
+
+Product strategy · Roadmapping · Customer discovery · Prioritisation · A/B testing · SQL · Metabase · Mixpanel · Jira · Go-to-market · Agile
+
+CERTIFICATIONS
+
+None added yet10
+
+I'm applying for GPM roles but my resume isn't getting shortlisted. Can you tell me what's weak?
+
+Let's start with your resume: attach it with + or paste its full text here.
+
+📄 old-resume.pdf
+
+📄 old-resume.pdf
+
+Got it, Ananya. Senior Product Manager · 3 roles · 11 skills – saved to your account.
+
+View resume
+
+What would you like to do?
+
+Improve my resume
+
+Improve my resume
+
+88
+Resume strength
+
+Up from 87 · 1 page
+
+Basic info
+100
+Headline & summary
+100
+Experience bullets
+80
+Skills & certifications
+80
+Length & format
+100
+
+I found 10 things to improve. We'll start with your weakest area, one change at a time – apply, regenerate or skip each.
+
+Tailor it to a job
+
+Paste the job description you're applying for – the whole thing, from the job page – and I'll take you through the changes one at a time.
+
+Job description
+Group Product Manager, Growth Platform - Orbita Cloud (Series D, Bengaluru / hybrid)
+
+About the role
+Orbita Cloud is a fast-growing B2B SaaS company building a revenue operations platform used by 4,000+ companies. We are…
+
+Copy
+Edit
+Rerun

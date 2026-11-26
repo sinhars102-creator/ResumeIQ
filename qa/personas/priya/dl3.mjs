@@ -1,0 +1,13 @@
+import { openApp, shot, savePdfDownload } from "../harness.mjs";
+const tpl = process.argv[2], tag = process.argv[3];
+const app = await openApp({ name: "priya", web: 5803 });
+const p = app.page;
+await p.getByRole("button",{name:/design & download/i}).click();
+await p.waitForTimeout(1500);
+await p.locator("[role=dialog]").getByText(tpl,{exact:true}).first().click();
+await p.waitForTimeout(1200);
+await p.getByRole("button",{name:/continue with/i}).click();
+await p.waitForTimeout(1500);
+const r = await savePdfDownload(p,"priya",()=>p.getByRole("button",{name:/^download pdf/i}).click());
+console.log(r.file, r.pages); r.text.forEach((t,i)=>console.log("PAGE",i+1,t));
+await app.close();
