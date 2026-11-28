@@ -31,6 +31,7 @@ import { searchApiSources, adzunaConfigured, loadCompanies } from "./jobSources.
 import { callLLM, llmProvider, llmModel, LLMUserError } from "./llm.js";
 import { spend } from "./modelRouter.js";
 import { aiGuard, cachedUser } from "./rateLimit.js";
+import { registerResumeTextRoute } from "./resumeText.js";
 
 /** Provider errors can leak account details (e.g. Groq org ids); only our own messages reach users. */
 function sendLLMError(res, err, tag) {
@@ -199,6 +200,8 @@ const LLM_MAX_TOKENS = 4096;
 // are both open to signed-out visitors, per IP address; see the tailor note below.
 const guardUser = cachedUser(optionalUser);
 app.use("/api/llm", aiGuard({ getUser: guardUser }));
+// Reads a PDF resume for browsers that can't (no AI cost, but still limited per address).
+registerResumeTextRoute(app, { getUser: guardUser });
 // Suggestions and chat are open to visitors who haven't signed in yet: they sign up at the download step, after they have seen the value.
 // A whole session is about 30 calls, so signed-out visitors get 80 per 10 minutes per address, and a daily breaker (ANON_AI_DAILY_CAP, default
 // 2000 per server instance) asks signed-out visitors to sign in when demand spikes. TAILOR_REQUIRE_SIGNIN=1 is the kill switch that

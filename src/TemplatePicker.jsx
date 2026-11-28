@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { buildResumePdf } from "./resumePdf.js";
 import { TEMPLATES, TEMPLATE_GROUPS, designFormat, normalizeDesign, DEFAULT_DESIGN, isDefaultDesign, templateById, FONT_CHOICES, SIZE_CHOICES, SPACING_CHOICES, MARGIN_CHOICES, ACCENT_CHOICES } from "./resumeTemplates.js";
 import { checkPreserved, extractPdfText } from "./preservation.js";
-import { pdfjs, renderPdfPages } from "./pdfPreview.js";
+import { loadPdfjs, renderPdfPages } from "./pdfPreview.js";
 
 const photoOf = (resume) => (typeof resume?.photoUrl === "string" && resume.photoUrl.startsWith("data:") ? resume.photoUrl : null);
 
@@ -17,6 +17,7 @@ async function preview(resume, id, design) {
   const doc = buildResumePdf(resume, photoOf(resume), designFormat(id, design));
   if (!doc) throw new Error("the resume couldn't be laid out");
   const data = doc.output("arraybuffer");
+  const pdfjs = await loadPdfjs();
   const [text, images] = await Promise.all([extractPdfText(data.slice(0), pdfjs), renderPdfPages(data.slice(0), 600)]);
   return { pages: doc.getNumberOfPages(), check: checkPreserved(resume, text), images };
 }

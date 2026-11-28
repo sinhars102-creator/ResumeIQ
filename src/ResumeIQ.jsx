@@ -1,8 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import * as pdfjsLib from "pdfjs-dist";
 
-// PDF.js worker: bundle via Vite so production gets a valid asset URL (fixes "load failed" on Vercel)
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { loadPdfjs } from "./pdfjs.js";
+import { readResumePdf, withTimeout } from "./resumePdfRead.js";
 import { track, bucket } from "./analytics.js";
 import EasyApplyPanel, { SignIn } from "./easyApply/EasyApplyPanel.jsx";
 import { supabase as supabaseClient, loadProfile, saveProfile } from "./easyApply/supabaseClient.js";
@@ -15,7 +14,6 @@ import ResumeFilesDialog, { storeResumeFile } from "./ResumeFiles.jsx";
 import {
   computeLocalMatchScore, experienceFromRoles, getCandidateYears, parseJdYearsRange, resumeForAI, scoreResume,
 } from "./matchScore.js";
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 
 // API origin: VITE_API_URL if set; otherwise the local dev server, or the same origin in
@@ -1783,66 +1781,6 @@ const PDF_FONT_OPTIONS = [
 const MM_TO_PX = 2.5;
 
 /**
- * Rebuild a PDF page's reading order from text positions. Design tools (Canva
- * etc.) store text in arbitrary order – a job's bullets can come before its
- * title line – so trusting the stored order files bullets under the wrong job.
- * Detects a column gutter (a vertical strip no text crosses), then reads each
- * column top-to-bottom, line by line.
- */
-function pageTextInReadingOrder(items, pageWidth) {
-  const words = items
-    .filter((it) => typeof it.str === "string" && it.str.trim())
-    .map((it) => ({
-      str: it.str,
-      x: it.transform[4],
-      y: it.transform[5],
-      w: it.width || 0,
-      h: Math.abs(it.height || it.transform[3] || 10),
-    }));
-  if (!words.length) return "";
-
-  // Coverage of each 2pt-wide vertical strip; full-width text (headers) is ignored so it can't hide a gutter.
-  const step = 2;
-  const coverage = new Array(Math.ceil(pageWidth / step) + 1).fill(0);
-  words
-    .filter((wd) => wd.w < pageWidth * 0.5)
-    .forEach((wd) => {
-      for (let x = Math.max(0, Math.floor(wd.x / step)); x <= Math.min(coverage.length - 1, Math.ceil((wd.x + wd.w) / step)); x++) coverage[x]++;
-    });
-  // Widest empty strip between 20% and 75% of the page width is the gutter.
-  let best = null;
-  let runStart = null;
-  for (let i = 0; i <= coverage.length; i++) {
-    const empty = i < coverage.length && coverage[i] === 0 && i * step > pageWidth * 0.2 && i * step < pageWidth * 0.75;
-    if (empty && runStart === null) runStart = i;
-    if (!empty && runStart !== null) {
-      if (!best || i - runStart > best.len) best = { start: runStart, len: i - runStart };
-      runStart = null;
-    }
-  }
-  const gutterX = best && best.len * step >= 8 ? (best.start + best.len / 2) * step : null;
-
-  const columns = gutterX == null ? [words] : [words.filter((wd) => wd.x < gutterX), words.filter((wd) => wd.x >= gutterX)];
-  return columns
-    .filter((col) => col.length)
-    .map((col) => {
-      // Group into lines (PDF y grows upward), then read lines top-to-bottom and words left-to-right.
-      const sorted = [...col].sort((a, b) => b.y - a.y || a.x - b.x);
-      const lines = [];
-      for (const wd of sorted) {
-        const line = lines[lines.length - 1];
-        if (line && Math.abs(line.y - wd.y) <= Math.max(2, Math.min(line.h, wd.h) * 0.5)) line.words.push(wd);
-        else lines.push({ y: wd.y, h: wd.h, words: [wd] });
-      }
-      return lines
-        .map((line) => line.words.sort((a, b) => a.x - b.x).map((wd) => wd.str).join(" ").replace(/\s+/g, " ").trim())
-        .filter(Boolean)
-        .join("\n");
-    })
-    .join("\n\n");
-}
-
-/**
  * Pull the profile photo out of an uploaded PDF resume as a PNG data URL, or
  * null. Walks page 1's drawing operations to find embedded images and their
  * on-page size, then picks the largest roughly-square one — skipping icons and
@@ -1851,7 +1789,8 @@ function pageTextInReadingOrder(items, pageWidth) {
  */
 async function extractPdfPhoto(file) {
   try {
-    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    const pdfjsLib = await loadPdfjs();
+    const pdf = await withTimeout(pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise, 15000);
     const page = await pdf.getPage(1);
     const { width: pageW, height: pageH } = page.getViewport({ scale: 1 });
     const { fnArray, argsArray } = await page.getOperatorList();
@@ -1886,7 +1825,7 @@ async function extractPdfPhoto(file) {
     candidates.sort((a, b) => b.area - a.area);
     const { name } = candidates[0];
     const store = name.startsWith("g_") ? page.commonObjs : page.objs;
-    const img = await new Promise((resolve) => store.get(name, resolve));
+    const img = await withTimeout(new Promise((resolve) => store.get(name, resolve)), 10000);
     if (!img?.width || !img?.height) return null;
 
     const canvas = document.createElement("canvas");
@@ -1920,26 +1859,7 @@ async function extractPdfPhoto(file) {
 // eslint-disable-next-line react-refresh/only-export-components -- shared with the /app/tailor prototype
 export async function readResumeFileText(file) {
   const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
-  if (isPdf) {
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      const numPages = pdf.numPages;
-      let fullText = "";
-      for (let i = 1; i <= numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        fullText += pageTextInReadingOrder(content.items, page.getViewport({ scale: 1 }).width) + "\n\n";
-      }
-      return fullText.trim();
-    } catch (e) {
-      const msg = e?.message || String(e);
-      if (/load failed|worker|invalid/i.test(msg)) {
-        throw new Error("Could not read this PDF. Try saving your resume as TXT or paste the text into the box below.");
-      }
-      throw e;
-    }
-  }
+  if (isPdf) return readResumePdf(file, { apiBase: API_BASE });
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(typeof reader.result === "string" ? reader.result : "");

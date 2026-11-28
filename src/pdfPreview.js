@@ -1,13 +1,11 @@
 // Module M10 – pdf.js in the browser: read a PDF's text back (content check) and draw its pages as images (template preview).
-import * as pdfjsLib from "pdfjs-dist";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import { loadPdfjs } from "./pdfjs.js";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
-
-export const pdfjs = pdfjsLib;
+export { loadPdfjs };
 
 /** Every page of a PDF as a JPEG data URL, `width` pixels wide (drawn at the screen's pixel density for sharpness). */
 export async function renderPdfPages(data, width = 600) {
+  const pdfjsLib = await loadPdfjs();
   const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(data) }).promise;
   const ratio = Math.min(window.devicePixelRatio || 1, 2);
   const images = [];

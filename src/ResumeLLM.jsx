@@ -539,8 +539,9 @@ export default function ResumeLLM() {
       // No sign-in wall here: the visitor sees the value first and signs up at the download step.
       resumeLoaded(parsed);
     } catch (e) {
-      track("rllm_resume_read_failed", { pasted: isText });
-      say({ role: "bot", text: `I couldn't read that resume (${e.message}). Try another file, or paste the text.` });
+      track("rllm_resume_read_failed", { pasted: isText, reason: e.name === "ResumeFileError" ? e.reason : "other" });
+      // A file problem already comes with a sentence written for the user; anything else is from reading the text.
+      say({ role: "bot", text: e.name === "ResumeFileError" ? e.message : `I couldn't read that resume (${e.message}). Try another file, or paste the text.` });
     } finally {
       setBusy(false);
     }
